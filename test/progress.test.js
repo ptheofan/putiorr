@@ -12,7 +12,25 @@ test('remote download maps to first half of progress', () => {
 
   assert.equal(result.percentDone, 0.2);
   assert.equal(result.status, TRANSMISSION_STATUS.download);
-  assert.equal(result.leftUntilDone, 600);
+  assert.equal(result.leftUntilDone, 800);
+});
+
+test('local download maps to second half of progress', () => {
+  const result = calculateTransmissionProgress({
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 1000,
+    lifecycle: 'downloading',
+  }, {
+    total_files: 2,
+    completed_files: 0,
+    total_size: 1000,
+    downloaded_size: 340,
+  });
+
+  assert.equal(result.percentDone, 0.67);
+  assert.equal(result.status, TRANSMISSION_STATUS.download);
+  assert.equal(result.leftUntilDone, 330);
 });
 
 test('local completion reports seeding', () => {

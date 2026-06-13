@@ -35,6 +35,10 @@ function deriveNameFromSource(source) {
   return path.basename(source);
 }
 
+function clampUnit(value) {
+  return Math.min(1, Math.max(0, Number(value) || 0));
+}
+
 function putioTransferToStoreInput(transfer, fallback = {}) {
   const lifecycle = fallback.lifecycle ?? 'remote';
   const useLocalMetrics = lifecycle !== 'remote';
@@ -297,6 +301,11 @@ export class TransferService {
     const profile = this.store.findProfileById(row.profile_id) ?? this.getDefaultProfile();
     const stats = this.store.getTransferFileStats(row.id);
     const progress = calculateTransmissionProgress(row, stats);
+    const files = this.store.listFilesForTransfer(row.id);
+    const totalSize = Number(stats.total_size ?? 0) > 0
+      ? Number(stats.total_size)
+      : Number(row.total_size ?? 0);
+    const downloadedEver = Math.max(0, Math.round(totalSize * progress.percentDone));
     const torrent = {
       id: row.id,
       hashString: row.hash,
@@ -304,16 +313,18 @@ export class TransferService {
       eta: row.eta ?? -1,
       status: progress.status,
       downloadDir: path.join(profile.download_at, row.category ?? ''),
-      totalSize: row.total_size,
+      totalSize,
       leftUntilDone: progress.leftUntilDone,
       uploadedEver: row.uploaded_ever,
-      downloadedEver: Math.max(row.downloaded_ever, Number(stats.downloaded_size ?? 0)),
+      downloadedEver,
       percentDone: progress.percentDone,
       rateDownload: row.download_speed,
       rateUpload: row.upload_speed,
-      uploadRatio: row.total_size > 0 ? row.uploaded_ever / row.total_size : 0,
+      uploadRatio: totalSize > 0 ? row.uploaded_ever / totalSize : 0,
       error: row.error,
       errorString: row.error_string,
+      files: files.map((file) => this.toTransmissionFile(row, file)),
+      fileStats: files.map((file) => this.toTransmissionFileStats(row, file)),
     };
 
     if (requestedFields.length === 0) return torrent;
@@ -327,10 +338,53 @@ export class TransferService {
     return filtered;
   }
 
+  toTransmissionFile(row, file) {
+    const size = Number(file.size ?? 0);
+    return {
+      bytesCompleted: Math.round(size * this.calculateFileRpcProgress(row, file)),
+      length: size,
+      name: file.relative_path,
+    };
+  }
+
+  toTransmissionFileStats(row, file) {
+    return {
+      bytesCompleted: Math.round(Number(file.size ?? 0) * this.calculateFileRpcProgress(row, file)),
+      wanted: true,
+      priority: 0,
+    };
+  }
+
+  calculateFileRpcProgress(row, file) {
+    const size = Number(file.size ?? 0);
+    const downloadedSize = Number(file.downloaded_bytes ?? 0);
+    const remoteProgress = Math.min(100, Math.max(0, Number(row.percent_done ?? 0))) / 200;
+    const localProgress = size > 0
+      ? (downloadedSize / size) * 0.5
+      : file.status === 'complete' ? 0.5 : 0;
+    return clampUnit(remoteProgress + localProgress);
+  }
+
   listDownloads() {
     return this.store.listActiveTransfers().map((row) => {
       const profile = this.store.findProfileById(row.profile_id) ?? this.getDefaultProfile();
       const stats = this.store.getTransferFileStats(row.id);
+      const fileItems = this.store.listFilesForTransfer(row.id).map((file) => {
+        const size = Number(file.size ?? 0);
+        const downloadedSize = Number(file.downloaded_bytes ?? 0);
+        return {
+          id: file.id,
+          relativePath: file.relative_path,
+          size,
+          downloadedSize,
+          speed: Number(file.download_speed ?? 0),
+          progress: size > 0
+            ? Math.max(0, Math.min(100, Math.round((downloadedSize / size) * 100)))
+            : file.status === 'complete' ? 100 : 0,
+          status: file.status,
+          error: file.error_string,
+        };
+      });
       const progress = calculateTransmissionProgress(row, stats);
       return {
         id: row.id,
@@ -357,6 +411,7 @@ export class TransferService {
           total: Number(stats.total_files ?? 0),
           complete: Number(stats.completed_files ?? 0),
           failed: Number(stats.failed_files ?? 0),
+          items: fileItems,
         },
       };
     });

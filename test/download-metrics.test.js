@@ -89,6 +89,92 @@ test('local download progress updates dashboard speed and ETA metrics', async ()
     assert.equal(download.eta, 2);
     assert.equal(download.localProgress, 40);
     assert.equal(download.downloadedSize, 400);
+    assert.deepEqual(download.files.items, [{
+      id: file.id,
+      relativePath: 'movie.mkv',
+      size: 1_000,
+      downloadedSize: 400,
+      speed: 300,
+      progress: 40,
+      status: 'downloading',
+      error: '',
+    }]);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('dashboard reports multi-file progress details', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 22,
+      putio_file_id: 23,
+      save_parent_id: 42,
+      hash: 'multifilehash',
+      name: 'Multi.File.Release',
+      lifecycle: 'downloading',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+      total_size: 13_700,
+      download_speed: 0,
+      eta: -1,
+    });
+
+    for (let index = 1; index <= 15; index += 1) {
+      harness.store.upsertTransferFile({
+        transfer_id: transfer.id,
+        putio_file_id: 1_000 + index,
+        relative_path: `Feature/file-${String(index).padStart(2, '0')}.mkv`,
+        size: 600,
+        downloaded_bytes: 600,
+        status: 'complete',
+      });
+    }
+
+    for (let index = 1; index <= 6; index += 1) {
+      harness.store.upsertTransferFile({
+        transfer_id: transfer.id,
+        putio_file_id: 2_000 + index,
+        relative_path: `Extras/extra-${String(index).padStart(2, '0')}.mkv`,
+        size: 500,
+        downloaded_bytes: 0,
+        status: 'pending',
+      });
+    }
+
+    const activeFile = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 3_001,
+      relative_path: 'Feature/currently-copying.mkv',
+      size: 1_700,
+      downloaded_bytes: 1_100,
+      status: 'downloading',
+    });
+
+    const [download] = harness.service.listDownloads();
+
+    assert.equal(download.files.total, 22);
+    assert.equal(download.files.complete, 15);
+    assert.equal(download.downloadedSize, 10_100);
+    assert.equal(download.totalSize, 13_700);
+    assert.equal(download.localProgress, 74);
+    assert.equal(download.files.items.length, 22);
+    assert.deepEqual(
+      download.files.items.find((item) => item.id === activeFile.id),
+      {
+        id: activeFile.id,
+        relativePath: 'Feature/currently-copying.mkv',
+        size: 1_700,
+        downloadedSize: 1_100,
+        speed: 0,
+        progress: 65,
+        status: 'downloading',
+        error: '',
+      },
+    );
   } finally {
     harness.store.close();
   }

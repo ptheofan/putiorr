@@ -143,6 +143,7 @@ export class StateStore {
         relative_path TEXT NOT NULL,
         size INTEGER NOT NULL DEFAULT 0,
         downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+        download_speed INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL DEFAULT 'pending',
         attempts INTEGER NOT NULL DEFAULT 0,
         error_string TEXT NOT NULL DEFAULT '',
@@ -155,6 +156,7 @@ export class StateStore {
     `);
     this.migrateProfileDownloadAt();
     this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
+    this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     this.migrateMagnetTransferHashes();
   }
 
@@ -544,16 +546,17 @@ export class StateStore {
     if (!existing) {
       const result = this.db.prepare(`
         INSERT INTO transfer_files (
-          transfer_id, putio_file_id, relative_path, size, downloaded_bytes,
+          transfer_id, putio_file_id, relative_path, size, downloaded_bytes, download_speed,
           status, attempts, error_string, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.transfer_id,
         input.putio_file_id,
         input.relative_path,
         input.size ?? 0,
         input.downloaded_bytes ?? 0,
+        input.download_speed ?? 0,
         input.status ?? 'pending',
         input.attempts ?? 0,
         input.error_string ?? '',
@@ -570,6 +573,7 @@ export class StateStore {
             WHEN status = 'complete' THEN downloaded_bytes
             ELSE ?
           END,
+          download_speed = ?,
           status = CASE
             WHEN status = 'complete' THEN status
             ELSE ?
@@ -581,6 +585,7 @@ export class StateStore {
       input.relative_path,
       input.size ?? existing.size,
       input.downloaded_bytes ?? existing.downloaded_bytes,
+      input.download_speed ?? existing.download_speed ?? 0,
       input.status ?? existing.status,
       timestamp,
       existing.id,
@@ -619,7 +624,7 @@ export class StateStore {
   }
 
   updateTransferFile(id, patch) {
-    const allowed = ['downloaded_bytes', 'status', 'attempts', 'error_string'];
+    const allowed = ['downloaded_bytes', 'download_speed', 'status', 'attempts', 'error_string'];
     const keys = allowed.filter((key) => Object.hasOwn(patch, key));
     if (keys.length === 0) return this.findTransferFileById(id);
     const assignments = keys.map((key) => `${key} = ?`).join(', ');

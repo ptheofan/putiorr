@@ -349,11 +349,17 @@ td.center input {
 
 .download-row {
   display: grid;
-  grid-template-columns: minmax(220px, 1.6fr) minmax(170px, 0.9fr) minmax(280px, 1.4fr) minmax(140px, 0.7fr);
-  gap: 16px;
+  gap: 12px;
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
+  background: #ffffff;
+}
+
+.download-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.6fr) minmax(170px, 0.9fr) minmax(280px, 1.4fr) minmax(140px, 0.7fr);
+  gap: 16px;
   align-items: center;
 }
 
@@ -366,6 +372,36 @@ td.center input {
 .metric-label {
   color: var(--muted);
   font-size: 12px;
+}
+
+.file-toggle {
+  margin-top: 10px;
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 9px;
+  background: #f8fbfb;
+  color: #193235;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.file-toggle span {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 22px;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #e5ecee;
+  color: var(--muted);
+}
+
+.file-toggle.open {
+  border-color: rgba(15, 118, 110, 0.35);
+  background: rgba(15, 118, 110, 0.08);
+  color: var(--accent-strong);
 }
 
 .progress-group {
@@ -397,6 +433,98 @@ td.center input {
 
 .bar.local > span {
   background: var(--amber);
+}
+
+.file-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.file-panel[hidden] {
+  display: none;
+}
+
+.file-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.file-panel-head span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-list {
+  display: grid;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #edf1f2;
+  border-radius: 8px;
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 86px minmax(170px, 260px);
+  gap: 12px;
+  align-items: center;
+  min-height: 54px;
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf1f2;
+}
+
+.file-row:last-child {
+  border-bottom: 0;
+}
+
+.file-name {
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.file-status {
+  justify-self: start;
+  min-width: 72px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  text-align: center;
+  background: #edf4f4;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.file-status[data-status="complete"] {
+  background: rgba(22, 128, 63, 0.08);
+  color: var(--ok);
+}
+
+.file-status[data-status="downloading"] {
+  background: rgba(183, 121, 31, 0.1);
+  color: #714600;
+}
+
+.file-status[data-status="failed"] {
+  background: #fff0ee;
+  color: var(--danger);
+}
+
+.file-progress {
+  display: grid;
+  grid-template-columns: 1fr 42px;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-empty {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .empty-state {
@@ -432,7 +560,13 @@ td.center input {
     align-items: stretch;
   }
 
-  .download-row {
+  .download-summary,
+  .file-row {
     grid-template-columns: 1fr;
+  }
+
+  .file-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

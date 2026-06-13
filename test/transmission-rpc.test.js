@@ -309,6 +309,89 @@ test('profile-specific RPC path uses that profile download directory', async (t)
   assert.equal(row.category, 'season-1');
 });
 
+test('torrent-get reports weighted progress consistently for Sonarr', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 99,
+    putio_file_id: 199,
+    save_parent_id: 42,
+    hash: 'weightedhash',
+    name: 'Weighted.Release',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 1000,
+    downloaded_ever: 500,
+    download_speed: 10,
+    eta: 25,
+  });
+  harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 200,
+    relative_path: 'Episode.One.mkv',
+    size: 400,
+    downloaded_bytes: 400,
+    status: 'complete',
+  });
+  harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 201,
+    relative_path: 'Episode.Two.mkv',
+    size: 600,
+    downloaded_bytes: 200,
+    status: 'downloading',
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+  const response = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-get',
+      arguments: {
+        fields: [
+          'id',
+          'percentDone',
+          'leftUntilDone',
+          'downloadedEver',
+          'totalSize',
+          'files',
+          'fileStats',
+        ],
+      },
+    }),
+  });
+  const body = await response.json();
+
+  assert.equal(body.result, 'success');
+  assert.deepEqual(body.arguments.torrents, [{
+    id: transfer.id,
+    percentDone: 0.8,
+    leftUntilDone: 200,
+    downloadedEver: 800,
+    totalSize: 1000,
+    files: [
+      { bytesCompleted: 400, length: 400, name: 'Episode.One.mkv' },
+      { bytesCompleted: 400, length: 600, name: 'Episode.Two.mkv' },
+    ],
+    fileStats: [
+      { bytesCompleted: 400, wanted: true, priority: 0 },
+      { bytesCompleted: 400, wanted: true, priority: 0 },
+    ],
+  }]);
+});
+
 test('generic RPC endpoint returns active transfers across profiles', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

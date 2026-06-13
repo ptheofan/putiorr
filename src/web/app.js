@@ -2,6 +2,8 @@ const state = {
   settings: undefined,
   profiles: [],
   downloads: [],
+  expandedDownloads: new Set(),
+  fileListScrollTops: new Map(),
 };
 
 const el = {
@@ -312,37 +314,54 @@ function addProfileRow() {
 }
 
 function renderDownloads() {
-  el.downloadsList.replaceChildren();
+  const viewportScroll = captureViewportScroll();
+  rememberFileListScrollTops();
+  pruneDownloadUiState();
+
   if (state.downloads.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.textContent = 'No active downloads yet. Once an RR client adds a release, progress will appear here.';
-    el.downloadsList.appendChild(empty);
+    el.downloadsList.replaceChildren(empty);
+    restoreViewportScroll(viewportScroll);
     return;
   }
 
-  for (const download of state.downloads) {
-    const putioProgress = clampPercent(download.putioProgress);
-    const localProgress = clampPercent(download.localProgress);
-    const combinedProgress = clampPercent(download.combinedProgress);
-    const files = download.files ?? {};
-    const completeFiles = Number(files.complete ?? 0);
-    const totalFiles = Number(files.total ?? 0);
-    const downloadedSize = Number(download.downloadedSize ?? 0);
-    const totalSize = Number(download.totalSize ?? 0);
-    const fileText = totalFiles > 0
-      ? `${completeFiles}/${totalFiles} files`
-      : 'Files pending';
-    const sizeText = totalSize > 0
-      ? `${formatBytes(downloadedSize)} / ${formatBytes(totalSize)}`
-      : `${formatBytes(downloadedSize)} copied`;
+  el.downloadsList.querySelector('.empty-state')?.remove();
+  const existingRows = Array.from(el.downloadsList.querySelectorAll('.download-row[data-id]'));
+  const existingById = new Map(existingRows.map((row) => [String(row.dataset.id), row]));
+  const seen = new Set();
 
-    const row = document.createElement('article');
-    row.className = 'download-row';
-    row.innerHTML = `
+  state.downloads.forEach((download, index) => {
+    const id = String(download.id);
+    let row = existingById.get(id);
+    if (!row) row = createDownloadRow(download);
+    updateDownloadRow(row, download);
+    seen.add(id);
+    placeChildAt(el.downloadsList, row, index);
+  });
+
+  for (const row of existingRows) {
+    if (row.dataset.id && !seen.has(String(row.dataset.id))) {
+      row.remove();
+    }
+  }
+  restoreViewportScroll(viewportScroll);
+}
+
+function createDownloadRow(download) {
+  const row = document.createElement('article');
+  row.className = 'download-row';
+  row.dataset.id = download.id;
+  row.innerHTML = `
+    <div class="download-summary">
       <div>
         <div class="download-title" data-role="download-title"></div>
         <div class="download-meta" data-role="download-location"></div>
+        <button class="file-toggle" type="button" data-action="toggle-files">
+          Files
+          <span data-role="file-count"></span>
+        </button>
       </div>
       <div>
         <div class="metric-label">Status</div>
@@ -350,25 +369,170 @@ function renderDownloads() {
         <div class="download-meta" data-role="download-files"></div>
       </div>
       <div class="progress-group">
-        ${progressLine('Put.io', putioProgress, 'putio-bar', 'putio-progress')}
-        ${progressLine('Local', localProgress, 'local-bar', 'local-progress', 'local')}
+        ${progressLine('Put.io', 0, 'putio-bar', 'putio-progress')}
+        ${progressLine('Local', 0, 'local-bar', 'local-progress', 'local')}
       </div>
       <div>
         <div class="metric-label">Speed / ETA</div>
         <strong data-role="download-speed"></strong>
         <div class="download-meta" data-role="download-eta"></div>
       </div>
-    `;
-    row.querySelector('[data-role="download-title"]').textContent = download.name;
-    row.querySelector('[data-role="download-location"]').textContent = `${download.profileName} · ${download.downloadAt}`;
-    row.querySelector('[data-role="download-status"]').textContent = `${download.lifecycle} · ${combinedProgress}%`;
-    row.querySelector('[data-role="download-files"]').textContent = download.error || `${fileText} · ${sizeText}`;
-    row.querySelector('[data-role="download-speed"]').textContent = formatSpeed(download.speed);
-    row.querySelector('[data-role="download-eta"]').textContent = formatEta(download.eta);
-    setProgressValue(row, 'putio-bar', putioProgress);
-    setProgressValue(row, 'local-bar', localProgress);
-    el.downloadsList.appendChild(row);
+    </div>
+    <div class="file-panel" data-role="file-panel" hidden>
+      <div class="file-panel-head">
+        <strong>Files</strong>
+        <span data-role="file-panel-summary"></span>
+      </div>
+      <div class="file-list" data-role="file-list"></div>
+    </div>
+  `;
+  row.querySelector('[data-action="toggle-files"]').addEventListener('click', () => {
+    toggleFilePanel(row.dataset.id);
+  });
+  const fileList = row.querySelector('[data-role="file-list"]');
+  fileList.addEventListener('scroll', () => {
+    state.fileListScrollTops.set(String(row.dataset.id), fileList.scrollTop);
+  }, { passive: true });
+  return row;
+}
+
+function updateDownloadRow(row, download) {
+  const putioProgress = clampPercent(download.putioProgress);
+  const localProgress = clampPercent(download.localProgress);
+  const combinedProgress = clampPercent(download.combinedProgress);
+  const files = download.files ?? {};
+  const fileItems = Array.isArray(files.items) ? files.items : [];
+  const completeFiles = Number(files.complete ?? 0);
+  const totalFiles = Number(files.total ?? 0);
+  const downloadedSize = Number(download.downloadedSize ?? 0);
+  const totalSize = Number(download.totalSize ?? 0);
+  const fileText = totalFiles > 0
+    ? `${completeFiles}/${totalFiles} files`
+    : 'Files pending';
+  const sizeText = totalSize > 0
+    ? `${formatBytes(downloadedSize)} / ${formatBytes(totalSize)}`
+    : `${formatBytes(downloadedSize)} copied`;
+
+  setDataValue(row, 'id', download.id);
+  setText(row.querySelector('[data-role="download-title"]'), download.name);
+  setText(row.querySelector('[data-role="download-location"]'), `${download.profileName} · ${download.downloadAt}`);
+  setText(row.querySelector('[data-role="download-status"]'), `${download.lifecycle} · ${combinedProgress}%`);
+  setText(row.querySelector('[data-role="download-files"]'), download.error || `${fileText} · ${sizeText}`);
+  setText(row.querySelector('[data-role="download-speed"]'), formatSpeed(download.speed));
+  setText(row.querySelector('[data-role="download-eta"]'), formatEta(download.eta));
+  setText(row.querySelector('[data-role="file-count"]'), totalFiles > 0 ? String(totalFiles) : '0');
+  setProgressValue(row, 'putio-bar', 'putio-progress', putioProgress);
+  setProgressValue(row, 'local-bar', 'local-progress', localProgress);
+  populateFilePanel(row, download, fileItems);
+}
+
+function toggleFilePanel(downloadId) {
+  rememberFileListScrollTops();
+  const key = String(downloadId);
+  if (state.expandedDownloads.has(key)) {
+    state.expandedDownloads.delete(key);
+  } else {
+    state.expandedDownloads.add(key);
   }
+  renderDownloads();
+}
+
+function populateFilePanel(row, download, fileItems) {
+  const key = String(download.id);
+  const expanded = state.expandedDownloads.has(key);
+  const button = row.querySelector('[data-action="toggle-files"]');
+  const panel = row.querySelector('[data-role="file-panel"]');
+  const list = row.querySelector('[data-role="file-list"]');
+  const summary = row.querySelector('[data-role="file-panel-summary"]');
+
+  setAttribute(button, 'aria-expanded', String(expanded));
+  button.classList.toggle('open', expanded);
+  setHidden(panel, !expanded);
+
+  const completed = fileItems.filter((file) => file.status === 'complete').length;
+  const downloading = fileItems.filter((file) => file.status === 'downloading').length;
+  const failed = fileItems.filter((file) => file.status === 'failed').length;
+  const pending = Math.max(0, fileItems.length - completed - downloading - failed);
+  setText(
+    summary,
+    fileItems.length > 0
+      ? `${completed} complete · ${downloading} active · ${pending} pending${failed > 0 ? ` · ${failed} failed` : ''}`
+      : 'Waiting for put.io file list',
+  );
+
+  if (!expanded) return;
+
+  if (fileItems.length === 0) {
+    renderEmptyFileList(list);
+    return;
+  }
+
+  list.querySelector('.file-empty')?.remove();
+  const existingRows = Array.from(list.querySelectorAll('.file-row[data-id]'));
+  const existingById = new Map(existingRows.map((fileRow) => [String(fileRow.dataset.id), fileRow]));
+  const seen = new Set();
+
+  fileItems.forEach((file, index) => {
+    const id = String(file.id);
+    let fileRow = existingById.get(id);
+    if (!fileRow) fileRow = createFileRow(file);
+    updateFileRow(fileRow, file);
+    seen.add(id);
+    placeChildAt(list, fileRow, index);
+  });
+
+  for (const fileRow of existingRows) {
+    if (fileRow.dataset.id && !seen.has(String(fileRow.dataset.id))) {
+      fileRow.remove();
+    }
+  }
+}
+
+function renderEmptyFileList(list) {
+  if (list.querySelector('.file-empty')) return;
+  list.replaceChildren();
+  const empty = document.createElement('div');
+  empty.className = 'file-empty';
+  empty.textContent = 'File details appear after put.io finishes preparing the transfer.';
+  list.appendChild(empty);
+}
+
+function createFileRow(file) {
+  const row = document.createElement('div');
+  row.className = 'file-row';
+  row.dataset.id = file.id;
+  row.innerHTML = `
+    <div class="file-main">
+      <div class="file-name" data-role="file-name"></div>
+      <div class="download-meta" data-role="file-size"></div>
+    </div>
+    <span class="file-status" data-role="file-status"></span>
+    <div class="file-progress">
+      <span class="bar local" data-role="file-bar"><span></span></span>
+      <span data-role="file-progress"></span>
+    </div>
+  `;
+  updateFileRow(row, file);
+  return row;
+}
+
+function updateFileRow(row, file) {
+  const progress = clampPercent(file.progress);
+  const status = file.status || 'pending';
+  const speed = Number(file.speed ?? 0);
+  const fileSizeText = `${formatBytes(file.downloadedSize)} / ${formatBytes(file.size)}`;
+  const sizeText = file.error
+    || (status === 'downloading' && speed > 0
+      ? `${fileSizeText} · ${formatSpeed(speed)}`
+      : fileSizeText);
+  const statusBadge = row.querySelector('[data-role="file-status"]');
+
+  setDataValue(row, 'id', file.id);
+  setText(row.querySelector('[data-role="file-name"]'), file.relativePath || 'Unknown file');
+  setText(row.querySelector('[data-role="file-size"]'), sizeText);
+  setText(statusBadge, statusLabel(file.status));
+  setDataValue(statusBadge, 'status', status);
+  setProgressValue(row, 'file-bar', 'file-progress', progress);
 }
 
 function progressLine(label, value, barRole, valueRole, className = '') {
@@ -381,8 +545,78 @@ function progressLine(label, value, barRole, valueRole, className = '') {
   `;
 }
 
-function setProgressValue(row, role, value) {
-  row.querySelector(`[data-role="${role}"] > span`).style.setProperty('--value', `${value}%`);
+function setProgressValue(row, barRole, valueRole, value) {
+  const nextValue = `${value}%`;
+  const bar = row.querySelector(`[data-role="${barRole}"] > span`);
+  if (bar.style.getPropertyValue('--value') !== nextValue) {
+    bar.style.setProperty('--value', nextValue);
+  }
+  setText(row.querySelector(`[data-role="${valueRole}"]`), nextValue);
+}
+
+function setText(element, value) {
+  const nextValue = String(value ?? '');
+  if (element.textContent !== nextValue) {
+    element.textContent = nextValue;
+  }
+}
+
+function setAttribute(element, name, value) {
+  const nextValue = String(value ?? '');
+  if (element.getAttribute(name) !== nextValue) {
+    element.setAttribute(name, nextValue);
+  }
+}
+
+function setDataValue(element, name, value) {
+  const nextValue = String(value ?? '');
+  if (element.dataset[name] !== nextValue) {
+    element.dataset[name] = nextValue;
+  }
+}
+
+function setHidden(element, hidden) {
+  if (element.hidden !== hidden) {
+    element.hidden = hidden;
+  }
+}
+
+function placeChildAt(parent, child, index) {
+  const current = parent.children[index] ?? null;
+  if (current !== child) {
+    parent.insertBefore(child, current);
+  }
+}
+
+function rememberFileListScrollTops() {
+  for (const row of el.downloadsList.querySelectorAll('.download-row[data-id]')) {
+    const panel = row.querySelector('[data-role="file-panel"]');
+    const list = row.querySelector('[data-role="file-list"]');
+    if (!panel || panel.hidden || !list) continue;
+    state.fileListScrollTops.set(String(row.dataset.id), list.scrollTop);
+  }
+}
+
+function pruneDownloadUiState() {
+  const ids = new Set(state.downloads.map((download) => String(download.id)));
+  for (const id of state.expandedDownloads) {
+    if (!ids.has(id)) state.expandedDownloads.delete(id);
+  }
+  for (const id of state.fileListScrollTops.keys()) {
+    if (!ids.has(id)) state.fileListScrollTops.delete(id);
+  }
+}
+
+function captureViewportScroll() {
+  return {
+    x: window.scrollX,
+    y: window.scrollY,
+  };
+}
+
+function restoreViewportScroll({ x, y }) {
+  const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  window.scrollTo(x, Math.min(y, maxY));
 }
 
 function clampPercent(value) {
@@ -414,6 +648,19 @@ function formatEta(value) {
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.round(minutes / 60)}h`;
+}
+
+function statusLabel(value) {
+  switch (value) {
+    case 'complete':
+      return 'Complete';
+    case 'downloading':
+      return 'Active';
+    case 'failed':
+      return 'Failed';
+    default:
+      return 'Pending';
+  }
 }
 
 function slugify(value) {

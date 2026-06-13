@@ -134,6 +134,7 @@ export class DownloadManager {
         this.store.updateTransferFile(job.id, {
           status: attempts >= 3 ? 'failed' : 'pending',
           attempts,
+          download_speed: 0,
           error_string: error.message,
         });
         logger.warn('file download failed', {
@@ -158,6 +159,7 @@ export class DownloadManager {
     this.store.updateTransferFile(job.id, {
       status: 'downloading',
       attempts: Number(job.attempts ?? 0) + 1,
+      download_speed: 0,
       error_string: '',
     });
     return this.store.findTransferFileById(job.id);
@@ -180,6 +182,7 @@ export class DownloadManager {
       this.store.updateTransferFile(file.id, {
         status: 'complete',
         downloaded_bytes: Number(file.size),
+        download_speed: 0,
         error_string: '',
       });
       await this.finalizeTransferIfComplete(transfer.id);
@@ -192,6 +195,7 @@ export class DownloadManager {
     this.store.updateTransferFile(file.id, {
       status: 'complete',
       downloaded_bytes: Number(file.size),
+      download_speed: 0,
       error_string: '',
     });
     await this.finalizeTransferIfComplete(transfer.id);
@@ -257,6 +261,7 @@ export class DownloadManager {
     if (expectedSize > 0 && actualSize !== expectedSize) {
       this.store.updateTransferFile(file.id, {
         downloaded_bytes: actualSize,
+        download_speed: 0,
         status: 'pending',
       });
       throw new Error(`download size mismatch: got ${actualSize}, expected ${expectedSize}`);
@@ -270,6 +275,7 @@ export class DownloadManager {
     const downloaded = Math.max(0, Math.min(Number(downloadedBytes ?? 0), size > 0 ? size : Number.MAX_SAFE_INTEGER));
     this.store.updateTransferFile(file.id, {
       downloaded_bytes: downloaded,
+      download_speed: Math.max(0, Math.round(Number(bytesPerSecond ?? 0))),
       status: 'downloading',
     });
     this.activeFileRates.set(file.id, {

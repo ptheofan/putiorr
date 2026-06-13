@@ -30,11 +30,13 @@ export function mapPutioStatus(status) {
 export function calculateTransmissionProgress(transfer, fileStats) {
   const remotePercent = clampPercent(transfer.percent_done ?? 0);
   const remoteProgress = remotePercent / 200;
+  const transferSize = Number(transfer.total_size ?? 0);
 
   const totalSize = Number(fileStats?.total_size ?? 0);
   const downloadedSize = Number(fileStats?.downloaded_size ?? 0);
   const totalFiles = Number(fileStats?.total_files ?? 0);
   const completedFiles = Number(fileStats?.completed_files ?? 0);
+  const reportableSize = totalSize > 0 ? totalSize : transferSize;
 
   if (transfer.lifecycle === 'processed') {
     return {
@@ -48,11 +50,10 @@ export function calculateTransmissionProgress(transfer, fileStats) {
     const localProgress = totalSize > 0
       ? (downloadedSize / totalSize) * 0.5
       : (completedFiles / totalFiles) * 0.5;
-    const remoteLeft = Number(transfer.total_size ?? 0) * (1 - remotePercent / 100);
-    const localLeft = Math.max(0, totalSize - downloadedSize);
+    const percentDone = clampUnit(remoteProgress + localProgress);
     return {
-      percentDone: clampUnit(remoteProgress + localProgress),
-      leftUntilDone: Math.max(0, Math.round(remoteLeft + localLeft)),
+      percentDone,
+      leftUntilDone: remainingFromProgress(reportableSize, percentDone),
       status: transfer.lifecycle === 'downloading'
         ? TRANSMISSION_STATUS.download
         : mapPutioStatus(transfer.putio_status),
@@ -60,18 +61,20 @@ export function calculateTransmissionProgress(transfer, fileStats) {
   }
 
   if (transfer.putio_status === 'COMPLETED' || transfer.putio_status === 'SEEDING') {
+    const percentDone = transfer.lifecycle === 'remote' ? 0.5 : 1;
     return {
-      percentDone: transfer.lifecycle === 'remote' ? 0.5 : 1,
-      leftUntilDone: transfer.lifecycle === 'remote' ? Number(transfer.total_size ?? 0) : 0,
+      percentDone,
+      leftUntilDone: remainingFromProgress(reportableSize, percentDone),
       status: transfer.lifecycle === 'remote'
         ? TRANSMISSION_STATUS.download
         : TRANSMISSION_STATUS.seed,
     };
   }
 
+  const percentDone = remoteProgress;
   return {
-    percentDone: remoteProgress,
-    leftUntilDone: Math.max(0, Math.round(Number(transfer.total_size ?? 0) * (1 - remotePercent / 100))),
+    percentDone,
+    leftUntilDone: remainingFromProgress(reportableSize, percentDone),
     status: mapPutioStatus(transfer.putio_status),
   };
 }
@@ -82,4 +85,8 @@ function clampPercent(value) {
 
 function clampUnit(value) {
   return Math.min(1, Math.max(0, Number(value) || 0));
+}
+
+function remainingFromProgress(size, percentDone) {
+  return Math.max(0, Math.round(Number(size ?? 0) * (1 - clampUnit(percentDone))));
 }
