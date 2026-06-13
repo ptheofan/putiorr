@@ -4,6 +4,8 @@ const state = {
   downloads: [],
   expandedDownloads: new Set(),
   fileListScrollTops: new Map(),
+  downloaderPolicyDirty: false,
+  downloaderPolicyBaseline: '',
 };
 
 const el = {
@@ -18,6 +20,11 @@ const el = {
   oauthLink: document.querySelector('#oauthLink'),
   oauthPollButton: document.querySelector('#oauthPollButton'),
   testConnectionButton: document.querySelector('#testConnectionButton'),
+  downloaderSettingsForm: document.querySelector('#downloaderSettingsForm'),
+  slowSpeedThreshold: document.querySelector('#slowSpeedThreshold'),
+  slowSpeedDuration: document.querySelector('#slowSpeedDuration'),
+  slowSpeedGrace: document.querySelector('#slowSpeedGrace'),
+  slowSpeedMinSize: document.querySelector('#slowSpeedMinSize'),
   addProfileButton: document.querySelector('#addProfileButton'),
   profilesBody: document.querySelector('#profilesBody'),
   profileRowTemplate: document.querySelector('#profileRowTemplate'),
@@ -84,8 +91,8 @@ function connectUpdates() {
     } catch {
       return;
     }
-    if (message.type === 'state') {
-      applyServerState(message);
+    if (message.type === 'downloads') {
+      applyDownloadsUpdate(message);
     }
   });
 
@@ -125,11 +132,8 @@ async function loadAll() {
   render();
 }
 
-function applyServerState(message) {
-  if (message.settings) state.settings = message.settings;
+function applyDownloadsUpdate(message) {
   if (Array.isArray(message.downloads)) state.downloads = message.downloads;
-  if (Array.isArray(message.profiles)) reconcileProfiles(message.profiles);
-  renderConnection();
   renderDownloads();
 }
 
@@ -150,38 +154,52 @@ function renderConnection() {
     stopOAuthPolling();
     el.oauthPanel.hidden = true;
   }
+  renderDownloadPolicy();
+}
+
+function renderDownloadPolicy() {
+  const policy = state.settings?.downloadPolicy;
+  if (!policy || isDownloaderPolicyDrafting()) return;
+
+  setNumberInput(el.slowSpeedThreshold, policy.slowSpeedThresholdBytesPerSecond);
+  setNumberInput(el.slowSpeedDuration, policy.slowSpeedDurationSeconds);
+  setNumberInput(el.slowSpeedGrace, policy.slowSpeedGraceSeconds);
+  setNumberInput(el.slowSpeedMinSize, policy.slowSpeedMinSizeBytes);
+  state.downloaderPolicyBaseline = JSON.stringify(getDownloadPolicyPayload());
+  state.downloaderPolicyDirty = false;
+}
+
+function isDownloaderPolicyDrafting() {
+  return state.downloaderPolicyDirty || el.downloaderSettingsForm.contains(document.activeElement);
+}
+
+function setNumberInput(input, value) {
+  const nextValue = String(Math.max(0, Number.parseInt(value ?? 0, 10) || 0));
+  if (input.value !== nextValue) input.value = nextValue;
+}
+
+function numberInputValue(input) {
+  const parsed = Number.parseInt(input.value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function getDownloadPolicyPayload() {
+  return {
+    slowSpeedThresholdBytesPerSecond: numberInputValue(el.slowSpeedThreshold),
+    slowSpeedDurationSeconds: numberInputValue(el.slowSpeedDuration),
+    slowSpeedGraceSeconds: numberInputValue(el.slowSpeedGrace),
+    slowSpeedMinSizeBytes: numberInputValue(el.slowSpeedMinSize),
+  };
+}
+
+function updateDownloaderPolicyDirtyState() {
+  state.downloaderPolicyDirty = state.downloaderPolicyBaseline !== JSON.stringify(getDownloadPolicyPayload());
 }
 
 function renderProfiles() {
   el.profilesBody.replaceChildren();
   for (const profile of state.profiles) {
     el.profilesBody.appendChild(createProfileRow(profile));
-  }
-}
-
-function reconcileProfiles(profiles) {
-  state.profiles = profiles;
-
-  const existingRows = Array.from(el.profilesBody.querySelectorAll('tr[data-id]'));
-  const existingById = new Map(existingRows.map((row) => [String(row.dataset.id), row]));
-  const seen = new Set();
-
-  for (const profile of profiles) {
-    const id = String(profile.id);
-    let row = existingById.get(id);
-    if (!row) {
-      row = createProfileRow(profile);
-    } else if (!isProfileRowDrafting(row)) {
-      populateProfileRow(row, profile);
-    }
-    seen.add(id);
-    el.profilesBody.appendChild(row);
-  }
-
-  for (const row of existingRows) {
-    if (row.dataset.id && !seen.has(String(row.dataset.id))) {
-      row.remove();
-    }
   }
 }
 
@@ -248,10 +266,6 @@ function updateProfileDirtyState(row) {
     'aria-label',
     hasUnsavedChanges ? 'Save profile with unsaved changes' : 'Save profile',
   );
-}
-
-function isProfileRowDrafting(row) {
-  return row.classList.contains('dirty') || row.contains(document.activeElement);
 }
 
 function upsertProfileState(profile) {
@@ -678,14 +692,34 @@ el.settingsForm.addEventListener('submit', async (event) => {
     return;
   }
   const payload = token ? { putioToken: token } : {};
-  await api('/api/settings', {
+  const settings = await api('/api/settings', {
     method: 'PUT',
     body: JSON.stringify(payload),
   });
+  state.settings = settings;
   el.putioToken.value = '';
+  renderConnection();
   setMessage('Settings saved.', 'ok');
+  requestStateRefresh();
+});
+
+el.downloaderSettingsForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const settings = await api('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ downloadPolicy: getDownloadPolicyPayload() }),
+  });
+  state.settings = settings;
+  state.downloaderPolicyDirty = false;
+  renderDownloadPolicy();
+  setMessage('Downloader settings saved.', 'ok');
   if (!requestStateRefresh()) await loadAll();
 });
+
+for (const input of el.downloaderSettingsForm.querySelectorAll('input')) {
+  input.addEventListener('input', updateDownloaderPolicyDirtyState);
+  input.addEventListener('change', updateDownloaderPolicyDirtyState);
+}
 
 el.testConnectionButton.addEventListener('click', async () => {
   try {
@@ -737,8 +771,13 @@ async function pollOAuth(manual) {
     stopOAuthPolling();
     el.oauthPanel.hidden = true;
     oauth.code = '';
+    state.settings = {
+      ...(state.settings ?? {}),
+      tokenConfigured: true,
+    };
+    renderConnection();
     setMessage('Put.io OAuth connected and token saved.', 'ok');
-    if (!requestStateRefresh()) await loadAll();
+    requestStateRefresh();
     return;
   }
   if (manual) {
@@ -753,9 +792,5 @@ el.refreshButton.addEventListener('click', () => {
   }
 });
 
+loadAll().catch((error) => setMessage(error.message, 'error'));
 connectUpdates();
-setTimeout(() => {
-  if (!state.settings) {
-    loadAll().catch((error) => setMessage(error.message, 'error'));
-  }
-}, 1_000);

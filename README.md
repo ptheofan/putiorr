@@ -78,14 +78,14 @@ ghcr.io/ptheofan/putiorr
 ```
 
 Publishing happens when a GitHub Release is published. Use a semver tag such as
-`v1.0.1`; the workflow builds the Dockerfile `production` target for
+`v1.0.2`; the workflow builds the Dockerfile `production` target for
 `linux/amd64` and `linux/arm64`.
 
 Release tags produce image tags like:
 
 ```text
-ghcr.io/ptheofan/putiorr:v1.0.1
-ghcr.io/ptheofan/putiorr:1.0.1
+ghcr.io/ptheofan/putiorr:v1.0.2
+ghcr.io/ptheofan/putiorr:1.0.2
 ghcr.io/ptheofan/putiorr:1.0
 ghcr.io/ptheofan/putiorr:latest
 ```
@@ -93,8 +93,8 @@ ghcr.io/ptheofan/putiorr:latest
 Prereleases do not receive the `latest` tag.
 
 Before publishing a release, run the **Release Gate** GitHub Actions workflow on
-`main` with the intended tag. For package version `1.0.1`, use release tag
-`v1.0.1`.
+`main` with the intended tag. For package version `1.0.2`, use release tag
+`v1.0.2`.
 
 The release workflow also runs the release gate after a GitHub Release is
 published. It checks that the release tag matches `package.json` and that README
@@ -363,6 +363,18 @@ Some *arr apps only read torrent-level Transmission fields, so they may display
 one shared percentage for all queue items from a multi-file torrent. The putiorr
 dashboard is the source of truth for per-file local download progress.
 
+## Local Resume And Slow Resets
+
+Local downloads are written as `.part` files and resumed with HTTP `Range`
+requests. If putiorr or the container restarts while a file is downloading, the
+next worker continues from the existing partial file.
+
+Slow-speed reset is optional. Set a nonzero threshold to enable it. After the
+startup grace window, if a file stays below the threshold for the configured
+duration, putiorr closes that file download and resumes it from the partial
+file. Files smaller than the configured minimum size are ignored by the reset
+policy.
+
 ## Environment
 
 | Variable | Default | Description |
@@ -380,6 +392,10 @@ dashboard is the source of truth for per-file local download progress.
 | `PUTIORR_PROFILES_JSON` | `[]` | Optional seed profiles as JSON |
 | `PUTIORR_WORKERS` | `4` | Concurrent local file downloads |
 | `PUTIORR_POLL_INTERVAL_MS` | `30000` | Backend put.io polling interval, minimum 5000. The web UI receives updates over WebSocket. |
+| `PUTIORR_SLOW_SPEED_THRESHOLD_BYTES_PER_SECOND` | `0` | Local file speed threshold. `0` disables slow-speed reset. |
+| `PUTIORR_SLOW_SPEED_DURATION_SECONDS` | `120` | Seconds below the threshold before resetting the file connection |
+| `PUTIORR_SLOW_SPEED_GRACE_SECONDS` | `30` | Startup grace window before slow-speed checks begin |
+| `PUTIORR_SLOW_SPEED_MIN_SIZE_BYTES` | `104857600` | Do not slow-reset files smaller than this size |
 | `PUTIORR_CLEANUP_REMOTE_FILES` | `true` | Delete put.io files/transfers after local completion |
 | `PUTIORR_RPC_USERNAME` | unset | Optional HTTP basic auth username |
 | `PUTIORR_RPC_PASSWORD` | unset | Optional HTTP basic auth password |

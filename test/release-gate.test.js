@@ -13,7 +13,7 @@ function runGate(env = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      RELEASE_TAG: 'v1.0.1',
+      RELEASE_TAG: 'v1.0.2',
       ...env,
     },
   });
@@ -23,7 +23,7 @@ test('release gate passes for current release metadata', () => {
   const result = runGate();
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Release gate passed for v1\.0\.1/);
+  assert.match(result.stdout, /Release gate passed for v1\.0\.2/);
 });
 
 test('release gate rejects stale release values in README', () => {
@@ -31,7 +31,7 @@ test('release gate rejects stale release values in README', () => {
   const staleReadme = path.join(scratch, 'README.md');
   const current = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 
-  writeFileSync(staleReadme, current.replaceAll('1.0.1', '1.0.0').replaceAll('v1.0.1', 'v1.0.0'));
+  writeFileSync(staleReadme, current.replaceAll('1.0.2', '1.0.0').replaceAll('v1.0.2', 'v1.0.0'));
 
   const result = runGate({
     RELEASE_GATE_README_MD: staleReadme,

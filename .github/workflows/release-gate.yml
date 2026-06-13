@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Optional release tag to validate, for example v1.0.1.
+        description: Optional release tag to validate, for example v1.0.2.
         required: false
         type: string
 

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { downloadPolicyFromStore, saveDownloadPolicyToStore } from '../download/policy.js';
 import { logger } from '../logger.js';
 import { PutioOAuthClient } from '../putio/oauth.js';
 
@@ -84,7 +85,7 @@ export class TransmissionRpcServer {
     this.liveReloadTimer = undefined;
     this.liveReloadVersion = String(Date.now());
     this.webSocketClients = new Set();
-    this.webSocketBroadcastTimer = undefined;
+    this.webSocketDownloadsBroadcastTimer = undefined;
     this.webSocketRefreshTimer = undefined;
     this.server = http.createServer((req, res) => {
       this.handle(req, res).catch((error) => {
@@ -186,7 +187,7 @@ export class TransmissionRpcServer {
     };
     jsonResponse(res, 200, body, this.sessionId);
     if (['torrent-add', 'torrent-remove'].includes(rpcRequest.method)) {
-      this.scheduleWebSocketBroadcast(`rpc:${rpcRequest.method}`);
+      this.scheduleWebSocketDownloadsBroadcast(`rpc:${rpcRequest.method}`);
     }
   }
 
@@ -197,6 +198,7 @@ export class TransmissionRpcServer {
       if (method === 'GET' && requestPath === '/api/settings') {
         jsonResponse(res, 200, {
           tokenConfigured: Boolean(this.service.getPutioToken()),
+          downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
         }, this.sessionId);
         return;
       }
@@ -210,9 +212,12 @@ export class TransmissionRpcServer {
           this.service.putioClient = undefined;
           this.service.putioToken = undefined;
         }
-        this.scheduleWebSocketBroadcast('settings');
+        if (body.downloadPolicy !== undefined) {
+          saveDownloadPolicyToStore(this.service.store, body.downloadPolicy, this.config);
+        }
         jsonResponse(res, 200, {
           tokenConfigured: Boolean(this.service.getPutioToken()),
+          downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
         }, this.sessionId);
         return;
       }
@@ -243,7 +248,6 @@ export class TransmissionRpcServer {
           this.service.store.setSetting('putio_token', result.oauthToken);
           this.service.putioClient = undefined;
           this.service.putioToken = undefined;
-          this.scheduleWebSocketBroadcast('oauth');
         }
         jsonResponse(res, 200, {
           status: result.status,
@@ -259,7 +263,6 @@ export class TransmissionRpcServer {
 
       if (method === 'POST' && requestPath === '/api/profiles') {
         const profile = this.service.store.createProfile(normalizeProfileInput(await readJsonBody(req)));
-        this.scheduleWebSocketBroadcast('profiles');
         jsonResponse(res, 201, profile, this.sessionId);
         return;
       }
@@ -271,14 +274,12 @@ export class TransmissionRpcServer {
           normalizeProfileInput(await readJsonBody(req), { partial: true }),
         );
         if (!profile) throw new Error('Profile not found');
-        this.scheduleWebSocketBroadcast('profiles');
         jsonResponse(res, 200, profile, this.sessionId);
         return;
       }
 
       if (profileMatch && method === 'DELETE') {
         this.service.store.deleteProfile(Number(profileMatch[1]));
-        this.scheduleWebSocketBroadcast('profiles');
         jsonResponse(res, 200, { ok: true }, this.sessionId);
         return;
       }
@@ -290,7 +291,7 @@ export class TransmissionRpcServer {
 
       if (method === 'POST' && requestPath === '/api/poll') {
         await this.service.refreshRemoteTransfers();
-        this.scheduleWebSocketBroadcast('downloads');
+        this.scheduleWebSocketDownloadsBroadcast('downloads');
         jsonResponse(res, 200, { ok: true }, this.sessionId);
         return;
       }
@@ -438,7 +439,7 @@ export class TransmissionRpcServer {
     socket.on('close', () => this.webSocketClients.delete(client));
     socket.on('error', () => this.webSocketClients.delete(client));
 
-    this.sendWebSocketState(client, 'connect');
+    this.sendWebSocketDownloads(client, 'connect');
   }
 
   handleWebSocketData(client, chunk) {
@@ -499,7 +500,7 @@ export class TransmissionRpcServer {
     }
 
     if (message?.type === 'refresh') {
-      this.sendWebSocketState(client, 'refresh');
+      this.sendWebSocketDownloads(client, 'refresh');
     }
   }
 
@@ -507,38 +508,34 @@ export class TransmissionRpcServer {
     if (this.webSocketRefreshTimer) return;
     this.webSocketRefreshTimer = setInterval(() => {
       if (this.webSocketClients.size > 0) {
-        this.broadcastWebSocketState('tick');
+        this.broadcastWebSocketDownloads('tick');
       }
     }, 2_000);
   }
 
-  scheduleWebSocketBroadcast(reason) {
-    if (this.webSocketBroadcastTimer) clearTimeout(this.webSocketBroadcastTimer);
-    this.webSocketBroadcastTimer = setTimeout(() => {
-      this.broadcastWebSocketState(reason);
+  scheduleWebSocketDownloadsBroadcast(reason) {
+    if (this.webSocketDownloadsBroadcastTimer) clearTimeout(this.webSocketDownloadsBroadcastTimer);
+    this.webSocketDownloadsBroadcastTimer = setTimeout(() => {
+      this.broadcastWebSocketDownloads(reason);
     }, 100);
   }
 
-  webUiState(reason) {
+  webDownloadsState(reason) {
     return {
-      type: 'state',
+      type: 'downloads',
       reason,
       sentAt: new Date().toISOString(),
-      settings: {
-        tokenConfigured: Boolean(this.service.getPutioToken()),
-      },
-      profiles: this.service.store.listProfiles({ includeDisabled: true }),
       downloads: this.service.listDownloads(),
     };
   }
 
-  sendWebSocketState(client, reason) {
-    this.sendWebSocketJson(client, this.webUiState(reason));
+  sendWebSocketDownloads(client, reason) {
+    this.sendWebSocketJson(client, this.webDownloadsState(reason));
   }
 
-  broadcastWebSocketState(reason) {
+  broadcastWebSocketDownloads(reason) {
     if (this.webSocketClients.size === 0) return;
-    const payload = JSON.stringify(this.webUiState(reason));
+    const payload = JSON.stringify(this.webDownloadsState(reason));
     for (const client of this.webSocketClients) {
       this.sendWebSocketFrame(client, payload);
     }
@@ -566,8 +563,8 @@ export class TransmissionRpcServer {
   }
 
   stopWebSockets() {
-    if (this.webSocketBroadcastTimer) clearTimeout(this.webSocketBroadcastTimer);
-    this.webSocketBroadcastTimer = undefined;
+    if (this.webSocketDownloadsBroadcastTimer) clearTimeout(this.webSocketDownloadsBroadcastTimer);
+    this.webSocketDownloadsBroadcastTimer = undefined;
     if (this.webSocketRefreshTimer) clearInterval(this.webSocketRefreshTimer);
     this.webSocketRefreshTimer = undefined;
     for (const client of this.webSocketClients) {

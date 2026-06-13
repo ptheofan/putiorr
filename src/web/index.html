@@ -15,6 +15,7 @@
         </div>
         <nav class="nav" aria-label="Main navigation">
           <a href="#connection" class="nav-link active">Connection</a>
+          <a href="#downloader" class="nav-link">Downloader</a>
           <a href="#profiles" class="nav-link">RR profiles</a>
           <a href="#downloads" class="nav-link">Downloads</a>
         </nav>
@@ -72,6 +73,40 @@
             </button>
           </div>
           <p id="settingsMessage" class="message" role="status"></p>
+        </section>
+
+        <section id="downloader" class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Downloader</h2>
+              <p>Resume is automatic. Slow-speed reset starts when the threshold is greater than zero.</p>
+            </div>
+          </div>
+
+          <form id="downloaderSettingsForm" class="policy-grid">
+            <label>
+              Slow threshold
+              <input id="slowSpeedThreshold" name="slowSpeedThresholdBytesPerSecond" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes per second">
+            </label>
+            <label>
+              Duration
+              <input id="slowSpeedDuration" name="slowSpeedDurationSeconds" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
+            </label>
+            <label>
+              Startup grace
+              <input id="slowSpeedGrace" name="slowSpeedGraceSeconds" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
+            </label>
+            <label>
+              Ignore below
+              <input id="slowSpeedMinSize" name="slowSpeedMinSizeBytes" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes">
+            </label>
+            <div class="button-row policy-actions">
+              <button class="button secondary" type="submit">
+                <span aria-hidden="true">●</span>
+                Save downloader
+              </button>
+            </div>
+          </form>
         </section>
 
         <section id="profiles" class="panel">

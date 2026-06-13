@@ -3,9 +3,19 @@ import { mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { once } from 'node:events';
 import path from 'node:path';
 import { logger } from '../logger.js';
+import { downloadPolicyFromStore, isSlowSpeedResetEnabled } from './policy.js';
 import { fileExistsWithSize, normalizeRelativePath, resolveInside } from './paths.js';
 
 const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
+const SLOW_RESET_PAUSE_MS = 500;
+
+class SlowSpeedResetError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'SlowSpeedResetError';
+    this.code = 'SLOW_SPEED_RESET';
+  }
+}
 
 function sleep(ms, signal) {
   return new Promise((resolve) => {
@@ -28,11 +38,18 @@ async function sizeOf(filePath) {
 }
 
 export class DownloadManager {
-  constructor({ config, store, service, fetchImpl = globalThis.fetch }) {
+  constructor({
+    config,
+    store,
+    service,
+    fetchImpl = globalThis.fetch,
+    now = Date.now,
+  }) {
     this.config = config;
     this.store = store;
     this.service = service;
     this.fetch = fetchImpl;
+    this.now = now;
     this.controller = new AbortController();
     this.running = false;
     this.pollTimer = undefined;
@@ -95,20 +112,22 @@ export class DownloadManager {
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
       const relativePath = normalizeRelativePath(remoteFile.relativePath ?? remoteFile.name);
-      totalSize += Number(remoteFile.size ?? 0);
+      const size = Number(remoteFile.size ?? 0);
+      totalSize += size;
       const targetPath = resolveInside(
         profile.download_at,
         updated.category ?? '',
         updated.name,
         relativePath,
       );
-      const exists = await fileExistsWithSize(targetPath, Number(remoteFile.size ?? 0));
+      const exists = await fileExistsWithSize(targetPath, size);
+      const partSize = exists ? size : Math.min(await sizeOf(`${targetPath}.part`), size);
       this.store.upsertTransferFile({
         transfer_id: updated.id,
         putio_file_id: remoteFile.id,
         relative_path: relativePath,
-        size: Number(remoteFile.size ?? 0),
-        downloaded_bytes: exists ? Number(remoteFile.size ?? 0) : 0,
+        size,
+        downloaded_bytes: exists ? size : partSize,
         status: exists ? 'complete' : 'pending',
       });
     }
@@ -130,6 +149,14 @@ export class DownloadManager {
       try {
         await this.processFile(job);
       } catch (error) {
+        if (signal.aborted || !this.running) {
+          this.store.updateTransferFile(job.id, {
+            status: 'pending',
+            download_speed: 0,
+            error_string: '',
+          });
+          continue;
+        }
         const attempts = Number(job.attempts ?? 0) + 1;
         this.store.updateTransferFile(job.id, {
           status: attempts >= 3 ? 'failed' : 'pending',
@@ -203,60 +230,31 @@ export class DownloadManager {
 
   async downloadToPath(downloadUrl, targetPath, file) {
     const partPath = `${targetPath}.part`;
-    let startAt = await sizeOf(partPath);
-    let response = await this.fetch(downloadUrl, {
-      headers: startAt > 0 ? { Range: `bytes=${startAt}-` } : undefined,
-      signal: this.controller.signal,
-    });
-
-    if (response.status === 416) {
-      await unlink(partPath).catch((error) => {
-        if (error.code !== 'ENOENT') throw error;
-      });
-      startAt = 0;
-      response = await this.fetch(downloadUrl, { signal: this.controller.signal });
-    }
-
-    if (startAt > 0 && response.status !== 206) {
-      await unlink(partPath).catch((error) => {
-        if (error.code !== 'ENOENT') throw error;
-      });
-      startAt = 0;
-      response = await this.fetch(downloadUrl, { signal: this.controller.signal });
-    }
-
-    if (!response.ok) {
-      throw new Error(`download failed with HTTP ${response.status}`);
-    }
-
-    const stream = createWriteStream(partPath, { flags: startAt > 0 ? 'a' : 'w' });
-    let downloaded = startAt;
-    let lastProgressUpdate = Date.now();
-    let lastMetricBytes = downloaded;
-
-    try {
-      for await (const chunk of response.body) {
-        const buffer = Buffer.from(chunk);
-        downloaded += buffer.length;
-        if (!stream.write(buffer)) {
-          await once(stream, 'drain');
-        }
-
-        const now = Date.now();
-        if (now - lastProgressUpdate >= 1_000) {
-          const elapsedSeconds = Math.max(0.001, (now - lastProgressUpdate) / 1_000);
-          const bytesPerSecond = Math.max(0, Math.round((downloaded - lastMetricBytes) / elapsedSeconds));
-          this.updateLocalProgressMetrics(file, downloaded, bytesPerSecond);
-          lastProgressUpdate = now;
-          lastMetricBytes = downloaded;
-        }
-      }
-    } finally {
-      stream.end();
-      await once(stream, 'finish');
-    }
-
     const expectedSize = Number(file.size);
+    let resetCount = 0;
+
+    while (!this.controller.signal.aborted) {
+      const partSize = await sizeOf(partPath);
+      if (expectedSize > 0 && partSize === expectedSize) break;
+      if (expectedSize > 0 && partSize > expectedSize) {
+        await unlink(partPath).catch((error) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
+      }
+
+      const result = await this.downloadAttempt(downloadUrl, partPath, file, resetCount);
+      if (result.complete) break;
+      if (result.reset) {
+        resetCount += 1;
+        await sleep(SLOW_RESET_PAUSE_MS, this.controller.signal);
+        continue;
+      }
+    }
+
+    if (this.controller.signal.aborted) {
+      throw new Error('download manager stopped');
+    }
+
     const actualSize = await sizeOf(partPath);
     if (expectedSize > 0 && actualSize !== expectedSize) {
       this.store.updateTransferFile(file.id, {
@@ -268,6 +266,193 @@ export class DownloadManager {
     }
 
     await rename(partPath, targetPath);
+  }
+
+  async downloadAttempt(downloadUrl, partPath, file, resetCount) {
+    let startAt = await sizeOf(partPath);
+    let downloaded = startAt;
+    const attemptController = new AbortController();
+    const unlinkAbort = this.linkAbortSignal(this.controller.signal, attemptController);
+    let guard;
+    let stream;
+
+    try {
+      let response = await this.fetch(downloadUrl, {
+        headers: startAt > 0 ? { Range: `bytes=${startAt}-` } : undefined,
+        signal: attemptController.signal,
+      });
+
+      if (response.status === 416) {
+        await unlink(partPath).catch((error) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
+        startAt = 0;
+        downloaded = 0;
+        response = await this.fetch(downloadUrl, { signal: attemptController.signal });
+      }
+
+      if (startAt > 0 && response.status !== 206) {
+        await unlink(partPath).catch((error) => {
+          if (error.code !== 'ENOENT') throw error;
+        });
+        startAt = 0;
+        downloaded = 0;
+        response = await this.fetch(downloadUrl, { signal: attemptController.signal });
+      }
+
+      if (!response.ok) {
+        throw new Error(`download failed with HTTP ${response.status}`);
+      }
+
+      this.store.updateTransferFile(file.id, {
+        status: 'downloading',
+        download_speed: 0,
+        error_string: '',
+      });
+      this.updateLocalProgressMetrics(file, downloaded, 0);
+      guard = this.createSlowSpeedGuard(file, attemptController, downloaded, resetCount);
+      stream = createWriteStream(partPath, { flags: startAt > 0 ? 'a' : 'w' });
+      let lastProgressUpdate = this.now();
+      let lastMetricBytes = downloaded;
+
+      for await (const chunk of response.body) {
+        const buffer = Buffer.from(chunk);
+        downloaded += buffer.length;
+        if (!stream.write(buffer)) {
+          await once(stream, 'drain');
+        }
+
+        guard?.recordProgress(downloaded);
+        const now = this.now();
+        if (now - lastProgressUpdate >= 1_000) {
+          const elapsedSeconds = Math.max(0.001, (now - lastProgressUpdate) / 1_000);
+          const bytesPerSecond = Math.max(0, Math.round((downloaded - lastMetricBytes) / elapsedSeconds));
+          this.updateLocalProgressMetrics(file, downloaded, bytesPerSecond);
+          lastProgressUpdate = now;
+          lastMetricBytes = downloaded;
+        }
+      }
+
+      this.updateLocalProgressMetrics(file, downloaded, 0);
+      return { complete: true };
+    } catch (error) {
+      if (guard?.triggered) {
+        if (stream) {
+          stream.end();
+          await once(stream, 'finish');
+          stream = undefined;
+        }
+        await this.updateAfterSlowReset(file, partPath, guard.message, resetCount + 1);
+        return { reset: true };
+      }
+      throw error;
+    } finally {
+      guard?.stop();
+      unlinkAbort();
+      if (stream) {
+        stream.end();
+        await once(stream, 'finish');
+      }
+    }
+  }
+
+  linkAbortSignal(sourceSignal, targetController) {
+    if (sourceSignal.aborted) {
+      targetController.abort(sourceSignal.reason);
+      return () => {};
+    }
+
+    const abort = () => targetController.abort(sourceSignal.reason);
+    sourceSignal.addEventListener('abort', abort, { once: true });
+    return () => sourceSignal.removeEventListener('abort', abort);
+  }
+
+  createSlowSpeedGuard(file, controller, initialBytes, resetCount) {
+    const policy = downloadPolicyFromStore(this.store, this.config);
+    const fileSize = Number(file.size ?? 0);
+    if (!isSlowSpeedResetEnabled(policy, fileSize)) return undefined;
+
+    const threshold = Number(policy.slowSpeedThresholdBytesPerSecond);
+    const durationMs = Number(policy.slowSpeedDurationSeconds) * 1_000;
+    const graceMs = Number(policy.slowSpeedGraceSeconds) * 1_000;
+    const startedAt = this.now();
+    const intervalMs = Math.max(100, Math.min(1_000, Math.floor(durationMs / 4) || 1_000));
+    let currentBytes = Number(initialBytes ?? 0);
+    let lastCheckAt = startedAt;
+    let lastCheckBytes = currentBytes;
+    let slowSince;
+    let triggered = false;
+    let message = '';
+
+    const check = () => {
+      if (triggered || controller.signal.aborted) return;
+
+      const now = this.now();
+      if (now - startedAt < graceMs) {
+        lastCheckAt = now;
+        lastCheckBytes = currentBytes;
+        return;
+      }
+
+      const elapsedSeconds = Math.max(0.001, (now - lastCheckAt) / 1_000);
+      const bytesPerSecond = Math.max(0, Math.round((currentBytes - lastCheckBytes) / elapsedSeconds));
+      if (bytesPerSecond < threshold) {
+        slowSince ??= now;
+      } else {
+        slowSince = undefined;
+      }
+
+      lastCheckAt = now;
+      lastCheckBytes = currentBytes;
+
+      if (slowSince !== undefined && now - slowSince >= durationMs) {
+        triggered = true;
+        message = `Slow connection reset after ${policy.slowSpeedDurationSeconds}s below ${threshold} B/s`;
+        controller.abort(new SlowSpeedResetError(message));
+      }
+    };
+
+    const timer = setInterval(check, intervalMs);
+    timer.unref?.();
+
+    return {
+      get triggered() {
+        return triggered;
+      },
+      get message() {
+        return message;
+      },
+      recordProgress(bytes) {
+        currentBytes = Math.max(0, Number(bytes ?? 0));
+        check();
+      },
+      stop() {
+        clearInterval(timer);
+      },
+      resetCount,
+    };
+  }
+
+  async updateAfterSlowReset(file, partPath, message, resetCount) {
+    const downloadedBytes = await sizeOf(partPath);
+    this.store.updateTransferFile(file.id, {
+      downloaded_bytes: downloadedBytes,
+      download_speed: 0,
+      status: 'downloading',
+      error_string: message,
+    });
+    this.activeFileRates.set(file.id, {
+      transferId: file.transfer_id,
+      bytesPerSecond: 0,
+    });
+    this.refreshTransferLocalMetrics(file.transfer_id);
+    logger.warn('slow file download reset', {
+      fileId: file.id,
+      putioFileId: file.putio_file_id,
+      downloadedBytes,
+      resetCount,
+      message,
+    });
   }
 
   updateLocalProgressMetrics(file, downloadedBytes, bytesPerSecond) {
