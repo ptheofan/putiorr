@@ -2,6 +2,7 @@
   "name": "putiorr",
   "version": "0.1.0",
   "description": "A stable put.io bridge that presents a Transmission RPC interface for Sonarr, Radarr, and the rest of the *arr family.",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "engines": {
