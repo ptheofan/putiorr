@@ -373,7 +373,7 @@ dashboard is the source of truth for per-file local download progress.
 | `PUTIORR_DEFAULT_RPC_PATH` | `/transmission/rpc` | Default Transmission RPC path |
 | `PUTIORR_PROFILES_JSON` | `[]` | Optional seed profiles as JSON |
 | `PUTIORR_WORKERS` | `4` | Concurrent local file downloads |
-| `PUTIORR_POLL_INTERVAL_MS` | `30000` | put.io polling interval, minimum 5000 |
+| `PUTIORR_POLL_INTERVAL_MS` | `30000` | Backend put.io polling interval, minimum 5000. The web UI receives updates over WebSocket. |
 | `PUTIORR_CLEANUP_REMOTE_FILES` | `true` | Delete put.io files/transfers after local completion |
 | `PUTIORR_RPC_USERNAME` | unset | Optional HTTP basic auth username |
 | `PUTIORR_RPC_PASSWORD` | unset | Optional HTTP basic auth password |

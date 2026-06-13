@@ -23,7 +23,6 @@ const el = {
   profileRowTemplate: document.querySelector('#profileRowTemplate'),
   downloadsList: document.querySelector('#downloadsList'),
   refreshButton: document.querySelector('#refreshButton'),
-  pollButton: document.querySelector('#pollButton'),
 };
 
 const oauth = {
@@ -751,15 +750,6 @@ el.addProfileButton.addEventListener('click', addProfileRow);
 el.refreshButton.addEventListener('click', () => {
   if (!requestStateRefresh()) {
     loadAll().catch((error) => setMessage(error.message, 'error'));
-  }
-});
-el.pollButton.addEventListener('click', async () => {
-  try {
-    await api('/api/poll', { method: 'POST', body: '{}' });
-    if (!requestStateRefresh()) await loadAll();
-    setMessage('put.io poll completed.', 'ok');
-  } catch (error) {
-    setMessage(error.message, 'error');
   }
 });
 
