@@ -11,16 +11,17 @@ library.
 The common target setup is:
 
 ```text
-put.io -> putiorr -> SSD staging folder -> Radarr/Sonarr import -> HDD/NAS library
+put.io -> putiorr -> SSD staging folder -> *arr import -> HDD/NAS library
 ```
 
 This keeps slow library storage out of the active download path while still
-letting Radarr, Sonarr, and similar apps move or hardlink/copy media exactly the
-way they normally do.
+letting Radarr, Sonarr, Lidarr, and similar apps move or hardlink/copy media
+exactly the way they normally do.
 
 ## Status
 
-This is early software. The current goal is reliability over feature breadth:
+Version 1 focuses on the core bridge workflow and reliability over feature
+breadth:
 
 - durable SQLite state
 - Transmission-compatible RPC endpoints
