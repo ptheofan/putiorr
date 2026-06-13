@@ -1,6 +1,6 @@
 {
   "name": "putiorr",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A stable put.io bridge that presents a Transmission RPC interface for Sonarr, Radarr, and the rest of the *arr family.",
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "node --watch --disable-warning=ExperimentalWarning src/main.js",
     "lint": "node scripts/lint.js",
-    "release:check": "node scripts/check-release-version.js",
+    "release:check": "pnpm release:gate",
+    "release:gate": "node scripts/release-gate.js",
     "start": "node --disable-warning=ExperimentalWarning src/main.js",
     "test": "node --disable-warning=ExperimentalWarning --test"
   }

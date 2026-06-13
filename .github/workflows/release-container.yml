@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,10 +34,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Check release version
+      - name: Run release gate
         env:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: pnpm release:check
+        run: pnpm release:gate
 
       - name: Run lint
         run: pnpm lint
@@ -55,6 +57,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3

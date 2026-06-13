@@ -1,0 +1,45 @@
+name: Release Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Optional release tag to validate, for example v1.0.1.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release-gate:
+    name: Release Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release gate
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: pnpm release:gate
+
+      - name: Run lint
+        run: pnpm lint
+
+      - name: Run tests
+        run: pnpm test
