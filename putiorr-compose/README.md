@@ -29,17 +29,22 @@ web UI with OAuth. Manual token paste remains available as a fallback.
 
 ## Layout
 
+The repository tracks placeholders only for shared download/state/library paths.
+The app config folders are created by Docker on your machine and are ignored by
+git.
+
 ```text
 putiorr-compose/data/putiorr-config # putiorr SQLite state
 putiorr-compose/data/putiorr        # SSD-style staging root shared by putiorr/Radarr/Sonarr/Lidarr
-putiorr-compose/data/radarr         # Radarr config
-putiorr-compose/data/sonarr         # Sonarr config
-putiorr-compose/data/lidarr         # Lidarr config
-putiorr-compose/data/prowlarr       # Prowlarr config
 putiorr-compose/data/movies         # Radarr final movie library path
 putiorr-compose/data/series         # Sonarr final series library path
 putiorr-compose/data/music          # Lidarr final music library path
 putiorr-compose/data/downloads      # spare shared downloads path
+
+putiorr-compose/data/radarr         # local-only Radarr config, ignored
+putiorr-compose/data/sonarr         # local-only Sonarr config, ignored
+putiorr-compose/data/lidarr         # local-only Lidarr config, ignored
+putiorr-compose/data/prowlarr       # local-only Prowlarr config, ignored
 ```
 
 On first boot, putiorr seeds three profiles:
