@@ -167,6 +167,17 @@ p {
   gap: 14px;
 }
 
+.policy-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) auto;
+  align-items: end;
+  gap: 14px;
+}
+
+.policy-actions {
+  justify-content: flex-end;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -554,6 +565,7 @@ td.center input {
   .topbar,
   .section-head,
   .form-grid,
+  .policy-grid,
   .oauth-panel {
     grid-template-columns: 1fr;
     flex-direction: column;

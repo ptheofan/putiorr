@@ -76,6 +76,22 @@ export function loadConfig(env = process.env, cwd = process.cwd(), options = {})
     seedProfiles: jsonFromEnv(sourceEnv.PUTIORR_PROFILES_JSON, []),
     workers: Math.max(1, intFromEnv(sourceEnv.PUTIORR_WORKERS, 4)),
     pollIntervalMs: Math.max(5_000, intFromEnv(sourceEnv.PUTIORR_POLL_INTERVAL_MS, 30_000)),
+    slowSpeedThresholdBytesPerSecond: Math.max(
+      0,
+      intFromEnv(sourceEnv.PUTIORR_SLOW_SPEED_THRESHOLD_BYTES_PER_SECOND, 0),
+    ),
+    slowSpeedDurationSeconds: Math.max(
+      0,
+      intFromEnv(sourceEnv.PUTIORR_SLOW_SPEED_DURATION_SECONDS, 120),
+    ),
+    slowSpeedGraceSeconds: Math.max(
+      0,
+      intFromEnv(sourceEnv.PUTIORR_SLOW_SPEED_GRACE_SECONDS, 30),
+    ),
+    slowSpeedMinSizeBytes: Math.max(
+      0,
+      intFromEnv(sourceEnv.PUTIORR_SLOW_SPEED_MIN_SIZE_BYTES, 100 * 1024 * 1024),
+    ),
     cleanupRemoteFiles: boolFromEnv(sourceEnv.PUTIORR_CLEANUP_REMOTE_FILES, true),
     rpcUsername: sourceEnv.PUTIORR_RPC_USERNAME ?? '',
     rpcPassword: sourceEnv.PUTIORR_RPC_PASSWORD ?? '',

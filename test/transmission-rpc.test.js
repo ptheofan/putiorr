@@ -128,6 +128,34 @@ function nextWebSocketJson(socket, predicate = () => true) {
   });
 }
 
+function collectWebSocketJson(socket, durationMs = 250) {
+  return new Promise((resolve, reject) => {
+    const messages = [];
+    const timeout = setTimeout(() => {
+      cleanup();
+      resolve(messages);
+    }, durationMs);
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.removeEventListener('message', onMessage);
+      socket.removeEventListener('error', onError);
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error('websocket error'));
+    };
+
+    const onMessage = (event) => {
+      messages.push(JSON.parse(String(event.data)));
+    };
+
+    socket.addEventListener('message', onMessage);
+    socket.addEventListener('error', onError);
+  });
+}
+
 test('Transmission RPC handshake and session-get', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
@@ -495,7 +523,29 @@ test('web API exposes settings and profile CRUD', async (t) => {
 
   const settings = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'));
   assert.equal(settings.status, 200);
-  assert.equal((await settings.json()).tokenConfigured, true);
+  const settingsBody = await settings.json();
+  assert.equal(settingsBody.tokenConfigured, true);
+  assert.equal(settingsBody.downloadPolicy.slowSpeedThresholdBytesPerSecond, 0);
+
+  const settingsUpdate = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      downloadPolicy: {
+        slowSpeedThresholdBytesPerSecond: 2048,
+        slowSpeedDurationSeconds: 45,
+        slowSpeedGraceSeconds: 10,
+        slowSpeedMinSizeBytes: 1048576,
+      },
+    }),
+  });
+  assert.equal(settingsUpdate.status, 200);
+  assert.deepEqual((await settingsUpdate.json()).downloadPolicy, {
+    slowSpeedThresholdBytesPerSecond: 2048,
+    slowSpeedDurationSeconds: 45,
+    slowSpeedGraceSeconds: 10,
+    slowSpeedMinSizeBytes: 1048576,
+  });
 
   const create = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles'), {
     method: 'POST',
@@ -556,7 +606,7 @@ test('web API starts and completes put.io OAuth flow', async (t) => {
   assert.equal(harness.store.getSetting('putio_token'), 'oauth-token-from-putio');
 });
 
-test('websocket streams dashboard state and profile updates', async (t) => {
+test('websocket streams only targeted download updates', async (t) => {
   const harness = await createHarness();
   const socket = new WebSocket(harness.url.replace('http://', 'ws://').replace('/transmission/rpc', '/api/ws'));
   t.after(async () => {
@@ -567,15 +617,18 @@ test('websocket streams dashboard state and profile updates', async (t) => {
 
   await waitForWebSocketOpen(socket);
   const initial = await nextWebSocketJson(socket);
-  assert.equal(initial.type, 'state');
+  assert.equal(initial.type, 'downloads');
   assert.equal(initial.reason, 'connect');
-  assert.equal(initial.settings.tokenConfigured, true);
-  assert.equal(initial.profiles.length, 1);
   assert.deepEqual(initial.downloads, []);
+  assert.equal(Object.hasOwn(initial, 'settings'), false);
+  assert.equal(Object.hasOwn(initial, 'profiles'), false);
 
   socket.send(JSON.stringify({ type: 'refresh' }));
   const refreshed = await nextWebSocketJson(socket, (message) => message.reason === 'refresh');
-  assert.equal(refreshed.type, 'state');
+  assert.equal(refreshed.type, 'downloads');
+  assert.deepEqual(refreshed.downloads, []);
+  assert.equal(Object.hasOwn(refreshed, 'settings'), false);
+  assert.equal(Object.hasOwn(refreshed, 'profiles'), false);
 
   const profile = harness.store.findProfileBySlug('default');
   const update = await fetch(harness.url.replace('/transmission/rpc', `/api/profiles/${profile.id}`), {
@@ -585,11 +638,13 @@ test('websocket streams dashboard state and profile updates', async (t) => {
   });
   assert.equal(update.status, 200);
 
-  const pushed = await nextWebSocketJson(socket, (message) => (
-    message.type === 'state'
-      && message.profiles?.some((item) => item.id === profile.id && item.name === 'Default Updated')
-  ));
-  assert.equal(pushed.reason, 'profiles');
+  const pushed = await collectWebSocketJson(socket);
+  for (const message of pushed) {
+    assert.equal(message.type, 'downloads');
+    assert.equal(Object.hasOwn(message, 'settings'), false);
+    assert.equal(Object.hasOwn(message, 'profiles'), false);
+    assert.notEqual(message.reason, 'profiles');
+  }
 });
 
 test('web UI includes development live reload hook', async (t) => {
