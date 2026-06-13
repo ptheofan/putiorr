@@ -1,0 +1,115 @@
+name: putiorr-stack
+
+services:
+  putiorr:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: dev
+    image: putiorr/local:dev
+    container_name: putiorr
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:-Europe/Athens}
+      PUTIORR_LISTEN_HOST: 0.0.0.0
+      PUTIORR_LISTEN_PORT: 9091
+      PUTIORR_LIVE_RELOAD: "true"
+      PUTIORR_STATE_PATH: /data/putiorr/putiorr.sqlite
+      PUTIORR_TARGET_DIR: /staged
+      PUTIORR_PUTIO_TOKEN: ${PUTIORR_PUTIO_TOKEN:-}
+      PUTIORR_PUTIO_APP_ID: ${PUTIORR_PUTIO_APP_ID:-3270}
+      PUTIORR_PROFILES_JSON: >
+        [
+          {
+            "name": "Radarr",
+            "type": "radarr",
+            "slug": "radarr",
+            "putio_folder_name": "movies",
+            "downloadAt": "/staged",
+            "rpc_path": "/radarr/transmission/rpc",
+            "enabled": true
+          },
+          {
+            "name": "Sonarr",
+            "type": "sonarr",
+            "slug": "sonarr",
+            "putio_folder_name": "series",
+            "downloadAt": "/staged",
+            "rpc_path": "/sonarr/transmission/rpc",
+            "enabled": true
+          }
+        ]
+    ports:
+      - "17010:9091"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const net=require('node:net'); const socket=net.connect(9091,'127.0.0.1'); socket.on('connect',()=>process.exit(0)); socket.on('error',()=>process.exit(1)); setTimeout(()=>process.exit(1),2000);"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    volumes:
+      - ./data/putiorr:/data/putiorr
+      - ./data/staged:/staged
+      - ./data/movies:/movies
+      - ./data/series:/series
+      - ../src:/app/src:ro
+      - ../package.json:/app/package.json:ro
+      - ../pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: putiorr-radarr
+    restart: unless-stopped
+    depends_on:
+      putiorr:
+        condition: service_healthy
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Athens}
+    ports:
+      - "17011:7878"
+    volumes:
+      - ./data/radarr:/config
+      - ./data/staged:/staged
+      - ./data/movies:/movies
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: putiorr-sonarr
+    restart: unless-stopped
+    depends_on:
+      putiorr:
+        condition: service_healthy
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Athens}
+    ports:
+      - "17012:8989"
+    volumes:
+      - ./data/sonarr:/config
+      - ./data/staged:/staged
+      - ./data/series:/series
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: putiorr-prowlarr
+    restart: unless-stopped
+    depends_on:
+      - radarr
+      - sonarr
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Athens}
+    ports:
+      - "17013:9696"
+    volumes:
+      - ./data/prowlarr:/config

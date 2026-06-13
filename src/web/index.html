@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>putiorr</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">p</span>
+          <span>putiorr</span>
+        </div>
+        <nav class="nav" aria-label="Main navigation">
+          <a href="#connection" class="nav-link active">Connection</a>
+          <a href="#profiles" class="nav-link">RR profiles</a>
+          <a href="#downloads" class="nav-link">Downloads</a>
+        </nav>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <h1>putiorr</h1>
+            <p>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</p>
+          </div>
+          <button id="refreshButton" class="button secondary" type="button">
+            <span aria-hidden="true">↻</span>
+            Refresh
+          </button>
+        </header>
+
+        <section id="connection" class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Put.io connection</h2>
+              <p id="connectionState">Checking connection state...</p>
+            </div>
+            <span id="connectionBadge" class="status neutral">Unknown</span>
+          </div>
+
+          <form id="settingsForm" class="form-grid">
+            <label>
+              OAuth token
+              <input id="putioToken" name="putioToken" type="password" autocomplete="off" placeholder="Paste a token to connect or rotate">
+            </label>
+            <div class="button-row">
+              <button id="oauthStartButton" class="button primary" type="button">
+                <span aria-hidden="true">↗</span>
+                Connect with put.io
+              </button>
+              <button id="testConnectionButton" class="button secondary" type="button">
+                <span aria-hidden="true">✓</span>
+                Test connection
+              </button>
+              <button class="button secondary" type="submit">
+                <span aria-hidden="true">●</span>
+                Save settings
+              </button>
+            </div>
+          </form>
+          <div id="oauthPanel" class="oauth-panel" hidden>
+            <div>
+              <div class="oauth-code" id="oauthCode">----</div>
+              <p>Open <a id="oauthLink" href="https://put.io/link" target="_blank" rel="noreferrer">put.io/link</a> and enter this code. This page will keep checking for authorization.</p>
+            </div>
+            <button id="oauthPollButton" class="button secondary" type="button">
+              <span aria-hidden="true">⟳</span>
+              Check now
+            </button>
+          </div>
+          <p id="settingsMessage" class="message" role="status"></p>
+        </section>
+
+        <section id="profiles" class="panel">
+          <div class="section-head">
+            <div>
+              <h2>RR profiles</h2>
+              <p>Give each app its own RPC endpoint, put.io folder, and download root.</p>
+            </div>
+            <button id="addProfileButton" class="button primary" type="button">
+              <span aria-hidden="true">＋</span>
+              Add profile
+            </button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="profiles-table">
+              <thead>
+                <tr>
+                  <th>App</th>
+                  <th>Type</th>
+                  <th>Put.io folder</th>
+                  <th>Download folder</th>
+                  <th>RPC endpoint</th>
+                  <th>On</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="profilesBody"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="downloads" class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Current downloads</h2>
+              <p>Combined put.io and local transfer state from the durable SQLite queue.</p>
+            </div>
+            <button id="pollButton" class="button secondary" type="button">
+              <span aria-hidden="true">⟳</span>
+              Poll put.io
+            </button>
+          </div>
+
+          <div id="downloadsList" class="downloads-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <template id="profileRowTemplate">
+      <tr>
+        <td><input data-field="name" type="text"></td>
+        <td>
+          <select data-field="type">
+            <option value="sonarr">Sonarr</option>
+            <option value="radarr">Radarr</option>
+            <option value="lidarr">Lidarr</option>
+            <option value="prowlarr">Prowlarr</option>
+            <option value="readarr">Readarr</option>
+            <option value="custom">Custom</option>
+          </select>
+        </td>
+        <td><input data-field="putio_folder_name" type="text"></td>
+        <td><input data-field="downloadAt" type="text"></td>
+        <td><input data-field="rpc_path" type="text"></td>
+        <td class="center"><input data-field="enabled" type="checkbox"></td>
+        <td class="actions">
+          <button data-action="save" class="icon-button" type="button" title="Save profile">Save</button>
+          <button data-action="delete" class="icon-button danger" type="button" title="Delete profile">Delete</button>
+        </td>
+      </tr>
+    </template>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "putiorr",
+  "version": "0.1.0",
+  "description": "A stable put.io bridge that presents a Transmission RPC interface for Sonarr, Radarr, and the rest of the *arr family.",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/main.js",
+    "start": "node --disable-warning=ExperimentalWarning src/main.js",
+    "test": "node --disable-warning=ExperimentalWarning --test"
+  }
+}
