@@ -32,6 +32,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Check release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: pnpm release:check
+
       - name: Run lint
         run: pnpm lint
 
