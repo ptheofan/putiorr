@@ -68,6 +68,37 @@ the putiorr UI.
 See [`putiorr-compose/README.md`](putiorr-compose/README.md) for the exact
 Radarr, Sonarr, Lidarr, and Prowlarr settings.
 
+## Container Images
+
+Release images are published to GitHub Container Registry:
+
+```text
+ghcr.io/ptheofan/putiorr
+```
+
+Publishing happens when a GitHub Release is published. Use a semver tag such as
+`v0.1.0`; the workflow builds the Dockerfile `production` target for
+`linux/amd64` and `linux/arm64`.
+
+Release tags produce image tags like:
+
+```text
+ghcr.io/ptheofan/putiorr:v0.1.0
+ghcr.io/ptheofan/putiorr:0.1.0
+ghcr.io/ptheofan/putiorr:0.1
+ghcr.io/ptheofan/putiorr:latest
+```
+
+Prereleases do not receive the `latest` tag.
+
+The release workflow runs the same gates as pull requests before publishing an
+image:
+
+```bash
+pnpm lint
+pnpm test
+```
+
 ## Typical NAS Layout
 
 Most real installs should share one staging path between putiorr and each *arr
@@ -98,16 +129,12 @@ Radarr container must have that same path mounted.
 
 ## Production Compose Example
 
-Until published images exist, build from a local checkout:
+After publishing a release, use the GHCR image:
 
 ```yaml
 services:
   putiorr:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: production
-    image: putiorr/local:latest
+    image: ghcr.io/ptheofan/putiorr:latest
     container_name: putiorr
     restart: unless-stopped
     environment:
@@ -370,6 +397,7 @@ Open <http://127.0.0.1:9091>.
 Run tests:
 
 ```bash
+pnpm lint
 pnpm test
 ```
 

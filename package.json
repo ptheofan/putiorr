@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "node --watch --disable-warning=ExperimentalWarning src/main.js",
+    "lint": "node scripts/lint.js",
     "start": "node --disable-warning=ExperimentalWarning src/main.js",
     "test": "node --disable-warning=ExperimentalWarning --test"
   }
