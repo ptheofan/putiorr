@@ -22,7 +22,8 @@ ENV NODE_ENV=development
 
 COPY src ./src
 
-RUN mkdir -p /data/putiorr /movies /series && chown -R node:node /data /movies /series
+RUN mkdir -p /data/putiorr-config /putiorr /movies /series /music \
+  && chown -R node:node /data /putiorr /movies /series /music
 
 USER node
 
@@ -36,7 +37,8 @@ ENV NODE_ENV=production
 COPY --from=prod-deps /app ./
 COPY src ./src
 
-RUN mkdir -p /data/putiorr /movies /series && chown -R node:node /data /movies /series
+RUN mkdir -p /data/putiorr-config /putiorr /movies /series /music \
+  && chown -R node:node /data /putiorr /movies /series /music
 
 USER node
 

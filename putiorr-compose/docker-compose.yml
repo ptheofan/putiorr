@@ -14,8 +14,8 @@ services:
       PUTIORR_LISTEN_HOST: 0.0.0.0
       PUTIORR_LISTEN_PORT: 9091
       PUTIORR_LIVE_RELOAD: "true"
-      PUTIORR_STATE_PATH: /data/putiorr/putiorr.sqlite
-      PUTIORR_TARGET_DIR: /staged
+      PUTIORR_STATE_PATH: /data/putiorr-config/putiorr.sqlite
+      PUTIORR_TARGET_DIR: /putiorr
       PUTIORR_PUTIO_TOKEN: ${PUTIORR_PUTIO_TOKEN:-}
       PUTIORR_PUTIO_APP_ID: ${PUTIORR_PUTIO_APP_ID:-3270}
       PUTIORR_PROFILES_JSON: >
@@ -24,8 +24,8 @@ services:
             "name": "Radarr",
             "type": "radarr",
             "slug": "radarr",
-            "putio_folder_name": "movies",
-            "downloadAt": "/staged",
+            "putio_folder_name": "putiorr",
+            "downloadAt": "/putiorr",
             "rpc_path": "/radarr/transmission/rpc",
             "enabled": true
           },
@@ -33,9 +33,18 @@ services:
             "name": "Sonarr",
             "type": "sonarr",
             "slug": "sonarr",
-            "putio_folder_name": "series",
-            "downloadAt": "/staged",
+            "putio_folder_name": "putiorr",
+            "downloadAt": "/putiorr",
             "rpc_path": "/sonarr/transmission/rpc",
+            "enabled": true
+          },
+          {
+            "name": "Lidarr",
+            "type": "lidarr",
+            "slug": "lidarr",
+            "putio_folder_name": "putiorr",
+            "downloadAt": "/putiorr",
+            "rpc_path": "/lidarr/transmission/rpc",
             "enabled": true
           }
         ]
@@ -54,10 +63,11 @@ services:
       retries: 20
       start_period: 10s
     volumes:
-      - ./data/putiorr:/data/putiorr
-      - ./data/staged:/staged
+      - ./data/putiorr-config:/data/putiorr-config
+      - ./data/putiorr:/putiorr
       - ./data/movies:/movies
       - ./data/series:/series
+      - ./data/music:/music
       - ../src:/app/src:ro
       - ../package.json:/app/package.json:ro
       - ../pnpm-lock.yaml:/app/pnpm-lock.yaml:ro
@@ -77,7 +87,7 @@ services:
       - "17011:7878"
     volumes:
       - ./data/radarr:/config
-      - ./data/staged:/staged
+      - ./data/putiorr:/putiorr
       - ./data/movies:/movies
 
   sonarr:
@@ -95,8 +105,26 @@ services:
       - "17012:8989"
     volumes:
       - ./data/sonarr:/config
-      - ./data/staged:/staged
+      - ./data/putiorr:/putiorr
       - ./data/series:/series
+
+  lidarr:
+    image: lscr.io/linuxserver/lidarr:latest
+    container_name: putiorr-lidarr
+    restart: unless-stopped
+    depends_on:
+      putiorr:
+        condition: service_healthy
+    environment:
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-Europe/Athens}
+    ports:
+      - "17014:8686"
+    volumes:
+      - ./data/lidarr:/config
+      - ./data/putiorr:/putiorr
+      - ./data/music:/music
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -105,6 +133,7 @@ services:
     depends_on:
       - radarr
       - sonarr
+      - lidarr
     environment:
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
