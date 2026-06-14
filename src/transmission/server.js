@@ -601,6 +601,9 @@ export class TransmissionRpcServer {
         return this.service.addTorrent(args, profile);
       case 'torrent-get':
         return this.service.getTorrents(args, profile);
+      case 'torrent-set':
+      case 'queue-move-top':
+        return {};
       case 'torrent-remove':
         return this.service.removeTorrents(args, profile);
       default:

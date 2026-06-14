@@ -255,7 +255,7 @@ export class TransferService {
         const targetDir = path.join(transferProfile.download_at, transfer.category ?? '');
         await deleteLocalData(targetDir, transfer.name);
       }
-      this.store.markTransferRemoved(transfer.id);
+      this.store.deleteTransfer(transfer.id);
       logger.info('torrent removed', {
         id: transfer.id,
         hash: transfer.hash,
@@ -323,6 +323,16 @@ export class TransferService {
       uploadRatio: totalSize > 0 ? row.uploaded_ever / totalSize : 0,
       error: row.error,
       errorString: row.error_string,
+      isFinished: progress.leftUntilDone === 0,
+      secondsDownloading: 0,
+      secondsSeeding: row.lifecycle === 'processed' ? 1 : 0,
+      seedRatioLimit: 0,
+      seedRatioMode: row.lifecycle === 'processed' ? 1 : 0,
+      seedIdleLimit: 0,
+      seedIdleMode: row.lifecycle === 'processed' ? 1 : 0,
+      fileCount: files.length,
+      'file-count': files.length,
+      labels: row.category ? [row.category] : [],
       files: files.map((file) => this.toTransmissionFile(row, file)),
       fileStats: files.map((file) => this.toTransmissionFileStats(row, file)),
     };

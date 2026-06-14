@@ -86,6 +86,7 @@ export class DownloadManager {
   }
 
   async pollOnce() {
+    await this.pruneProcessedTransfersMissingLocalData();
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {
@@ -134,6 +135,67 @@ export class DownloadManager {
 
     this.store.updateTransfer(updated.id, { total_size: totalSize });
     await this.finalizeTransferIfComplete(updated.id);
+  }
+
+  async pruneProcessedTransfersMissingLocalData() {
+    const transfers = this.store.listActiveTransfers()
+      .filter((transfer) => transfer.lifecycle === 'processed');
+
+    for (const transfer of transfers) {
+      const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+      if (!profile) continue;
+
+      let hasLocalData;
+      try {
+        hasLocalData = await this.hasLocalTransferData(profile, transfer);
+      } catch (error) {
+        logger.warn('failed to inspect processed transfer local data', {
+          transferId: transfer.id,
+          name: transfer.name,
+          error: error.message,
+        });
+        continue;
+      }
+
+      if (hasLocalData) continue;
+
+      if (this.service.getPutioToken()) {
+        await this.service.removeRemoteTransfer(transfer);
+      }
+      this.store.deleteTransfer(transfer.id);
+      logger.info('processed transfer pruned after local data disappeared', {
+        transferId: transfer.id,
+        name: transfer.name,
+      });
+    }
+  }
+
+  async hasLocalTransferData(profile, transfer) {
+    const files = this.store.listFilesForTransfer(transfer.id);
+    if (files.length === 0) {
+      return this.pathExists(resolveInside(profile.download_at, transfer.category ?? '', transfer.name));
+    }
+
+    for (const file of files) {
+      const targetPath = resolveInside(
+        profile.download_at,
+        transfer.category ?? '',
+        transfer.name,
+        file.relative_path,
+      );
+      if (await this.pathExists(targetPath)) return true;
+    }
+    return false;
+  }
+
+  async pathExists(filePath) {
+    try {
+      await stat(filePath);
+      return true;
+    } catch (error) {
+      if (error.code === 'ENOENT') return false;
+      throw error;
+    }
   }
 
   async workerLoop(index) {

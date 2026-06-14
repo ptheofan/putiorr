@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DownloadManager } from '../src/download/manager.js';
@@ -11,6 +11,8 @@ import { TransferService } from '../src/transfer/service.js';
 class FakePutio {
   constructor(remoteTransfers = []) {
     this.remoteTransfers = remoteTransfers;
+    this.deletedFiles = [];
+    this.deletedTransfers = [];
   }
 
   async ensureFolder() {
@@ -19,6 +21,14 @@ class FakePutio {
 
   async listTransfers() {
     return this.remoteTransfers;
+  }
+
+  async deleteFile(id) {
+    this.deletedFiles.push(id);
+  }
+
+  async deleteTransfer(id) {
+    this.deletedTransfers.push(id);
   }
 }
 
@@ -37,7 +47,7 @@ async function createHarness(remoteTransfers = []) {
     store,
     putioFactory: () => putio,
   });
-  return { config, store, service };
+  return { config, store, service, putio };
 }
 
 function createDownloadingTransfer(store) {
@@ -211,6 +221,64 @@ test('put.io refresh preserves local speed and ETA while staged files are downlo
     assert.equal(updated.lifecycle, 'downloading');
     assert.equal(updated.download_speed, 300);
     assert.equal(updated.eta, 2);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('poll prunes processed transfers after local staging data disappears', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 22,
+      putio_file_id: 23,
+      save_parent_id: 42,
+      hash: 'prunemissinglocalhash',
+      name: 'Prune.Missing.Local.Release',
+      category: 'radarr',
+      download_dir: path.join(harness.config.targetDir, 'radarr'),
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+      total_size: 5,
+      downloaded_ever: 5,
+    });
+    harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 24,
+      relative_path: 'movie.mkv',
+      size: 5,
+      downloaded_bytes: 5,
+      status: 'complete',
+    });
+
+    const stagedFile = path.join(
+      harness.config.targetDir,
+      'radarr',
+      'Prune.Missing.Local.Release',
+      'movie.mkv',
+    );
+    await mkdir(path.dirname(stagedFile), { recursive: true });
+    await writeFile(stagedFile, 'movie');
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await manager.pollOnce();
+    assert.equal(harness.store.findTransferById(transfer.id).id, transfer.id);
+
+    await unlink(stagedFile);
+    await manager.pollOnce();
+
+    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.deepEqual(harness.putio.deletedFiles, [23]);
+    assert.deepEqual(harness.putio.deletedTransfers, [22]);
+    assert.deepEqual(harness.service.listDownloads(), []);
   } finally {
     harness.store.close();
   }

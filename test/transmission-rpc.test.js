@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
+import { TRANSMISSION_STATUS } from '../src/transmission/progress.js';
 import { TransmissionRpcServer } from '../src/transmission/server.js';
 
 class FakePutio {
@@ -257,6 +258,7 @@ test('torrent-remove deletes remote resources and hides transfer', async (t) => 
       arguments: { filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release' },
     }),
   });
+  const transfer = harness.store.findTransferByHash('ABCDEF');
 
   const removeResponse = await fetch(harness.url, {
     method: 'POST',
@@ -272,6 +274,7 @@ test('torrent-remove deletes remote resources and hides transfer', async (t) => 
   assert.equal(removeResponse.status, 200);
   assert.deepEqual(harness.putio.deletedFiles, [88]);
   assert.deepEqual(harness.putio.deletedTransfers, [77]);
+  assert.equal(harness.store.findTransferById(transfer.id), undefined);
 
   const getResponse = await fetch(harness.url, {
     method: 'POST',
@@ -283,6 +286,54 @@ test('torrent-remove deletes remote resources and hides transfer', async (t) => 
   });
   const getBody = await getResponse.json();
   assert.deepEqual(getBody.arguments.torrents, []);
+});
+
+test('torrent-remove with delete-local-data deletes local staging files', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+
+  await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: {
+        filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+        'download-dir': path.join(harness.config.targetDir, 'radarr'),
+      },
+    }),
+  });
+
+  const stagedPath = path.join(harness.config.targetDir, 'radarr', 'Example.Release');
+  await mkdir(stagedPath, { recursive: true });
+  await writeFile(path.join(stagedPath, 'Example.Release.mkv'), 'movie');
+
+  const removeResponse = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-remove',
+      arguments: {
+        ids: ['ABCDEF'],
+        'delete-local-data': true,
+      },
+    }),
+  });
+
+  assert.equal(removeResponse.status, 200);
+  await assert.rejects(() => stat(stagedPath), { code: 'ENOENT' });
 });
 
 test('profile-specific RPC path uses that profile download directory', async (t) => {
@@ -417,6 +468,82 @@ test('torrent-get reports weighted progress consistently for Sonarr', async (t) 
       { bytesCompleted: 400, wanted: true, priority: 0 },
       { bytesCompleted: 400, wanted: true, priority: 0 },
     ],
+  }]);
+});
+
+test('processed torrents report seed goal reached for Radarr cleanup', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 99,
+    putio_file_id: 199,
+    save_parent_id: 42,
+    hash: 'processedhash',
+    name: 'Processed.Release',
+    category: 'radarr',
+    download_dir: path.join(harness.config.targetDir, 'radarr'),
+    lifecycle: 'processed',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 1000,
+    downloaded_ever: 1000,
+    eta: -1,
+  });
+  harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 200,
+    relative_path: 'Processed.Release.mkv',
+    size: 1000,
+    downloaded_bytes: 1000,
+    status: 'complete',
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+  const response = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-get',
+      arguments: {
+        fields: [
+          'id',
+          'status',
+          'leftUntilDone',
+          'isFinished',
+          'secondsSeeding',
+          'seedIdleLimit',
+          'seedIdleMode',
+          'seedRatioLimit',
+          'seedRatioMode',
+          'labels',
+        ],
+      },
+    }),
+  });
+  const body = await response.json();
+
+  assert.equal(body.result, 'success');
+  assert.deepEqual(body.arguments.torrents, [{
+    id: transfer.id,
+    status: TRANSMISSION_STATUS.seed,
+    leftUntilDone: 0,
+    isFinished: true,
+    secondsSeeding: 1,
+    seedIdleLimit: 0,
+    seedIdleMode: 1,
+    seedRatioLimit: 0,
+    seedRatioMode: 1,
+    labels: ['radarr'],
   }]);
 });
 
