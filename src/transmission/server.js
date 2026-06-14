@@ -14,6 +14,8 @@ const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../w
 const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const PUTIO_SWAGGER_APP_ID = '3270';
+const OAUTH_APP_ID_SETTING = 'putio_oauth_app_id';
+const OAUTH_RELAY_URL_SETTING = 'putio_oauth_relay_url';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -88,6 +90,35 @@ function websocketFrame(payload, opcode = 0x1) {
 function firstHeaderValue(value) {
   if (Array.isArray(value)) return firstHeaderValue(value[0]);
   return String(value ?? '').split(',')[0].trim();
+}
+
+function normalizeOAuthAppId(value) {
+  return String(value ?? '').trim();
+}
+
+function normalizeOAuthRelayUrl(value) {
+  const relayUrl = String(value ?? '').trim().replace(/\/+$/, '');
+  if (!relayUrl) return '';
+  const parsed = new URL(relayUrl);
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    throw new Error('Put.io OAuth relay URL must use http or https');
+  }
+  return parsed.toString().replace(/\/+$/, '');
+}
+
+function normalizePutioOAuthSettingsInput(input) {
+  const source = input ?? {};
+  const output = {};
+  if (source.reset === true) output.reset = true;
+  if (source.appId !== undefined) {
+    const appId = normalizeOAuthAppId(source.appId);
+    if (!appId) throw new Error('Put.io OAuth app id is required');
+    output.appId = appId;
+  }
+  if (source.relayUrl !== undefined) {
+    output.relayUrl = normalizeOAuthRelayUrl(source.relayUrl);
+  }
+  return output;
 }
 
 function encodeOAuthState(payload) {
@@ -222,10 +253,34 @@ export class TransmissionRpcServer {
     }
   }
 
-  createOAuthState({ callbackUrl } = {}) {
+  oauthSettings() {
+    const storedAppId = this.service.store.getSetting(OAUTH_APP_ID_SETTING);
+    const storedRelayUrl = this.service.store.getSetting(OAUTH_RELAY_URL_SETTING);
+    const appId = storedAppId !== undefined
+      ? normalizeOAuthAppId(storedAppId)
+      : this.config.putioAppId;
+    const relayUrl = storedRelayUrl !== undefined
+      ? normalizeOAuthRelayUrl(storedRelayUrl)
+      : this.config.putioOAuthRelayUrl;
+    return {
+      appId,
+      relayUrl,
+      defaultAppId: this.config.putioAppId,
+      defaultRelayUrl: this.config.putioOAuthRelayUrl,
+      appIdOverridden: storedAppId !== undefined,
+      relayUrlOverridden: storedRelayUrl !== undefined,
+    };
+  }
+
+  oauthClient(appId = this.oauthSettings().appId) {
+    if (!this.oauth?.appId || this.oauth.appId === appId) return this.oauth;
+    return new PutioOAuthClient({ appId });
+  }
+
+  createOAuthState({ callbackUrl, relayUrl } = {}) {
     this.cleanupOAuthStates();
     const nonce = crypto.randomBytes(24).toString('hex');
-    const state = this.config.putioOAuthRelayUrl
+    const state = relayUrl
       ? encodeOAuthState({
           v: 1,
           nonce,
@@ -259,7 +314,7 @@ export class TransmissionRpcServer {
   }
 
   putioAuthorizeRedirectUri() {
-    return this.config.putioOAuthRelayUrl || undefined;
+    return this.oauthSettings().relayUrl || undefined;
   }
 
   async handle(req, res) {
@@ -346,6 +401,20 @@ export class TransmissionRpcServer {
           this.service.putioClient = undefined;
           this.service.putioToken = undefined;
         }
+        if (body.putioOAuth !== undefined) {
+          const oauthSettings = normalizePutioOAuthSettingsInput(body.putioOAuth);
+          if (oauthSettings.reset) {
+            this.service.store.deleteSetting(OAUTH_APP_ID_SETTING);
+            this.service.store.deleteSetting(OAUTH_RELAY_URL_SETTING);
+          } else {
+            if (oauthSettings.appId !== undefined) {
+              this.service.store.setSetting(OAUTH_APP_ID_SETTING, oauthSettings.appId);
+            }
+            if (oauthSettings.relayUrl !== undefined) {
+              this.service.store.setSetting(OAUTH_RELAY_URL_SETTING, oauthSettings.relayUrl);
+            }
+          }
+        }
         if (body.downloadPolicy !== undefined) {
           saveDownloadPolicyToStore(this.service.store, body.downloadPolicy, this.config);
         }
@@ -372,17 +441,18 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'POST' && requestPath === '/api/oauth/start') {
+        const oauthSettings = this.oauthSettings();
         const redirectUri = this.oauthRedirectUri(req);
-        const putioRedirectUri = this.putioAuthorizeRedirectUri() || redirectUri;
-        if (this.config.putioAppId === PUTIO_SWAGGER_APP_ID) {
+        const putioRedirectUri = oauthSettings.relayUrl || redirectUri;
+        if (oauthSettings.appId === PUTIO_SWAGGER_APP_ID) {
           throw new Error(
             `Put.io OAuth redirect requires your own put.io OAuth app. `
             + `The default app id ${PUTIO_SWAGGER_APP_ID} is put.io's Swagger test API and will reject `
-            + `${putioRedirectUri}. Create a put.io app, add that callback URL, set PUTIORR_PUTIO_APP_ID, and restart putiorr.`,
+            + `${putioRedirectUri}. Create a put.io app, add that callback URL, then change the App Id under Advanced or set PUTIORR_PUTIO_APP_ID.`,
           );
         }
-        const state = this.createOAuthState({ callbackUrl: redirectUri });
-        const result = this.oauth.startRedirect({ redirectUri: putioRedirectUri, state });
+        const state = this.createOAuthState({ callbackUrl: redirectUri, relayUrl: oauthSettings.relayUrl });
+        const result = this.oauthClient(oauthSettings.appId).startRedirect({ redirectUri: putioRedirectUri, state });
         jsonResponse(res, 200, {
           mode: 'redirect',
           ...result,
@@ -407,7 +477,7 @@ export class TransmissionRpcServer {
 
       if (method === 'POST' && requestPath === '/api/oauth/poll') {
         const body = await readJsonBody(req);
-        const result = await this.oauth.poll(String(body.code ?? '').trim());
+        const result = await this.oauthClient().poll(String(body.code ?? '').trim());
         if (result.status === 'OK' && result.oauthToken) {
           this.service.store.setSetting('putio_token', result.oauthToken);
           this.service.putioClient = undefined;
@@ -513,22 +583,28 @@ export class TransmissionRpcServer {
 
   settingsResponse(req) {
     const defaultDownloadProfile = this.service.store.findDefaultDownloadProfile();
+    const oauthSettings = this.oauthSettings();
     const redirectUri = req
       ? this.oauthRedirectUri(req)
       : new URL(
           '/api/oauth/callback',
           this.config.publicUrl || `http://127.0.0.1:${this.config.listenPort}`,
         ).toString();
-    const putioRedirectUri = this.putioAuthorizeRedirectUri() || redirectUri;
+    const putioRedirectUri = oauthSettings.relayUrl || redirectUri;
     return {
       tokenConfigured: Boolean(this.service.getPutioToken()),
       putioOAuth: {
-        appId: this.config.putioAppId,
+        appId: oauthSettings.appId,
+        defaultAppId: oauthSettings.defaultAppId,
+        appIdOverridden: oauthSettings.appIdOverridden,
         redirectUri,
         putioRedirectUri,
-        relayUrl: this.config.putioOAuthRelayUrl,
-        mode: this.config.putioOAuthRelayUrl ? 'hosted-relay' : 'self-hosted',
-        requiresCustomApp: this.config.putioAppId === PUTIO_SWAGGER_APP_ID,
+        relayUrl: oauthSettings.relayUrl,
+        defaultRelayUrl: oauthSettings.defaultRelayUrl,
+        relayUrlOverridden: oauthSettings.relayUrlOverridden,
+        overridesConfigured: oauthSettings.appIdOverridden || oauthSettings.relayUrlOverridden,
+        mode: oauthSettings.relayUrl ? 'hosted-relay' : 'self-hosted',
+        requiresCustomApp: oauthSettings.appId === PUTIO_SWAGGER_APP_ID,
       },
       defaultDownloadProfileId: defaultDownloadProfile?.id,
       downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),

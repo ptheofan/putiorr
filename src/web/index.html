@@ -96,23 +96,55 @@
           <button id="putioTokenTab" class="putio-tab" type="button" role="tab" aria-selected="false" aria-controls="putioTokenPanel" data-putio-tab="token" tabindex="-1">Direct Token</button>
         </div>
 
+        <div id="settingsMessageBox" class="message-box" data-tone="neutral" hidden>
+          <p id="settingsMessage" class="message" role="status"></p>
+          <button id="settingsMessageClose" class="icon-button" type="button" aria-label="Dismiss message">×</button>
+        </div>
+
         <section id="putioOauthPanel" class="putio-tab-panel wizard-step" role="tabpanel" aria-labelledby="putioOauthTab" data-putio-panel="oauth">
-          <div class="step-label">Connect</div>
-          <div class="button-row putio-connect-actions">
+          <div id="putioOauthStepLabel" class="step-label">Connect</div>
+          <div id="putioConnectPanel" class="button-row putio-connect-actions">
             <button id="oauthStartButton" class="button primary" type="button">
               <span aria-hidden="true">↗</span>
               Connect with put.io
             </button>
-            <button id="testConnectionButton" class="button secondary" type="button">
-              <span aria-hidden="true">✓</span>
-              Test connection
-            </button>
-            <button id="putioDisconnectButton" class="button danger" type="button">
-              Disconnect
-            </button>
+          </div>
+          <div id="putioConnectedPanel" class="putio-connected-panel" hidden>
+            <span class="status-dot" aria-hidden="true"></span>
+            <div>
+              <span>Connected account</span>
+              <strong id="putioConnectedAccount">Checking account...</strong>
+            </div>
           </div>
 
-          <p id="oauthSetupHint" class="oauth-setup-hint"></p>
+          <div class="putio-advanced-summary">
+            <span id="putioAdvancedSummary">Using default OAuth relay settings</span>
+            <button id="togglePutioAdvancedButton" class="text-button" type="button">change OAuth settings</button>
+          </div>
+
+          <section id="putioAdvancedPanel" class="putio-advanced" aria-labelledby="putioAdvancedTitle" hidden>
+            <div class="putio-advanced-head">
+              <div>
+                <h3 id="putioAdvancedTitle">Advanced</h3>
+                <p>Override the baked OAuth defaults for this instance.</p>
+              </div>
+              <button id="resetPutioOAuthSettingsButton" class="button secondary" type="button">Reset</button>
+            </div>
+            <p id="oauthSetupHint" class="oauth-setup-hint"></p>
+            <div class="field-pair">
+              <label>
+                OAuth relay url
+                <input id="putioOAuthRelayUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://ptheofan.github.io/putiorr/putio-oauth-relay.html">
+              </label>
+              <label>
+                App Id
+                <input id="putioOAuthAppId" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="9354">
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="savePutioOAuthSettingsButton" class="button secondary" type="button">Save OAuth settings</button>
+            </div>
+          </section>
 
           <div id="oauthPanel" class="oauth-panel" hidden>
             <div>
@@ -135,10 +167,15 @@
           </label>
         </section>
 
-        <p id="settingsMessage" class="message modal-message" role="status"></p>
-
         <div class="modal-actions">
           <button class="button secondary" type="button" data-action="cancel-putio">Cancel</button>
+          <button id="testConnectionButton" class="button secondary" type="button">
+            <span aria-hidden="true">✓</span>
+            Test connection
+          </button>
+          <button id="putioDisconnectButton" class="button danger" type="button">
+            Disconnect
+          </button>
           <button id="savePutioTokenButton" class="button primary" type="submit">
             Save
           </button>

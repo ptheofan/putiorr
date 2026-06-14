@@ -208,13 +208,15 @@ Register this callback URL in the put.io app:
 https://ptheofan.github.io/putiorr/putio-oauth-relay.html
 ```
 
-These values are baked into the image and can still be overridden by forks or
-custom builds:
+These values are baked into the image and should not be added to normal
+`docker-compose.yml` environment blocks. Forks or custom builds can override
+them with Docker build arguments when they intentionally use a different put.io
+OAuth app or relay.
 
-```yaml
-PUTIORR_PUTIO_APP_ID: "9354"
-PUTIORR_PUTIO_OAUTH_RELAY_URL: https://ptheofan.github.io/putiorr/putio-oauth-relay.html
-```
+The Put.io connection dialog also has an **Advanced** section with editable
+OAuth relay URL and App Id fields. Saving there stores an instance-level
+override in the SQLite state database. Reset clears that override and restores
+the baked defaults.
 
 Only the put.io **Client ID** is public and safe to bake in. Do not put the
 client secret or the app owner's OAuth token in GitHub Actions, GitHub Pages,
