@@ -3,7 +3,7 @@ import { mkdir, rename, stat, unlink } from 'node:fs/promises';
 import { once } from 'node:events';
 import path from 'node:path';
 import { logger } from '../logger.js';
-import { downloadPolicyFromStore, isSlowSpeedResetEnabled } from './policy.js';
+import { downloadPolicyForContext, isSlowSpeedResetEnabled } from './policy.js';
 import { fileExistsWithSize, normalizeRelativePath, resolveInside } from './paths.js';
 
 const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
@@ -430,7 +430,7 @@ export class DownloadManager {
   }
 
   createSlowSpeedGuard(file, controller, initialBytes, resetCount) {
-    const policy = downloadPolicyFromStore(this.store, this.config);
+    const policy = this.downloadPolicyForFile(file);
     const fileSize = Number(file.size ?? 0);
     if (!isSlowSpeedResetEnabled(policy, fileSize)) return undefined;
 
@@ -493,6 +493,12 @@ export class DownloadManager {
       },
       resetCount,
     };
+  }
+
+  downloadPolicyForFile(file) {
+    const transfer = this.store.findTransferById(file.transfer_id);
+    const profile = transfer ? this.store.findProfileById(transfer.profile_id) : undefined;
+    return downloadPolicyForContext(this.store, this.config, { profile });
   }
 
   async updateAfterSlowReset(file, partPath, message, resetCount) {

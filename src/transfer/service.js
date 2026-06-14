@@ -378,6 +378,9 @@ export class TransferService {
   listDownloads() {
     return this.store.listActiveTransfers().map((row) => {
       const profile = this.store.findProfileById(row.profile_id) ?? this.getDefaultProfile();
+      const downloadProfile = profile
+        ? this.store.findDownloadProfileById(profile.download_profile_id) ?? this.store.findDefaultDownloadProfile()
+        : this.store.findDefaultDownloadProfile();
       const stats = this.store.getTransferFileStats(row.id);
       const fileItems = this.store.listFilesForTransfer(row.id).map((file) => {
         const size = Number(file.size ?? 0);
@@ -403,6 +406,8 @@ export class TransferService {
         profileId: profile?.id,
         profileName: profile?.name ?? 'Unknown',
         profileType: profile?.type ?? 'custom',
+        downloadProfileId: downloadProfile?.id,
+        downloadProfileName: downloadProfile?.name ?? 'Default',
         putioFolder: profile?.putio_folder_name ?? '',
         downloadAt: profile ? path.join(profile.download_at, row.category ?? '') : '',
         lifecycle: row.lifecycle,
