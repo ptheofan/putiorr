@@ -4,8 +4,15 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import semver from 'semver';
 
 const root = new URL('..', import.meta.url);
+const currentVersion = JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).version;
+const currentTag = `v${currentVersion}`;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function runGate(env = {}) {
   return spawnSync(process.execPath, ['scripts/release-gate.js'], {
@@ -13,8 +20,8 @@ function runGate(env = {}) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      RELEASE_TAG: 'v1.1.0',
-      RELEASE_GATE_LATEST_RELEASE_TAG: 'v1.1.0',
+      RELEASE_TAG: currentTag,
+      RELEASE_GATE_LATEST_RELEASE_TAG: currentTag,
       ...env,
     },
   });
@@ -24,7 +31,7 @@ test('release gate passes for current release metadata', () => {
   const result = runGate();
 
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Release gate passed for v1\.1\.0/);
+  assert.match(result.stdout, new RegExp(`Release gate passed for ${escapeRegExp(currentTag)}`));
 });
 
 test('release gate does not require README version examples', () => {
@@ -41,18 +48,15 @@ test('release gate does not require README version examples', () => {
 });
 
 test('release gate rejects package versions older than latest release', () => {
-  const scratch = mkdtempSync(path.join(tmpdir(), 'putiorr-release-gate-'));
-  const stalePackage = path.join(scratch, 'package.json');
-  const current = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
-
-  writeFileSync(stalePackage, current.replace('"version": "1.1.0"', '"version": "1.0.2"'));
+  const newerTag = `v${semver.inc(currentVersion, 'minor')}`;
 
   const result = runGate({
-    RELEASE_GATE_PACKAGE_JSON: stalePackage,
-    RELEASE_TAG: 'v1.0.2',
-    RELEASE_GATE_LATEST_RELEASE_TAG: 'v1.1.0',
+    RELEASE_GATE_LATEST_RELEASE_TAG: newerTag,
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /package\.json version 1\.0\.2 is older than latest GitHub release v1\.1\.0/);
+  assert.match(
+    result.stderr,
+    new RegExp(`package\\.json version ${escapeRegExp(currentVersion)} is older than latest GitHub release ${escapeRegExp(newerTag)}`),
+  );
 });
