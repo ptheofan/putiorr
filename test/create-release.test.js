@@ -115,3 +115,35 @@ test('release create updates package metadata from positional release tag', () =
   assert.match(result.stdout, /Release metadata is prepared for v1\.3\.0/);
   assert.doesNotMatch(result.stdout, /gh release create/);
 });
+
+test('release create reverts the version bump when a check fails', () => {
+  const scratch = path.join(tmpdir(), `putiorr-release-create-${Date.now()}-revert`);
+  const bin = path.join(scratch, 'bin');
+  const packageJson = path.join(scratch, 'package.json');
+  mkdirSync(bin, { recursive: true });
+  writePackageJson(packageJson);
+
+  writeFakeGit(bin);
+  // Pass the gate and lint, then fail the test step so the script must revert.
+  writeExecutable(path.join(bin, 'pnpm'), `
+const args = process.argv.slice(2).join(' ');
+if (args === 'release:gate' || args === 'lint') process.exit(0);
+if (args === 'test') process.exit(1);
+console.error('unexpected pnpm ' + args);
+process.exit(1);
+`);
+
+  const result = spawnSync(process.execPath, ['scripts/create-release.js', 'v1.3.0'], {
+    cwd: root,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+      RELEASE_CREATE_PACKAGE_JSON: packageJson,
+    },
+  });
+
+  assert.notEqual(result.status, 0);
+  assert.equal(JSON.parse(readFileSync(packageJson, 'utf8')).version, '1.1.0');
+  assert.match(result.stderr, /Reverted package\.json/);
+});

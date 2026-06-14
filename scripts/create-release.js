@@ -15,6 +15,9 @@ creating the GitHub release so that metadata can be committed first.
 
 Options:
   --yes                 Create the release when metadata is already committed.
+  --dry-run             Print the gh release command without creating it,
+                        even when --yes is passed. This is also the default
+                        when --yes is omitted.
   --publish             Publish the release instead of creating a draft.
   --prerelease          Mark the release as a prerelease.
   --tag <tag>           Release tag. Same as the positional release tag.
@@ -227,12 +230,31 @@ checkCleanGit(options);
 checkMain(options);
 if (!options.skipFetch) run('git', ['fetch', '--tags', 'origin', 'main']);
 const head = checkUpToDate(options);
+const previousPackageJson = readFileSync(packageJsonPath(), 'utf8');
 const metadataChanged = writePackageVersion(tagVersion);
 
+function revertMetadataIfChanged() {
+  if (!metadataChanged) return;
+  writeFileSync(packageJsonPath(), previousPackageJson);
+  console.error('Reverted package.json to its previous version after a failed pre-release check.');
+}
+
 if (!options.skipChecks) {
-  run('pnpm', ['release:gate'], { env: { RELEASE_TAG: tag } });
-  run('pnpm', ['lint']);
-  run('pnpm', ['test']);
+  // The release gate validates package.json against the tag, so checks must run
+  // after the version bump. Revert the bump if any check fails so a failed run
+  // never leaves the working tree dirty.
+  const checks = [
+    { command: 'pnpm', args: ['release:gate'], env: { RELEASE_TAG: tag } },
+    { command: 'pnpm', args: ['lint'] },
+    { command: 'pnpm', args: ['test'] },
+  ];
+  for (const check of checks) {
+    const result = run(check.command, check.args, { allowFailure: true, env: check.env });
+    if (result.status !== 0) {
+      revertMetadataIfChanged();
+      process.exit(result.status ?? 1);
+    }
+  }
 }
 
 if (metadataChanged) {
