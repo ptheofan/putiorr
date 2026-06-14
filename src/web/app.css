@@ -190,6 +190,18 @@ label {
   font-weight: 700;
 }
 
+.field-control {
+  display: grid;
+  gap: 7px;
+  color: #2c3a3d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field-label {
+  min-height: 16px;
+}
+
 input,
 select {
   width: 100%;
@@ -205,6 +217,77 @@ input:focus,
 select:focus {
   outline: 2px solid rgba(15, 118, 110, 0.22);
   border-color: var(--accent);
+}
+
+.byte-input {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.byte-input:focus-within {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  border-color: var(--accent);
+}
+
+.byte-input input,
+.byte-input select {
+  min-height: 36px;
+  border: 0;
+  border-radius: 0;
+  outline: 0;
+  background: transparent;
+}
+
+.byte-input input:focus,
+.byte-input select:focus {
+  outline: 0;
+  border-color: transparent;
+}
+
+.byte-input input[type="number"] {
+  min-width: 0;
+  padding-left: 8px;
+}
+
+.byte-input select {
+  width: auto;
+  min-width: 82px;
+  border-left: 1px solid #edf1f2;
+  color: #2c3a3d;
+  font-weight: 750;
+}
+
+.byte-disable {
+  display: inline-flex;
+  grid-template-columns: none;
+  flex-direction: row;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-right: 1px solid #edf1f2;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.byte-disable input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.byte-input.is-disabled input[type="number"],
+.byte-input.is-disabled select {
+  color: var(--muted);
+  background: #f7faf9;
 }
 
 .button-row {

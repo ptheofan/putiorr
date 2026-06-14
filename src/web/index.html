@@ -266,23 +266,47 @@
               <div class="step-label">Slow-speed reset</div>
               <div class="field-pair">
                 <label>
-                  Slow threshold
-                  <input id="downloadSlowSpeedThreshold" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes per second">
+                  Startup grace
+                  <input id="downloadSlowSpeedGrace" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
                 </label>
+                <div class="field-control" data-help-field="downloadSlowSpeedMinSize">
+                  <span id="downloadSlowSpeedMinSizeLabel" class="field-label">Ignore below</span>
+                  <div class="byte-input">
+                    <label class="byte-disable" title="Disable ignore-below size">
+                      <input id="downloadSlowSpeedMinSizeDisabled" type="checkbox" aria-label="Disable ignore-below size">
+                      <span>Off</span>
+                    </label>
+                    <input id="downloadSlowSpeedMinSizeAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedMinSizeLabel" placeholder="100">
+                    <select id="downloadSlowSpeedMinSizeUnit" aria-label="Ignore below unit">
+                      <option value="bytes">bytes</option>
+                      <option value="mb">MB</option>
+                      <option value="gb">GB</option>
+                    </select>
+                  </div>
+                  <input id="downloadSlowSpeedMinSize" type="hidden">
+                </div>
+              </div>
+              <div class="field-pair">
                 <label>
                   Duration
                   <input id="downloadSlowSpeedDuration" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
                 </label>
-              </div>
-              <div class="field-pair">
-                <label>
-                  Startup grace
-                  <input id="downloadSlowSpeedGrace" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
-                </label>
-                <label>
-                  Ignore below
-                  <input id="downloadSlowSpeedMinSize" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes">
-                </label>
+                <div class="field-control" data-help-field="downloadSlowSpeedThreshold">
+                  <span id="downloadSlowSpeedThresholdLabel" class="field-label">Slow threshold</span>
+                  <div class="byte-input">
+                    <label class="byte-disable" title="Disable slow-speed reset">
+                      <input id="downloadSlowSpeedThresholdDisabled" type="checkbox" aria-label="Disable slow-speed reset">
+                      <span>Off</span>
+                    </label>
+                    <input id="downloadSlowSpeedThresholdAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedThresholdLabel" placeholder="100">
+                    <select id="downloadSlowSpeedThresholdUnit" aria-label="Slow threshold unit">
+                      <option value="bytes">bytes/s</option>
+                      <option value="mb">MB/s</option>
+                      <option value="gb">GB/s</option>
+                    </select>
+                  </div>
+                  <input id="downloadSlowSpeedThreshold" type="hidden">
+                </div>
               </div>
             </section>
           </div>

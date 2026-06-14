@@ -57,9 +57,15 @@ const el = {
   downloadProfileId: document.querySelector('#downloadProfileId'),
   downloadProfileName: document.querySelector('#downloadProfileName'),
   downloadSlowSpeedThreshold: document.querySelector('#downloadSlowSpeedThreshold'),
+  downloadSlowSpeedThresholdDisabled: document.querySelector('#downloadSlowSpeedThresholdDisabled'),
+  downloadSlowSpeedThresholdAmount: document.querySelector('#downloadSlowSpeedThresholdAmount'),
+  downloadSlowSpeedThresholdUnit: document.querySelector('#downloadSlowSpeedThresholdUnit'),
   downloadSlowSpeedDuration: document.querySelector('#downloadSlowSpeedDuration'),
   downloadSlowSpeedGrace: document.querySelector('#downloadSlowSpeedGrace'),
   downloadSlowSpeedMinSize: document.querySelector('#downloadSlowSpeedMinSize'),
+  downloadSlowSpeedMinSizeDisabled: document.querySelector('#downloadSlowSpeedMinSizeDisabled'),
+  downloadSlowSpeedMinSizeAmount: document.querySelector('#downloadSlowSpeedMinSizeAmount'),
+  downloadSlowSpeedMinSizeUnit: document.querySelector('#downloadSlowSpeedMinSizeUnit'),
   downloadProfileHelpKicker: document.querySelector('#downloadProfileHelpKicker'),
   downloadProfileHelpTitle: document.querySelector('#downloadProfileHelpTitle'),
   downloadProfileHelpBody: document.querySelector('#downloadProfileHelpBody'),
@@ -119,6 +125,11 @@ const DEFAULT_CLIENT_HOST = 'putiorr';
 const DEFAULT_CLIENT_PORT = '9091';
 const DEFAULT_HELP_FIELD = 'wizardProfileType';
 const DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD = 'downloadProfileName';
+const BYTE_UNITS = {
+  bytes: 1,
+  mb: 1024 * 1024,
+  gb: 1024 * 1024 * 1024,
+};
 
 const WIZARD_HELP = {
   wizardProfileType: {
@@ -272,11 +283,11 @@ const DOWNLOAD_PROFILE_HELP = {
     title: 'Slow threshold',
     paragraphs: [
       'When this is greater than zero, putiorr watches the local copy speed from put.io. If the speed stays below this value for the configured duration, the local copy is reset and resumed.',
-      'Set it to zero to disable slow-speed resets for this profile.',
+      'Use the Off checkbox to disable slow-speed resets for this profile without entering a magic zero value.',
     ],
     tips: [
       'Large movie files can usually tolerate a higher threshold than small music files.',
-      'Use bytes per second here; the card and guide convert the number into a readable speed.',
+      'Enter an integer amount and choose bytes/s, MB/s, or GB/s from the unit selector.',
     ],
     valueLabel: 'Current threshold',
     value: (profile) => profile.slowSpeedThresholdBytesPerSecond > 0
@@ -313,11 +324,11 @@ const DOWNLOAD_PROFILE_HELP = {
     title: 'Ignore below',
     paragraphs: [
       'Files smaller than this size skip the slow-speed reset guard. That keeps tiny metadata, subtitle, sample, and music files from being reset unnecessarily.',
-      'Set this lower for profiles that mostly handle small files, and higher for movie or episode profiles.',
+      'Use the Off checkbox when every file should be eligible for slow-speed checks, regardless of size.',
     ],
     tips: [
       'Music profiles usually need a much lower value than movie profiles.',
-      'Use bytes here; the card and guide convert the number into a readable size.',
+      'Enter an integer amount and choose bytes, MB, or GB from the unit selector.',
     ],
     valueLabel: 'Ignored files',
     value: (profile) => `Below ${formatBytes(profile.slowSpeedMinSizeBytes)}`,
@@ -459,6 +470,55 @@ function setNumberInput(input, value) {
 function numberInputValue(input) {
   const parsed = Number.parseInt(input.value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function integerInputValue(input) {
+  const parsed = Number.parseInt(input.value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function setByteInput(hiddenInput, disabledInput, amountInput, unitInput, value) {
+  const bytes = Math.max(0, Number.parseInt(value ?? 0, 10) || 0);
+  const disabled = bytes <= 0;
+  hiddenInput.value = String(bytes);
+  disabledInput.checked = disabled;
+
+  const { amount, unit } = splitBytesForInput(bytes);
+  amountInput.value = disabled ? '' : String(amount);
+  unitInput.value = unit;
+  updateByteInputDisabledState(disabledInput, amountInput, unitInput);
+}
+
+function splitBytesForInput(bytes) {
+  if (bytes > 0 && bytes % BYTE_UNITS.gb === 0) {
+    return { amount: bytes / BYTE_UNITS.gb, unit: 'gb' };
+  }
+  if (bytes > 0 && bytes % BYTE_UNITS.mb === 0) {
+    return { amount: bytes / BYTE_UNITS.mb, unit: 'mb' };
+  }
+  return { amount: bytes, unit: 'bytes' };
+}
+
+function byteInputValue(disabledInput, amountInput, unitInput) {
+  if (disabledInput.checked) return 0;
+  return integerInputValue(amountInput) * (BYTE_UNITS[unitInput.value] ?? BYTE_UNITS.bytes);
+}
+
+function syncByteInput(hiddenInput, disabledInput, amountInput, unitInput) {
+  amountInput.value = amountInput.value.replace(/[^\d]/g, '');
+  if (!disabledInput.checked && amountInput.value === '' && document.activeElement === disabledInput) {
+    amountInput.value = '1';
+  }
+  hiddenInput.value = String(byteInputValue(disabledInput, amountInput, unitInput));
+  updateByteInputDisabledState(disabledInput, amountInput, unitInput);
+}
+
+function updateByteInputDisabledState(disabledInput, amountInput, unitInput) {
+  const disabled = disabledInput.checked;
+  const wrapper = disabledInput.closest('.byte-input');
+  if (wrapper) wrapper.classList.toggle('is-disabled', disabled);
+  amountInput.disabled = disabled;
+  unitInput.disabled = disabled;
 }
 
 function renderProfiles() {
@@ -809,10 +869,22 @@ function openDownloadProfileDialog(downloadProfile = createDefaultDownloadProfil
     : 'New download profile';
   el.downloadProfileId.value = downloadProfile.id || '';
   el.downloadProfileName.value = downloadProfile.name || '';
-  setNumberInput(el.downloadSlowSpeedThreshold, downloadProfile.slowSpeedThresholdBytesPerSecond ?? 0);
+  setByteInput(
+    el.downloadSlowSpeedThreshold,
+    el.downloadSlowSpeedThresholdDisabled,
+    el.downloadSlowSpeedThresholdAmount,
+    el.downloadSlowSpeedThresholdUnit,
+    downloadProfile.slowSpeedThresholdBytesPerSecond ?? 0,
+  );
   setNumberInput(el.downloadSlowSpeedDuration, downloadProfile.slowSpeedDurationSeconds ?? 120);
   setNumberInput(el.downloadSlowSpeedGrace, downloadProfile.slowSpeedGraceSeconds ?? 30);
-  setNumberInput(el.downloadSlowSpeedMinSize, downloadProfile.slowSpeedMinSizeBytes ?? 100 * 1024 * 1024);
+  setByteInput(
+    el.downloadSlowSpeedMinSize,
+    el.downloadSlowSpeedMinSizeDisabled,
+    el.downloadSlowSpeedMinSizeAmount,
+    el.downloadSlowSpeedMinSizeUnit,
+    downloadProfile.slowSpeedMinSizeBytes ?? 100 * 1024 * 1024,
+  );
   el.deleteDownloadProfileButton.hidden = !isExisting || isDefaultDownloadProfile(downloadProfile);
   el.saveDownloadProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
   setDownloadProfileMessage('');
@@ -850,15 +922,46 @@ function getDownloadProfilePayload() {
   return {
     name: el.downloadProfileName.value.trim(),
     slug: slugify(el.downloadProfileName.value),
-    slowSpeedThresholdBytesPerSecond: numberInputValue(el.downloadSlowSpeedThreshold),
+    slowSpeedThresholdBytesPerSecond: byteInputValue(
+      el.downloadSlowSpeedThresholdDisabled,
+      el.downloadSlowSpeedThresholdAmount,
+      el.downloadSlowSpeedThresholdUnit,
+    ),
     slowSpeedDurationSeconds: numberInputValue(el.downloadSlowSpeedDuration),
     slowSpeedGraceSeconds: numberInputValue(el.downloadSlowSpeedGrace),
-    slowSpeedMinSizeBytes: numberInputValue(el.downloadSlowSpeedMinSize),
+    slowSpeedMinSizeBytes: byteInputValue(
+      el.downloadSlowSpeedMinSizeDisabled,
+      el.downloadSlowSpeedMinSizeAmount,
+      el.downloadSlowSpeedMinSizeUnit,
+    ),
   };
 }
 
-function updateDownloadProfileHelp() {
+function updateDownloadProfileHelp(event) {
+  const fieldId = getDownloadProfileHelpFieldFromEvent(event);
+  if (fieldId) el.downloadProfileDialog.dataset.activeHelpField = fieldId;
+  syncDownloadProfileByteInputs();
   setDownloadProfileHelpForField(el.downloadProfileDialog.dataset.activeHelpField || DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD);
+}
+
+function getDownloadProfileHelpFieldFromEvent(event) {
+  const fieldId = event?.target?.closest?.('[data-help-field]')?.dataset.helpField || event?.target?.id;
+  return DOWNLOAD_PROFILE_HELP[fieldId] ? fieldId : '';
+}
+
+function syncDownloadProfileByteInputs() {
+  syncByteInput(
+    el.downloadSlowSpeedThreshold,
+    el.downloadSlowSpeedThresholdDisabled,
+    el.downloadSlowSpeedThresholdAmount,
+    el.downloadSlowSpeedThresholdUnit,
+  );
+  syncByteInput(
+    el.downloadSlowSpeedMinSize,
+    el.downloadSlowSpeedMinSizeDisabled,
+    el.downloadSlowSpeedMinSizeAmount,
+    el.downloadSlowSpeedMinSizeUnit,
+  );
 }
 
 function setDownloadProfileHelpForField(fieldId = DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD, profile = getDownloadProfilePayload()) {
@@ -1715,15 +1818,20 @@ el.downloadProfileForm.addEventListener('submit', (event) => {
   saveDownloadProfileFromDialog().catch((error) => setDownloadProfileMessage(error.message, 'error'));
 });
 el.downloadProfileForm.addEventListener('focusin', (event) => {
-  const fieldId = event.target?.id;
+  const fieldId = getDownloadProfileHelpFieldFromEvent(event);
   if (DOWNLOAD_PROFILE_HELP[fieldId]) setDownloadProfileHelpForField(fieldId);
 });
+el.downloadProfileForm.addEventListener('click', updateDownloadProfileHelp);
 for (const input of [
   el.downloadProfileName,
-  el.downloadSlowSpeedThreshold,
+  el.downloadSlowSpeedThresholdDisabled,
+  el.downloadSlowSpeedThresholdAmount,
+  el.downloadSlowSpeedThresholdUnit,
   el.downloadSlowSpeedDuration,
   el.downloadSlowSpeedGrace,
-  el.downloadSlowSpeedMinSize,
+  el.downloadSlowSpeedMinSizeDisabled,
+  el.downloadSlowSpeedMinSizeAmount,
+  el.downloadSlowSpeedMinSizeUnit,
 ]) {
   input.addEventListener('input', updateDownloadProfileHelp);
   input.addEventListener('change', updateDownloadProfileHelp);
