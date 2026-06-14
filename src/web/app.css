@@ -375,6 +375,7 @@ select:focus {
   min-width: 0;
 }
 
+.profile-fact-wide,
 .profile-facts div:last-child {
   grid-column: 1 / -1;
 }

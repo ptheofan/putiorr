@@ -60,6 +60,12 @@ const el = {
   downloadSlowSpeedDuration: document.querySelector('#downloadSlowSpeedDuration'),
   downloadSlowSpeedGrace: document.querySelector('#downloadSlowSpeedGrace'),
   downloadSlowSpeedMinSize: document.querySelector('#downloadSlowSpeedMinSize'),
+  downloadProfileHelpKicker: document.querySelector('#downloadProfileHelpKicker'),
+  downloadProfileHelpTitle: document.querySelector('#downloadProfileHelpTitle'),
+  downloadProfileHelpBody: document.querySelector('#downloadProfileHelpBody'),
+  downloadProfileHelpList: document.querySelector('#downloadProfileHelpList'),
+  downloadProfileHelpValueLabel: document.querySelector('#downloadProfileHelpValueLabel'),
+  downloadProfileHelpValue: document.querySelector('#downloadProfileHelpValue'),
   downloadProfileMessage: document.querySelector('#downloadProfileMessage'),
   saveDownloadProfileButton: document.querySelector('#saveDownloadProfileButton'),
   deleteDownloadProfileButton: document.querySelector('#deleteDownloadProfileButton'),
@@ -112,6 +118,7 @@ const DEFAULT_DOWNLOAD_FOLDER = '/putiorr';
 const DEFAULT_CLIENT_HOST = 'putiorr';
 const DEFAULT_CLIENT_PORT = '9091';
 const DEFAULT_HELP_FIELD = 'wizardProfileType';
+const DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD = 'downloadProfileName';
 
 const WIZARD_HELP = {
   wizardProfileType: {
@@ -244,6 +251,76 @@ const WIZARD_HELP = {
     ],
     valueLabel: 'Profile state',
     value: (profile) => profile.enabled ? 'Enabled: accepts new RPC requests' : 'Disabled: saved, but not used for new RPC requests',
+  },
+};
+
+const DOWNLOAD_PROFILE_HELP = {
+  downloadProfileName: {
+    title: 'Name',
+    paragraphs: [
+      'The name is shown on download profile cards, RR profile cards, and the link dialog where RR profiles attach to downloader behavior.',
+      'Create names around the shape of the files being copied locally, such as Movies, TV Episodes, Music, or Books.',
+    ],
+    tips: [
+      'Keep names short enough to scan in RR profile cards.',
+      'If two apps need different reset rules, give each behavior its own download profile.',
+    ],
+    valueLabel: 'Generated slug',
+    value: (profile) => profile.slug || 'Name this profile',
+  },
+  downloadSlowSpeedThreshold: {
+    title: 'Slow threshold',
+    paragraphs: [
+      'When this is greater than zero, putiorr watches the local copy speed from put.io. If the speed stays below this value for the configured duration, the local copy is reset and resumed.',
+      'Set it to zero to disable slow-speed resets for this profile.',
+    ],
+    tips: [
+      'Large movie files can usually tolerate a higher threshold than small music files.',
+      'Use bytes per second here; the card and guide convert the number into a readable speed.',
+    ],
+    valueLabel: 'Current threshold',
+    value: (profile) => profile.slowSpeedThresholdBytesPerSecond > 0
+      ? formatSpeed(profile.slowSpeedThresholdBytesPerSecond)
+      : 'Off: slow-speed reset disabled',
+  },
+  downloadSlowSpeedDuration: {
+    title: 'Duration',
+    paragraphs: [
+      'This is how long the local copy speed must remain below the threshold before putiorr resets the stalled copy.',
+      'A longer duration avoids resetting short dips. A shorter duration reacts faster to truly stuck downloads.',
+    ],
+    tips: [
+      'Start around 60 to 120 seconds for large files.',
+      'Lower this only when resets are too slow to recover stuck copies.',
+    ],
+    valueLabel: 'Reset after',
+    value: (profile) => `${profile.slowSpeedDurationSeconds}s below threshold`,
+  },
+  downloadSlowSpeedGrace: {
+    title: 'Startup grace',
+    paragraphs: [
+      'This delay starts when putiorr begins copying a file locally. Slow-speed checks wait until the grace period has passed.',
+      'It prevents a reset while the transfer is still ramping up or opening the destination file.',
+    ],
+    tips: [
+      'Keep a small grace period for fast local disks.',
+      'Increase it if large files frequently start slowly before reaching normal speed.',
+    ],
+    valueLabel: 'Grace period',
+    value: (profile) => `${profile.slowSpeedGraceSeconds}s before checks start`,
+  },
+  downloadSlowSpeedMinSize: {
+    title: 'Ignore below',
+    paragraphs: [
+      'Files smaller than this size skip the slow-speed reset guard. That keeps tiny metadata, subtitle, sample, and music files from being reset unnecessarily.',
+      'Set this lower for profiles that mostly handle small files, and higher for movie or episode profiles.',
+    ],
+    tips: [
+      'Music profiles usually need a much lower value than movie profiles.',
+      'Use bytes here; the card and guide convert the number into a readable size.',
+    ],
+    valueLabel: 'Ignored files',
+    value: (profile) => `Below ${formatBytes(profile.slowSpeedMinSizeBytes)}`,
   },
 };
 
@@ -423,7 +500,7 @@ function createProfileCard(profile) {
         <dt>Download</dt>
         <dd data-role="download"></dd>
       </div>
-      <div>
+      <div class="profile-fact-wide">
         <dt>Downloader Profile</dt>
         <dd data-role="download-profile"></dd>
       </div>
@@ -739,6 +816,7 @@ function openDownloadProfileDialog(downloadProfile = createDefaultDownloadProfil
   el.deleteDownloadProfileButton.hidden = !isExisting || isDefaultDownloadProfile(downloadProfile);
   el.saveDownloadProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
   setDownloadProfileMessage('');
+  setDownloadProfileHelpForField(DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD);
 
   if (typeof el.downloadProfileDialog.showModal === 'function') {
     el.downloadProfileDialog.showModal();
@@ -777,6 +855,48 @@ function getDownloadProfilePayload() {
     slowSpeedGraceSeconds: numberInputValue(el.downloadSlowSpeedGrace),
     slowSpeedMinSizeBytes: numberInputValue(el.downloadSlowSpeedMinSize),
   };
+}
+
+function updateDownloadProfileHelp() {
+  setDownloadProfileHelpForField(el.downloadProfileDialog.dataset.activeHelpField || DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD);
+}
+
+function setDownloadProfileHelpForField(fieldId = DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD, profile = getDownloadProfilePayload()) {
+  const nextFieldId = DOWNLOAD_PROFILE_HELP[fieldId] ? fieldId : DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD;
+  const help = DOWNLOAD_PROFILE_HELP[nextFieldId];
+  el.downloadProfileDialog.dataset.activeHelpField = nextFieldId;
+  setText(el.downloadProfileHelpKicker, 'Field guide');
+  setText(el.downloadProfileHelpTitle, help.title);
+  setText(el.downloadProfileHelpValueLabel, help.valueLabel || 'Current value');
+  setText(el.downloadProfileHelpValue, resolveDownloadProfileHelpValue(help, profile));
+  renderDownloadProfileHelpParagraphs(resolveDownloadProfileHelpContent(help.paragraphs, profile));
+  renderDownloadProfileHelpList(resolveDownloadProfileHelpContent(help.tips, profile));
+}
+
+function resolveDownloadProfileHelpContent(content, profile) {
+  return typeof content === 'function' ? content(profile) : content;
+}
+
+function resolveDownloadProfileHelpValue(help, profile) {
+  return typeof help.value === 'function' ? help.value(profile) : help.value;
+}
+
+function renderDownloadProfileHelpParagraphs(paragraphs = []) {
+  el.downloadProfileHelpBody.replaceChildren();
+  for (const paragraphText of paragraphs) {
+    const paragraph = document.createElement('p');
+    setText(paragraph, paragraphText);
+    el.downloadProfileHelpBody.appendChild(paragraph);
+  }
+}
+
+function renderDownloadProfileHelpList(items = []) {
+  el.downloadProfileHelpList.replaceChildren();
+  for (const itemText of items) {
+    const item = document.createElement('li');
+    setText(item, itemText);
+    el.downloadProfileHelpList.appendChild(item);
+  }
 }
 
 async function saveDownloadProfileFromDialog() {
@@ -1594,6 +1714,20 @@ el.downloadProfileForm.addEventListener('submit', (event) => {
   event.preventDefault();
   saveDownloadProfileFromDialog().catch((error) => setDownloadProfileMessage(error.message, 'error'));
 });
+el.downloadProfileForm.addEventListener('focusin', (event) => {
+  const fieldId = event.target?.id;
+  if (DOWNLOAD_PROFILE_HELP[fieldId]) setDownloadProfileHelpForField(fieldId);
+});
+for (const input of [
+  el.downloadProfileName,
+  el.downloadSlowSpeedThreshold,
+  el.downloadSlowSpeedDuration,
+  el.downloadSlowSpeedGrace,
+  el.downloadSlowSpeedMinSize,
+]) {
+  input.addEventListener('input', updateDownloadProfileHelp);
+  input.addEventListener('change', updateDownloadProfileHelp);
+}
 el.downloadProfileDialogClose.addEventListener('click', closeDownloadProfileDialog);
 el.downloadProfileDialog.querySelector('[data-action="cancel-download-profile"]').addEventListener('click', closeDownloadProfileDialog);
 el.downloadProfileDialog.addEventListener('click', (event) => {

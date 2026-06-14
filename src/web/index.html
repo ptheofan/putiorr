@@ -240,7 +240,7 @@
       </form>
     </dialog>
 
-    <dialog id="downloadProfileDialog" class="modal compact-modal">
+    <dialog id="downloadProfileDialog" class="modal download-profile-modal">
       <form id="downloadProfileForm" class="download-profile-form">
         <div class="modal-head">
           <div>
@@ -250,32 +250,57 @@
           <button id="downloadProfileDialogClose" class="icon-button" type="button" aria-label="Close download profile">×</button>
         </div>
 
-        <div class="modal-body">
-          <input id="downloadProfileId" type="hidden">
-          <label>
-            Name
-            <input id="downloadProfileName" type="text" autocomplete="off" placeholder="Movies">
-          </label>
-          <div class="field-pair">
-            <label>
-              Slow threshold
-              <input id="downloadSlowSpeedThreshold" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes per second">
-            </label>
-            <label>
-              Duration
-              <input id="downloadSlowSpeedDuration" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
-            </label>
+        <div class="wizard-layout download-profile-layout">
+          <div class="wizard-questions">
+            <section class="wizard-step">
+              <div class="step-label">Profile</div>
+              <input id="downloadProfileId" type="hidden">
+              <label>
+                Name
+                <input id="downloadProfileName" type="text" autocomplete="off" placeholder="Movies">
+              </label>
+              <p class="field-help">Use one profile per download shape, such as movies, TV episodes, music, or books.</p>
+            </section>
+
+            <section class="wizard-step">
+              <div class="step-label">Slow-speed reset</div>
+              <div class="field-pair">
+                <label>
+                  Slow threshold
+                  <input id="downloadSlowSpeedThreshold" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes per second">
+                </label>
+                <label>
+                  Duration
+                  <input id="downloadSlowSpeedDuration" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
+                </label>
+              </div>
+              <div class="field-pair">
+                <label>
+                  Startup grace
+                  <input id="downloadSlowSpeedGrace" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
+                </label>
+                <label>
+                  Ignore below
+                  <input id="downloadSlowSpeedMinSize" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes">
+                </label>
+              </div>
+            </section>
           </div>
-          <div class="field-pair">
-            <label>
-              Startup grace
-              <input id="downloadSlowSpeedGrace" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
-            </label>
-            <label>
-              Ignore below
-              <input id="downloadSlowSpeedMinSize" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes">
-            </label>
-          </div>
+
+          <aside class="setup-preview context-help" aria-live="polite">
+            <div class="preview-head">
+              <div>
+                <span id="downloadProfileHelpKicker" class="step-label">Field guide</span>
+                <h3 id="downloadProfileHelpTitle">Name</h3>
+              </div>
+            </div>
+            <div id="downloadProfileHelpBody" class="help-body"></div>
+            <ul id="downloadProfileHelpList" class="help-list"></ul>
+            <div class="endpoint-box">
+              <span id="downloadProfileHelpValueLabel">Current value</span>
+              <strong id="downloadProfileHelpValue">Default</strong>
+            </div>
+          </aside>
         </div>
 
         <p id="downloadProfileMessage" class="message modal-message" role="status"></p>
