@@ -12,8 +12,12 @@
     "dev": "node --watch --disable-warning=ExperimentalWarning src/main.js",
     "lint": "node scripts/lint.js",
     "release:check": "pnpm release:gate",
+    "release:create": "node scripts/create-release.js",
     "release:gate": "node scripts/release-gate.js",
     "start": "node --disable-warning=ExperimentalWarning src/main.js",
     "test": "node --disable-warning=ExperimentalWarning --test"
+  },
+  "dependencies": {
+    "semver": "^7.8.4"
   }
 }

@@ -77,37 +77,75 @@ Release images are published to GitHub Container Registry:
 ghcr.io/ptheofan/putiorr
 ```
 
-Publishing happens when a GitHub Release is published. Use a semver tag such as
-`v1.1.0`; the workflow builds the Dockerfile `production` target for
+Publishing happens when a GitHub Release is published. Use a semver tag with a
+leading `v`; the workflow builds the Dockerfile `production` target for
 `linux/amd64` and `linux/arm64`.
 
 Release tags produce image tags like:
 
 ```text
-ghcr.io/ptheofan/putiorr:v1.1.0
-ghcr.io/ptheofan/putiorr:1.1.0
-ghcr.io/ptheofan/putiorr:1.1
+ghcr.io/ptheofan/putiorr:vMAJOR.MINOR.PATCH
+ghcr.io/ptheofan/putiorr:MAJOR.MINOR.PATCH
+ghcr.io/ptheofan/putiorr:MAJOR.MINOR
 ghcr.io/ptheofan/putiorr:latest
 ```
 
 Prereleases do not receive the `latest` tag.
 
-Before publishing a release, run the **Release Gate** GitHub Actions workflow on
-`main` with the intended tag. For package version `1.1.0`, use release tag
-`v1.1.0`.
+### Release Gate
+
+`package.json` is the source of truth for the app version. Before publishing a
+release, run the guarded release script with the intended semver tag. The script
+updates release metadata, and the **Release Gate** GitHub Actions workflow can
+then validate `main` with the matching tag.
+
+The release gate uses the `semver` package to compare versions. It checks that:
+
+- `package.json` contains a valid semver version.
+- the requested release tag matches `package.json` exactly, with a leading `v`.
+- `package.json` is not older than the latest GitHub Release.
+- the release workflow still runs the release gate before publishing images.
 
 The release workflow also runs the release gate after a GitHub Release is
-published. It checks that the release tag matches `package.json` and that README
-release examples were updated.
+published, then runs the same lint/test gates as pull requests before publishing
+an image.
 
-The release workflow then runs the same lint/test gates as pull requests before
-publishing an image:
+For local or test runs where the GitHub API should be pinned, set
+`RELEASE_GATE_LATEST_RELEASE_TAG`:
+
+```bash
+RELEASE_GATE_LATEST_RELEASE_TAG=vMAJOR.MINOR.PATCH pnpm release:gate
+pnpm release:gate
+pnpm lint
+pnpm test
+```
+
+### Creating a Release
+
+Use the guarded `gh` wrapper when an agent or maintainer should create a release
+from the local checkout:
+
+```bash
+pnpm release:create -- vMAJOR.MINOR.PATCH
+pnpm release:create -- vMAJOR.MINOR.PATCH --yes
+pnpm release:create -- vMAJOR.MINOR.PATCH --yes --publish
+```
+
+The script accepts a release tag, updates `package.json` to match it with
+`semver`, requires a clean and up-to-date `main` checkout, and runs:
 
 ```bash
 pnpm release:gate
 pnpm lint
 pnpm test
 ```
+
+If `package.json` changed, the script stops after the checks so the metadata can
+be committed and merged. Once `main` already contains the target version, rerun
+the same command. Without `--yes`, the script only prints the
+`gh release create` command it would run. With `--yes`, it creates a draft
+release by default. Add `--publish` only when the release should be published
+immediately and the container publishing workflow should start.
 
 ## Typical NAS Layout
 

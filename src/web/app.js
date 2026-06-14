@@ -14,10 +14,12 @@ const state = {
     username: '',
     error: '',
   },
+  version: undefined,
 };
 
 const el = {
   connectionState: document.querySelector('#connectionState'),
+  versionUpdateLink: document.querySelector('#versionUpdateLink'),
   putioStatusButton: document.querySelector('#putioStatusButton'),
   putioDialog: document.querySelector('#putioDialog'),
   putioDialogClose: document.querySelector('#putioDialogClose'),
@@ -570,16 +572,39 @@ async function refreshDownloads() {
   renderDownloads();
 }
 
+async function loadVersion() {
+  state.version = await api('/api/version');
+  renderVersion();
+}
+
 function applyDownloadsUpdate(message) {
   if (Array.isArray(message.downloads)) state.downloads = message.downloads;
   renderDownloads();
 }
 
 function render() {
+  renderVersion();
   renderConnection();
   renderProfiles();
   renderDownloadProfiles();
   renderDownloads();
+}
+
+function renderVersion() {
+  const version = state.version;
+  const isUpdateAvailable = Boolean(version?.updateAvailable && version.latestVersion);
+  el.versionUpdateLink.hidden = !isUpdateAvailable;
+  if (!isUpdateAvailable) {
+    el.versionUpdateLink.removeAttribute('aria-label');
+    el.versionUpdateLink.removeAttribute('title');
+    return;
+  }
+
+  const latest = `v${version.latestVersion}`;
+  el.versionUpdateLink.href = version.releaseUrl || 'https://github.com/ptheofan/putiorr/releases/latest';
+  el.versionUpdateLink.textContent = `${latest} available`;
+  el.versionUpdateLink.title = `putiorr ${latest} is available. Current version: ${version.currentVersion}.`;
+  el.versionUpdateLink.setAttribute('aria-label', `${el.versionUpdateLink.textContent}. Open putiorr releases.`);
 }
 
 function renderConnection() {
@@ -2534,4 +2559,5 @@ el.deleteConfirmDialog.addEventListener('click', (event) => {
 });
 
 loadAll().catch((error) => setMessage(error.message, 'error'));
+loadVersion().catch(() => {});
 connectUpdates();

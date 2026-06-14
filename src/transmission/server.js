@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { downloadPolicyFromStore, saveDownloadPolicyToStore } from '../download/policy.js';
 import { logger } from '../logger.js';
 import { PutioOAuthClient } from '../putio/oauth.js';
+import { VersionChecker } from '../version.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -135,14 +136,14 @@ function oauthCallbackHtml() {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#2a6863">
+    <meta name="theme-color" content="#0f766e">
     <title>Put.io connection</title>
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48x48.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
-    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/favicon.ico?v=portal" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png?v=portal">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png?v=portal">
+    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48x48.png?v=portal">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=portal">
+    <link rel="manifest" href="/manifest.webmanifest?v=portal">
     <style>
       :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f7f8; color: #172326; }
@@ -158,7 +159,7 @@ function oauthCallbackHtml() {
   <body>
     <main>
       <div class="brand">
-        <img src="/icons/putiorr-icon-64.png" alt="">
+        <img src="/icons/putiorr-icon-64.png?v=portal" alt="">
         <span>putiorr</span>
       </div>
       <h1>Put.io connection</h1>
@@ -212,10 +213,11 @@ function oauthCallbackHtml() {
 }
 
 export class TransmissionRpcServer {
-  constructor({ config, service }) {
+  constructor({ config, service, fetch: fetchImpl } = {}) {
     this.config = config;
     this.service = service;
     this.oauth = new PutioOAuthClient({ appId: config.putioAppId });
+    this.versionChecker = new VersionChecker({ fetch: fetchImpl });
     this.oauthStates = new Map();
     this.sessionId = crypto.randomBytes(24).toString('hex');
     this.liveReloadClients = new Set();
@@ -406,6 +408,11 @@ export class TransmissionRpcServer {
 
       if (method === 'GET' && requestPath === '/api/settings') {
         jsonResponse(res, 200, this.settingsResponse(req), this.sessionId);
+        return;
+      }
+
+      if (method === 'GET' && requestPath === '/api/version') {
+        jsonResponse(res, 200, await this.versionChecker.check(), this.sessionId);
         return;
       }
 

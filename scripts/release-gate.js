@@ -1,5 +1,8 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
+import semver from 'semver';
+
+const LATEST_RELEASE_API_URL = 'https://api.github.com/repos/ptheofan/putiorr/releases/latest';
 
 function readText(path) {
   const override = process.env[`RELEASE_GATE_${path.replace(/[^A-Za-z0-9]/g, '_').toUpperCase()}`];
@@ -12,70 +15,56 @@ function fail(message) {
   process.exitCode = 1;
 }
 
-const packageJson = JSON.parse(readText('package.json'));
-const packageVersion = String(packageJson.version ?? '').trim();
-const releaseTag = String(process.env.RELEASE_TAG || process.argv[2] || '').trim();
-const semverMatch = packageVersion.match(/^(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/);
+async function latestReleaseTag() {
+  const override = String(process.env.RELEASE_GATE_LATEST_RELEASE_TAG ?? '').trim();
+  if (override) return override;
 
-if (!semverMatch) {
-  fail(`package.json version must be semver. Received: ${packageVersion}`);
+  const response = await fetch(LATEST_RELEASE_API_URL, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'putiorr-release-gate',
+    },
+  });
+  if (response.status === 404) return '';
+  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+  const body = await response.json();
+  return String(body.tag_name ?? '').trim();
 }
 
-const [, major, minor] = semverMatch ?? [];
+const packageJson = JSON.parse(readText('package.json'));
+const packageVersion = semver.valid(String(packageJson.version ?? '').trim());
+const releaseTag = String(process.env.RELEASE_TAG || process.argv[2] || '').trim();
+
+if (!packageVersion) {
+  fail(`package.json version must be semver. Received: ${packageJson.version}`);
+  process.exit(process.exitCode);
+}
+
 const expectedTag = `v${packageVersion}`;
-const expectedMinor = `${major}.${minor}`;
-const previousPatch = Number(semverMatch?.[3] ?? 0) > 0
-  ? `${major}.${minor}.${Number(semverMatch[3]) - 1}`
-  : '';
-const staleCandidates = [
-  ...(previousPatch ? [previousPatch, `v${previousPatch}`] : []),
-];
 
 if (releaseTag && releaseTag !== expectedTag) {
   fail(`Release tag ${releaseTag} does not match package.json version ${packageVersion}. Use ${expectedTag}.`);
 }
 
-const readme = readText('README.md');
-const releaseGateWorkflow = readText('.github/workflows/release-gate.yml');
+try {
+  const latestTag = await latestReleaseTag();
+  const latestVersion = latestTag ? semver.clean(latestTag) : '';
+  if (latestTag && !latestVersion) {
+    fail(`Latest GitHub release tag must be semver. Received: ${latestTag}`);
+  }
+  if (latestVersion && semver.lt(packageVersion, latestVersion)) {
+    fail(
+      `package.json version ${packageVersion} is older than latest GitHub release ${latestTag}. `
+      + `Update package.json and release documentation before running the release gate.`,
+    );
+  }
+} catch (error) {
+  fail(`Could not check latest GitHub release: ${error.message}`);
+}
+
 const releaseContainerWorkflow = readText('.github/workflows/release-container.yml');
 
 const requirements = [
-  {
-    file: 'README.md',
-    text: readme,
-    label: 'example release tag',
-    value: `\`${expectedTag}\``,
-  },
-  {
-    file: 'README.md',
-    text: readme,
-    label: 'versioned GHCR tag',
-    value: `ghcr.io/ptheofan/putiorr:${expectedTag}`,
-  },
-  {
-    file: 'README.md',
-    text: readme,
-    label: 'plain semver GHCR tag',
-    value: `ghcr.io/ptheofan/putiorr:${packageVersion}`,
-  },
-  {
-    file: 'README.md',
-    text: readme,
-    label: 'minor GHCR tag',
-    value: `ghcr.io/ptheofan/putiorr:${expectedMinor}`,
-  },
-  {
-    file: 'README.md',
-    text: readme,
-    label: 'package version instruction',
-    value: `package version \`${packageVersion}\``,
-  },
-  {
-    file: '.github/workflows/release-gate.yml',
-    text: releaseGateWorkflow,
-    label: 'manual workflow release tag example',
-    value: `for example ${expectedTag}`,
-  },
   {
     file: '.github/workflows/release-container.yml',
     text: releaseContainerWorkflow,
@@ -87,27 +76,6 @@ const requirements = [
 for (const requirement of requirements) {
   if (!requirement.text.includes(requirement.value)) {
     fail(`${requirement.file} is missing ${requirement.label}: ${requirement.value}`);
-  }
-}
-
-const staleChecks = [
-  {
-    file: 'README.md',
-    text: readme,
-    description: 'README release section',
-  },
-  {
-    file: '.github/workflows/release-gate.yml',
-    text: releaseGateWorkflow,
-    description: 'release gate workflow',
-  },
-];
-
-for (const stale of staleCandidates) {
-  for (const check of staleChecks) {
-    if (check.text.includes(stale)) {
-      fail(`${check.description} still mentions stale release value ${stale} in ${check.file}.`);
-    }
   }
 }
 

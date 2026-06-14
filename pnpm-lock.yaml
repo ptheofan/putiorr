@@ -6,4 +6,19 @@ settings:
 
 importers:
 
-  .: {}
+  .:
+    dependencies:
+      semver:
+        specifier: ^7.8.4
+        version: 7.8.4
+
+packages:
+
+  semver@7.8.4:
+    resolution: {integrity: sha512-rUCObTnP32Q08R2uuIrt7r9PlEonuTmtuXYcW6s5kjdlj3xbnwe+21yXptAUYcMAABLkYYTtnmzb3w3EDZfueA==}
+    engines: {node: '>=10'}
+    hasBin: true
+
+snapshots:
+
+  semver@7.8.4: {}

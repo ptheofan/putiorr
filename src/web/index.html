@@ -3,42 +3,36 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#2a6863">
+    <meta name="theme-color" content="#0f766e">
     <title>putiorr</title>
-    <link rel="icon" href="/favicon.ico" sizes="any">
-    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
-    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
-    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48x48.png">
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
-    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/favicon.ico?v=portal" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png?v=portal">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png?v=portal">
+    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48x48.png?v=portal">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=portal">
+    <link rel="manifest" href="/manifest.webmanifest?v=portal">
     <link rel="stylesheet" href="/app.css">
   </head>
   <body>
     <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true">
-            <img src="/icons/putiorr-icon-64.png" alt="">
-          </span>
-          <span>putiorr</span>
-        </div>
-        <nav class="nav" aria-label="Main navigation">
-          <a href="#profiles" class="nav-link active">RR profiles</a>
-          <a href="#download-profiles" class="nav-link">Download profiles</a>
-          <a href="#downloads" class="nav-link">Downloads</a>
-        </nav>
-      </aside>
-
       <main class="content">
         <header class="topbar">
-          <div>
-            <h1>putiorr</h1>
-            <p>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</p>
+          <div class="hero-brand">
+            <span class="hero-icon" aria-hidden="true">
+              <img src="/icons/putiorr-icon-128.png?v=portal" alt="">
+            </span>
+            <div>
+              <h1>putiorr</h1>
+              <p>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</p>
+            </div>
           </div>
-          <button id="putioStatusButton" class="putio-status-button" type="button" data-state="unknown" aria-label="Put.io connection status">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span>Put.io</span>
-          </button>
+          <div class="topbar-actions">
+            <a id="versionUpdateLink" class="version-update-link" href="https://github.com/ptheofan/putiorr/releases/latest" target="_blank" rel="noreferrer" hidden>Update available</a>
+            <button id="putioStatusButton" class="putio-status-button" type="button" data-state="unknown" aria-label="Put.io connection status">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span>Put.io</span>
+            </button>
+          </div>
         </header>
 
         <section id="profiles" class="panel">
