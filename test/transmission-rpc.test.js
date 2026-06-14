@@ -652,6 +652,7 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(settings.status, 200);
   const settingsBody = await settings.json();
   assert.equal(settingsBody.tokenConfigured, true);
+  assert.equal(typeof settingsBody.defaultDownloadProfileId, 'number');
   assert.equal(settingsBody.downloadPolicy.slowSpeedThresholdBytesPerSecond, 0);
 
   const settingsUpdate = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'), {
@@ -674,6 +675,29 @@ test('web API exposes settings and profile CRUD', async (t) => {
     slowSpeedMinSizeBytes: 1048576,
   });
 
+  const downloadProfiles = await fetch(harness.url.replace('/transmission/rpc', '/api/download-profiles'));
+  assert.equal(downloadProfiles.status, 200);
+  const [defaultDownloadProfile] = await downloadProfiles.json();
+  assert.equal(defaultDownloadProfile.slug, 'default');
+  assert.equal(defaultDownloadProfile.slowSpeedThresholdBytesPerSecond, 2048);
+
+  const createDownloadProfile = await fetch(harness.url.replace('/transmission/rpc', '/api/download-profiles'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Movies',
+      slug: 'movies',
+      slowSpeedThresholdBytesPerSecond: 4096,
+      slowSpeedDurationSeconds: 120,
+      slowSpeedGraceSeconds: 20,
+      slowSpeedMinSizeBytes: 10,
+    }),
+  });
+  assert.equal(createDownloadProfile.status, 201);
+  const movieDownloadProfile = await createDownloadProfile.json();
+  assert.equal(movieDownloadProfile.name, 'Movies');
+  assert.equal(movieDownloadProfile.slowSpeedThresholdBytesPerSecond, 4096);
+
   const create = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -681,6 +705,7 @@ test('web API exposes settings and profile CRUD', async (t) => {
       name: 'Radarr',
       type: 'radarr',
       slug: 'radarr',
+      downloadProfileId: movieDownloadProfile.id,
       putio_folder_name: 'radarr',
       downloadAt: path.join(harness.config.targetDir, 'movies'),
       rpc_path: '/radarr/transmission/rpc',
@@ -691,6 +716,7 @@ test('web API exposes settings and profile CRUD', async (t) => {
   const profile = await create.json();
   assert.equal(profile.name, 'Radarr');
   assert.equal(profile.downloadAt, path.join(harness.config.targetDir, 'movies'));
+  assert.equal(profile.download_profile_id, movieDownloadProfile.id);
   assert.equal(Object.hasOwn(profile, 'local_path'), false);
 
   const update = await fetch(harness.url.replace('/transmission/rpc', `/api/profiles/${profile.id}`), {

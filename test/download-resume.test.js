@@ -210,3 +210,45 @@ test('slow-speed reset keeps the part file and resumes without a failed attempt'
     harness.store.close();
   }
 });
+
+test('slow-speed guard uses the download profile attached to the RR profile', async () => {
+  const harness = await createHarness();
+  try {
+    const rrProfile = harness.store.findProfileBySlug('default');
+    const strictDownloadProfile = harness.store.createDownloadProfile({
+      name: 'Strict movies',
+      slug: 'strict-movies',
+      slowSpeedThresholdBytesPerSecond: 1000,
+      slowSpeedDurationSeconds: 5,
+      slowSpeedGraceSeconds: 0,
+      slowSpeedMinSizeBytes: 0,
+    });
+    harness.store.updateProfile(rrProfile.id, {
+      download_profile_id: strictDownloadProfile.id,
+    });
+
+    const transfer = createTransfer(harness.store, { total_size: 10 });
+    const file = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 904,
+      relative_path: 'movie.mkv',
+      size: 10,
+      downloaded_bytes: 0,
+      status: 'downloading',
+    });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const guard = manager.createSlowSpeedGuard(file, new AbortController(), 0, 0);
+    try {
+      assert.ok(guard);
+    } finally {
+      guard?.stop();
+    }
+  } finally {
+    harness.store.close();
+  }
+});

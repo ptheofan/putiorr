@@ -1,11 +1,10 @@
 const state = {
   settings: undefined,
   profiles: [],
+  downloadProfiles: [],
   downloads: [],
   expandedDownloads: new Set(),
   fileListScrollTops: new Map(),
-  downloaderPolicyDirty: false,
-  downloaderPolicyBaseline: '',
 };
 
 const el = {
@@ -20,13 +19,10 @@ const el = {
   oauthLink: document.querySelector('#oauthLink'),
   oauthPollButton: document.querySelector('#oauthPollButton'),
   testConnectionButton: document.querySelector('#testConnectionButton'),
-  downloaderSettingsForm: document.querySelector('#downloaderSettingsForm'),
-  slowSpeedThreshold: document.querySelector('#slowSpeedThreshold'),
-  slowSpeedDuration: document.querySelector('#slowSpeedDuration'),
-  slowSpeedGrace: document.querySelector('#slowSpeedGrace'),
-  slowSpeedMinSize: document.querySelector('#slowSpeedMinSize'),
   addProfileButton: document.querySelector('#addProfileButton'),
   profilesBody: document.querySelector('#profilesBody'),
+  addDownloadProfileButton: document.querySelector('#addDownloadProfileButton'),
+  downloadProfilesBody: document.querySelector('#downloadProfilesBody'),
   profileWizard: document.querySelector('#profileWizard'),
   profileWizardForm: document.querySelector('#profileWizardForm'),
   profileWizardTitle: document.querySelector('#profileWizardTitle'),
@@ -37,6 +33,7 @@ const el = {
   wizardProfileName: document.querySelector('#wizardProfileName'),
   wizardPutioFolder: document.querySelector('#wizardPutioFolder'),
   wizardDownloadAt: document.querySelector('#wizardDownloadAt'),
+  wizardDownloadProfile: document.querySelector('#wizardDownloadProfile'),
   wizardRpcPath: document.querySelector('#wizardRpcPath'),
   wizardClientHost: document.querySelector('#wizardClientHost'),
   wizardClientPort: document.querySelector('#wizardClientPort'),
@@ -52,6 +49,19 @@ const el = {
   saveProfileButton: document.querySelector('#saveProfileButton'),
   deleteProfileButton: document.querySelector('#deleteProfileButton'),
   copyClientSettingsButton: document.querySelector('#copyClientSettingsButton'),
+  downloadProfileDialog: document.querySelector('#downloadProfileDialog'),
+  downloadProfileForm: document.querySelector('#downloadProfileForm'),
+  downloadProfileDialogTitle: document.querySelector('#downloadProfileDialogTitle'),
+  downloadProfileDialogClose: document.querySelector('#downloadProfileDialogClose'),
+  downloadProfileId: document.querySelector('#downloadProfileId'),
+  downloadProfileName: document.querySelector('#downloadProfileName'),
+  downloadSlowSpeedThreshold: document.querySelector('#downloadSlowSpeedThreshold'),
+  downloadSlowSpeedDuration: document.querySelector('#downloadSlowSpeedDuration'),
+  downloadSlowSpeedGrace: document.querySelector('#downloadSlowSpeedGrace'),
+  downloadSlowSpeedMinSize: document.querySelector('#downloadSlowSpeedMinSize'),
+  downloadProfileMessage: document.querySelector('#downloadProfileMessage'),
+  saveDownloadProfileButton: document.querySelector('#saveDownloadProfileButton'),
+  deleteDownloadProfileButton: document.querySelector('#deleteDownloadProfileButton'),
   downloadsList: document.querySelector('#downloadsList'),
   refreshButton: document.querySelector('#refreshButton'),
 };
@@ -149,6 +159,19 @@ const WIZARD_HELP = {
     ],
     valueLabel: 'Final category folder',
     value: (profile, settings) => joinPathParts(settings.directory, settings.category),
+  },
+  wizardDownloadProfile: {
+    title: 'Download profile',
+    paragraphs: [
+      'Choose the local downloader behavior for releases sent through this RR profile. This lets movies, episodes, music, and books use different slow-speed reset thresholds.',
+      'The selected download profile is used when putiorr copies files from put.io into the shared download folder.',
+    ],
+    tips: [
+      'Use a stricter threshold for large movie files and a lower threshold for smaller music files.',
+      'Changing this affects active and future local downloads that belong to this RR profile.',
+    ],
+    valueLabel: 'Downloader policy',
+    value: (profile) => downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId),
   },
   wizardRpcPath: {
     title: 'RPC endpoint path',
@@ -306,13 +329,15 @@ function requestStateRefresh() {
 }
 
 async function loadAll() {
-  const [settings, profiles, downloads] = await Promise.all([
+  const [settings, profiles, downloadProfiles, downloads] = await Promise.all([
     api('/api/settings'),
     api('/api/profiles'),
+    api('/api/download-profiles'),
     api('/api/downloads'),
   ]);
   state.settings = settings;
   state.profiles = profiles;
+  state.downloadProfiles = downloadProfiles;
   state.downloads = downloads;
   render();
 }
@@ -325,6 +350,7 @@ function applyDownloadsUpdate(message) {
 function render() {
   renderConnection();
   renderProfiles();
+  renderDownloadProfiles();
   renderDownloads();
 }
 
@@ -339,23 +365,6 @@ function renderConnection() {
     stopOAuthPolling();
     el.oauthPanel.hidden = true;
   }
-  renderDownloadPolicy();
-}
-
-function renderDownloadPolicy() {
-  const policy = state.settings?.downloadPolicy;
-  if (!policy || isDownloaderPolicyDrafting()) return;
-
-  setNumberInput(el.slowSpeedThreshold, policy.slowSpeedThresholdBytesPerSecond);
-  setNumberInput(el.slowSpeedDuration, policy.slowSpeedDurationSeconds);
-  setNumberInput(el.slowSpeedGrace, policy.slowSpeedGraceSeconds);
-  setNumberInput(el.slowSpeedMinSize, policy.slowSpeedMinSizeBytes);
-  state.downloaderPolicyBaseline = JSON.stringify(getDownloadPolicyPayload());
-  state.downloaderPolicyDirty = false;
-}
-
-function isDownloaderPolicyDrafting() {
-  return state.downloaderPolicyDirty || el.downloaderSettingsForm.contains(document.activeElement);
 }
 
 function setNumberInput(input, value) {
@@ -366,19 +375,6 @@ function setNumberInput(input, value) {
 function numberInputValue(input) {
   const parsed = Number.parseInt(input.value, 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function getDownloadPolicyPayload() {
-  return {
-    slowSpeedThresholdBytesPerSecond: numberInputValue(el.slowSpeedThreshold),
-    slowSpeedDurationSeconds: numberInputValue(el.slowSpeedDuration),
-    slowSpeedGraceSeconds: numberInputValue(el.slowSpeedGrace),
-    slowSpeedMinSizeBytes: numberInputValue(el.slowSpeedMinSize),
-  };
-}
-
-function updateDownloaderPolicyDirtyState() {
-  state.downloaderPolicyDirty = state.downloaderPolicyBaseline !== JSON.stringify(getDownloadPolicyPayload());
 }
 
 function renderProfiles() {
@@ -421,6 +417,10 @@ function createProfileCard(profile) {
         <dd data-role="download"></dd>
       </div>
       <div>
+        <dt>Downloader</dt>
+        <dd data-role="download-profile"></dd>
+      </div>
+      <div>
         <dt>RPC</dt>
         <dd data-role="rpc"></dd>
       </div>
@@ -437,6 +437,7 @@ function createProfileCard(profile) {
   setProfileFact(card, 'rpc', profile.rpc_path || 'Not set');
   setProfileFact(card, 'putio', profile.putio_folder_name || 'Not set');
   setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
+  setProfileFact(card, 'download-profile', downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId));
   const status = card.querySelector('[data-role="status"]');
   status.className = `profile-status status ${profile.enabled === false ? 'warn' : 'ok'}`;
   setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
@@ -444,6 +445,98 @@ function createProfileCard(profile) {
   card.querySelector('[data-action="edit"]').addEventListener('click', () => openProfileWizard(profile));
   card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteProfileById(profile.id));
   return card;
+}
+
+function renderDownloadProfiles() {
+  el.downloadProfilesBody.replaceChildren();
+  if (state.downloadProfiles.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state profile-empty';
+    empty.textContent = 'No download profiles yet. Create one to control local download behavior.';
+    el.downloadProfilesBody.appendChild(empty);
+    return;
+  }
+
+  for (const downloadProfile of state.downloadProfiles) {
+    el.downloadProfilesBody.appendChild(createDownloadProfileCard(downloadProfile));
+  }
+}
+
+function createDownloadProfileCard(downloadProfile) {
+  const card = document.createElement('article');
+  const usageCount = countRrProfilesUsingDownloadProfile(downloadProfile.id);
+  card.className = 'profile-card download-profile-card';
+  card.dataset.id = downloadProfile.id || '';
+  card.innerHTML = `
+    <div class="profile-card-main">
+      <div>
+        <div class="profile-eyebrow">Download profile</div>
+        <h3 data-role="name"></h3>
+        <p data-role="summary"></p>
+      </div>
+      <span data-role="status" class="profile-status status"></span>
+    </div>
+    <dl class="profile-facts">
+      <div>
+        <dt>Threshold</dt>
+        <dd data-role="threshold"></dd>
+      </div>
+      <div>
+        <dt>Duration</dt>
+        <dd data-role="duration"></dd>
+      </div>
+      <div>
+        <dt>Grace</dt>
+        <dd data-role="grace"></dd>
+      </div>
+      <div>
+        <dt>Ignore below</dt>
+        <dd data-role="min-size"></dd>
+      </div>
+    </dl>
+    <div class="profile-actions" aria-label="Download profile actions">
+      <button data-action="edit" class="profile-action primary" type="button">Edit</button>
+      <button data-action="delete" class="profile-action danger" type="button">Delete</button>
+    </div>
+  `;
+
+  setText(card.querySelector('[data-role="name"]'), downloadProfile.name);
+  setText(card.querySelector('[data-role="summary"]'), downloadProfileSummary(downloadProfile, usageCount));
+  setText(card.querySelector('[data-role="status"]'), isDefaultDownloadProfile(downloadProfile) ? 'Default' : `${usageCount} RR`);
+  card.querySelector('[data-role="status"]').className = `profile-status status ${isDefaultDownloadProfile(downloadProfile) ? 'ok' : ''}`;
+  setProfileFact(
+    card,
+    'threshold',
+    Number(downloadProfile.slowSpeedThresholdBytesPerSecond) > 0
+      ? formatSpeed(downloadProfile.slowSpeedThresholdBytesPerSecond)
+      : 'Off',
+  );
+  setProfileFact(card, 'duration', `${Number(downloadProfile.slowSpeedDurationSeconds ?? 0)}s`);
+  setProfileFact(card, 'grace', `${Number(downloadProfile.slowSpeedGraceSeconds ?? 0)}s`);
+  setProfileFact(card, 'min-size', formatBytes(downloadProfile.slowSpeedMinSizeBytes));
+
+  card.querySelector('[data-action="edit"]').addEventListener('click', () => openDownloadProfileDialog(downloadProfile));
+  const deleteButton = card.querySelector('[data-action="delete"]');
+  deleteButton.hidden = isDefaultDownloadProfile(downloadProfile);
+  deleteButton.addEventListener('click', () => deleteDownloadProfileById(downloadProfile.id));
+  return card;
+}
+
+function downloadProfileSummary(downloadProfile, usageCount) {
+  if (isDefaultDownloadProfile(downloadProfile)) {
+    return 'Fallback policy for RR profiles without a custom attachment.';
+  }
+  return usageCount === 1
+    ? 'Attached to 1 RR profile.'
+    : `Attached to ${usageCount} RR profiles.`;
+}
+
+function countRrProfilesUsingDownloadProfile(downloadProfileId) {
+  const defaultId = defaultDownloadProfileId();
+  return state.profiles.filter((profile) => {
+    const attachedId = profile.download_profile_id ?? profile.downloadProfileId ?? defaultId;
+    return String(attachedId) === String(downloadProfileId);
+  }).length;
 }
 
 function setProfileFact(card, role, value) {
@@ -485,6 +578,7 @@ function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE))
   el.wizardProfileName.value = displayName;
   el.wizardPutioFolder.value = profile.putio_folder_name || DEFAULT_PUTIO_FOLDER;
   el.wizardDownloadAt.value = profile.downloadAt ?? profile.download_at ?? DEFAULT_DOWNLOAD_FOLDER;
+  renderDownloadProfileOptions(profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId());
   el.wizardRpcPath.value = profile.rpc_path || defaultRpcPathForType(type);
   el.wizardClientHost.value = DEFAULT_CLIENT_HOST;
   el.wizardClientPort.value = DEFAULT_CLIENT_PORT;
@@ -520,9 +614,35 @@ function createDefaultProfile(type) {
     type,
     putio_folder_name: DEFAULT_PUTIO_FOLDER,
     downloadAt: DEFAULT_DOWNLOAD_FOLDER,
+    download_profile_id: defaultDownloadProfileId(),
     rpc_path: defaultRpcPathForType(type),
     enabled: true,
   };
+}
+
+function renderDownloadProfileOptions(selectedId = defaultDownloadProfileId()) {
+  el.wizardDownloadProfile.replaceChildren();
+  const profiles = state.downloadProfiles.length > 0
+    ? state.downloadProfiles
+    : [{
+        id: '',
+        name: 'Default',
+      }];
+  for (const downloadProfile of profiles) {
+    const option = document.createElement('option');
+    option.value = downloadProfile.id == null ? '' : String(downloadProfile.id);
+    option.textContent = downloadProfile.name || 'Default';
+    el.wizardDownloadProfile.appendChild(option);
+  }
+  const nextValue = selectedId == null ? '' : String(selectedId);
+  if (Array.from(el.wizardDownloadProfile.options).some((option) => option.value === nextValue)) {
+    el.wizardDownloadProfile.value = nextValue;
+  }
+}
+
+function numericSelectValue(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function syncWizardDefaultsForType() {
@@ -542,6 +662,7 @@ function getWizardPayload() {
     slug: slugify(el.wizardProfileName.value),
     putio_folder_name: el.wizardPutioFolder.value.trim(),
     downloadAt: el.wizardDownloadAt.value.trim(),
+    download_profile_id: numericSelectValue(el.wizardDownloadProfile.value),
     rpc_path: normalizeRpcPath(el.wizardRpcPath.value),
     enabled: el.wizardEnabled.checked,
   };
@@ -565,9 +686,10 @@ async function saveProfileFromWizard() {
       : await api('/api/profiles', {
         method: 'POST',
         body: JSON.stringify(payload),
-      });
+    });
     upsertProfileState(savedProfile);
     renderProfiles();
+    renderDownloadProfiles();
     closeProfileWizard();
     setMessage('Profile saved.', 'ok');
   } catch (error) {
@@ -586,8 +708,112 @@ async function deleteProfileById(id = el.wizardProfileId.value) {
   await api(`/api/profiles/${id}`, { method: 'DELETE' });
   state.profiles = state.profiles.filter((profile) => String(profile.id) !== String(id));
   renderProfiles();
+  renderDownloadProfiles();
   closeProfileWizard();
   setMessage('Profile deleted.', 'ok');
+}
+
+function openDownloadProfileDialog(downloadProfile = createDefaultDownloadProfile()) {
+  const isExisting = Boolean(downloadProfile.id);
+  el.downloadProfileDialogTitle.textContent = isExisting
+    ? `Download profile: ${downloadProfile.name}`
+    : 'New download profile';
+  el.downloadProfileId.value = downloadProfile.id || '';
+  el.downloadProfileName.value = downloadProfile.name || '';
+  setNumberInput(el.downloadSlowSpeedThreshold, downloadProfile.slowSpeedThresholdBytesPerSecond ?? 0);
+  setNumberInput(el.downloadSlowSpeedDuration, downloadProfile.slowSpeedDurationSeconds ?? 120);
+  setNumberInput(el.downloadSlowSpeedGrace, downloadProfile.slowSpeedGraceSeconds ?? 30);
+  setNumberInput(el.downloadSlowSpeedMinSize, downloadProfile.slowSpeedMinSizeBytes ?? 100 * 1024 * 1024);
+  el.deleteDownloadProfileButton.hidden = !isExisting || isDefaultDownloadProfile(downloadProfile);
+  el.saveDownloadProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
+  setDownloadProfileMessage('');
+
+  if (typeof el.downloadProfileDialog.showModal === 'function') {
+    el.downloadProfileDialog.showModal();
+  } else {
+    el.downloadProfileDialog.setAttribute('open', '');
+  }
+  el.downloadProfileName.focus();
+}
+
+function closeDownloadProfileDialog() {
+  if (el.downloadProfileDialog.open && typeof el.downloadProfileDialog.close === 'function') {
+    el.downloadProfileDialog.close();
+  } else {
+    el.downloadProfileDialog.removeAttribute('open');
+  }
+}
+
+function createDefaultDownloadProfile() {
+  const fallback = state.settings?.downloadPolicy ?? state.downloadProfiles[0] ?? {};
+  return {
+    id: '',
+    name: '',
+    slowSpeedThresholdBytesPerSecond: fallback.slowSpeedThresholdBytesPerSecond ?? 0,
+    slowSpeedDurationSeconds: fallback.slowSpeedDurationSeconds ?? 120,
+    slowSpeedGraceSeconds: fallback.slowSpeedGraceSeconds ?? 30,
+    slowSpeedMinSizeBytes: fallback.slowSpeedMinSizeBytes ?? 100 * 1024 * 1024,
+  };
+}
+
+function getDownloadProfilePayload() {
+  return {
+    name: el.downloadProfileName.value.trim(),
+    slug: slugify(el.downloadProfileName.value),
+    slowSpeedThresholdBytesPerSecond: numberInputValue(el.downloadSlowSpeedThreshold),
+    slowSpeedDurationSeconds: numberInputValue(el.downloadSlowSpeedDuration),
+    slowSpeedGraceSeconds: numberInputValue(el.downloadSlowSpeedGrace),
+    slowSpeedMinSizeBytes: numberInputValue(el.downloadSlowSpeedMinSize),
+  };
+}
+
+async function saveDownloadProfileFromDialog() {
+  const id = el.downloadProfileId.value;
+  const payload = getDownloadProfilePayload();
+  if (!payload.name) {
+    setDownloadProfileMessage('Download profile name is required.', 'error');
+    return;
+  }
+
+  el.saveDownloadProfileButton.disabled = true;
+  try {
+    const savedProfile = id
+      ? await api(`/api/download-profiles/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+      : await api('/api/download-profiles', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    upsertDownloadProfileState(savedProfile);
+    renderProfiles();
+    renderDownloadProfiles();
+    closeDownloadProfileDialog();
+    setMessage('Download profile saved.', 'ok');
+  } catch (error) {
+    setDownloadProfileMessage(error.message, 'error');
+  } finally {
+    el.saveDownloadProfileButton.disabled = false;
+  }
+}
+
+function upsertDownloadProfileState(downloadProfile) {
+  const index = state.downloadProfiles.findIndex((existing) => String(existing.id) === String(downloadProfile.id));
+  if (index >= 0) state.downloadProfiles[index] = downloadProfile;
+  else state.downloadProfiles.push(downloadProfile);
+}
+
+async function deleteDownloadProfileById(id = el.downloadProfileId.value) {
+  if (!id) {
+    closeDownloadProfileDialog();
+    return;
+  }
+
+  await api(`/api/download-profiles/${id}`, { method: 'DELETE' });
+  closeDownloadProfileDialog();
+  setMessage('Download profile deleted.', 'ok');
+  await loadAll();
 }
 
 function updateWizardPreview() {
@@ -712,8 +938,33 @@ function setWizardMessage(message, tone = 'neutral') {
   el.profileWizardMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
 }
 
+function setDownloadProfileMessage(message, tone = 'neutral') {
+  el.downloadProfileMessage.textContent = message;
+  el.downloadProfileMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+}
+
 function profileType(type) {
   return PROFILE_TYPES[type] ?? PROFILE_TYPES.custom;
+}
+
+function defaultDownloadProfileId() {
+  return state.settings?.defaultDownloadProfileId
+    ?? state.downloadProfiles.find((profile) => profile.slug === 'default')?.id
+    ?? state.downloadProfiles[0]?.id
+    ?? null;
+}
+
+function isDefaultDownloadProfile(downloadProfile) {
+  return String(downloadProfile?.id) === String(defaultDownloadProfileId()) || downloadProfile?.slug === 'default';
+}
+
+function findDownloadProfile(id) {
+  const targetId = id ?? defaultDownloadProfileId();
+  return state.downloadProfiles.find((profile) => String(profile.id) === String(targetId));
+}
+
+function downloadProfileDisplayName(id) {
+  return findDownloadProfile(id)?.name ?? 'Default';
 }
 
 function profileDisplayName(profile, detail = profileType(profile?.type)) {
@@ -845,7 +1096,10 @@ function updateDownloadRow(row, download) {
 
   setDataValue(row, 'id', download.id);
   setText(row.querySelector('[data-role="download-title"]'), download.name);
-  setText(row.querySelector('[data-role="download-location"]'), `${download.profileName} · ${download.downloadAt}`);
+  setText(
+    row.querySelector('[data-role="download-location"]'),
+    `${download.profileName} · ${download.downloadProfileName || 'Default'} · ${download.downloadAt}`,
+  );
   setText(row.querySelector('[data-role="download-status"]'), `${download.lifecycle} · ${combinedProgress}%`);
   setText(row.querySelector('[data-role="download-files"]'), download.error || `${fileText} · ${sizeText}`);
   setText(row.querySelector('[data-role="download-speed"]'), formatSpeed(download.speed));
@@ -1120,24 +1374,6 @@ el.settingsForm.addEventListener('submit', async (event) => {
   requestStateRefresh();
 });
 
-el.downloaderSettingsForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const settings = await api('/api/settings', {
-    method: 'PUT',
-    body: JSON.stringify({ downloadPolicy: getDownloadPolicyPayload() }),
-  });
-  state.settings = settings;
-  state.downloaderPolicyDirty = false;
-  renderDownloadPolicy();
-  setMessage('Downloader settings saved.', 'ok');
-  if (!requestStateRefresh()) await loadAll();
-});
-
-for (const input of el.downloaderSettingsForm.querySelectorAll('input')) {
-  input.addEventListener('input', updateDownloaderPolicyDirtyState);
-  input.addEventListener('change', updateDownloaderPolicyDirtyState);
-}
-
 el.testConnectionButton.addEventListener('click', async () => {
   try {
     const token = el.putioToken.value.trim();
@@ -1203,6 +1439,7 @@ async function pollOAuth(manual) {
 }
 
 el.addProfileButton.addEventListener('click', () => openProfileWizard(createDefaultProfile(DEFAULT_PROFILE_TYPE)));
+el.addDownloadProfileButton.addEventListener('click', () => openDownloadProfileDialog(createDefaultDownloadProfile()));
 el.profileWizardForm.addEventListener('submit', (event) => {
   event.preventDefault();
   saveProfileFromWizard().catch((error) => setWizardMessage(error.message, 'error'));
@@ -1221,6 +1458,7 @@ for (const input of [
   el.wizardProfileName,
   el.wizardPutioFolder,
   el.wizardDownloadAt,
+  el.wizardDownloadProfile,
   el.wizardRpcPath,
   el.wizardClientHost,
   el.wizardClientPort,
@@ -1235,6 +1473,18 @@ el.copyClientSettingsButton.addEventListener('click', () => {
 });
 el.deleteProfileButton.addEventListener('click', () => {
   deleteProfileById().catch((error) => setWizardMessage(error.message, 'error'));
+});
+el.downloadProfileForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveDownloadProfileFromDialog().catch((error) => setDownloadProfileMessage(error.message, 'error'));
+});
+el.downloadProfileDialogClose.addEventListener('click', closeDownloadProfileDialog);
+el.downloadProfileDialog.querySelector('[data-action="cancel-download-profile"]').addEventListener('click', closeDownloadProfileDialog);
+el.downloadProfileDialog.addEventListener('click', (event) => {
+  if (event.target === el.downloadProfileDialog) closeDownloadProfileDialog();
+});
+el.deleteDownloadProfileButton.addEventListener('click', () => {
+  deleteDownloadProfileById().catch((error) => setDownloadProfileMessage(error.message, 'error'));
 });
 el.refreshButton.addEventListener('click', () => {
   if (!requestStateRefresh()) {

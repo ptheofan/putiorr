@@ -449,6 +449,10 @@ select:focus {
   background: #fff0ee;
 }
 
+.download-profile-card .profile-facts div:last-child {
+  grid-column: auto;
+}
+
 .modal {
   width: min(900px, calc(100vw - 32px));
   max-height: calc(100vh - 32px);
@@ -459,6 +463,10 @@ select:focus {
   color: var(--text);
   background: #ffffff;
   overflow: hidden;
+}
+
+.compact-modal {
+  width: min(620px, calc(100vw - 32px));
 }
 
 .modal::backdrop {
@@ -486,6 +494,23 @@ select:focus {
   padding: 8px;
   font-size: 20px;
   line-height: 1;
+}
+
+.download-profile-form {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  max-height: calc(100vh - 32px);
+}
+
+.modal-body {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.modal-message {
+  padding: 0 18px;
 }
 
 .wizard-layout {
@@ -620,7 +645,8 @@ select:focus {
   overflow-wrap: anywhere;
 }
 
-#profileWizardMessage:empty {
+#profileWizardMessage:empty,
+#downloadProfileMessage:empty {
   display: none;
 }
 

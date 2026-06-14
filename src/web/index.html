@@ -15,8 +15,8 @@
         </div>
         <nav class="nav" aria-label="Main navigation">
           <a href="#connection" class="nav-link active">Connection</a>
-          <a href="#downloader" class="nav-link">Downloader</a>
           <a href="#profiles" class="nav-link">RR profiles</a>
+          <a href="#download-profiles" class="nav-link">Download profiles</a>
           <a href="#downloads" class="nav-link">Downloads</a>
         </nav>
       </aside>
@@ -75,40 +75,6 @@
           <p id="settingsMessage" class="message" role="status"></p>
         </section>
 
-        <section id="downloader" class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Downloader</h2>
-              <p>Resume is automatic. Slow-speed reset starts when the threshold is greater than zero.</p>
-            </div>
-          </div>
-
-          <form id="downloaderSettingsForm" class="policy-grid">
-            <label>
-              Slow threshold
-              <input id="slowSpeedThreshold" name="slowSpeedThresholdBytesPerSecond" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes per second">
-            </label>
-            <label>
-              Duration
-              <input id="slowSpeedDuration" name="slowSpeedDurationSeconds" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
-            </label>
-            <label>
-              Startup grace
-              <input id="slowSpeedGrace" name="slowSpeedGraceSeconds" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
-            </label>
-            <label>
-              Ignore below
-              <input id="slowSpeedMinSize" name="slowSpeedMinSizeBytes" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes">
-            </label>
-            <div class="button-row policy-actions">
-              <button class="button secondary" type="submit">
-                <span aria-hidden="true">●</span>
-                Save downloader
-              </button>
-            </div>
-          </form>
-        </section>
-
         <section id="profiles" class="panel">
           <div class="section-head">
             <div>
@@ -122,6 +88,21 @@
           </div>
 
           <div id="profilesBody" class="profiles-list"></div>
+        </section>
+
+        <section id="download-profiles" class="panel">
+          <div class="section-head">
+            <div>
+              <h2>Download profiles</h2>
+              <p>Tune slow-speed reset separately for music, episodes, movies, and other download shapes.</p>
+            </div>
+            <button id="addDownloadProfileButton" class="button primary" type="button">
+              <span aria-hidden="true">＋</span>
+              Add profile
+            </button>
+          </div>
+
+          <div id="downloadProfilesBody" class="profiles-list"></div>
         </section>
 
         <section id="downloads" class="panel">
@@ -186,6 +167,10 @@
                 </label>
               </div>
               <p class="field-help">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
+              <label>
+                Download profile
+                <select id="wizardDownloadProfile"></select>
+              </label>
             </section>
 
             <section class="wizard-step">
@@ -244,6 +229,56 @@
           <div class="button-row">
             <button class="button secondary" type="button" data-action="cancel-profile-wizard">Cancel</button>
             <button id="saveProfileButton" class="button primary" type="submit">Save profile</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="downloadProfileDialog" class="modal compact-modal">
+      <form id="downloadProfileForm" class="download-profile-form">
+        <div class="modal-head">
+          <div>
+            <h2 id="downloadProfileDialogTitle">Download profile</h2>
+            <p>Slow-speed reset starts when the threshold is greater than zero.</p>
+          </div>
+          <button id="downloadProfileDialogClose" class="icon-button" type="button" aria-label="Close download profile">×</button>
+        </div>
+
+        <div class="modal-body">
+          <input id="downloadProfileId" type="hidden">
+          <label>
+            Name
+            <input id="downloadProfileName" type="text" autocomplete="off" placeholder="Movies">
+          </label>
+          <div class="field-pair">
+            <label>
+              Slow threshold
+              <input id="downloadSlowSpeedThreshold" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes per second">
+            </label>
+            <label>
+              Duration
+              <input id="downloadSlowSpeedDuration" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
+            </label>
+          </div>
+          <div class="field-pair">
+            <label>
+              Startup grace
+              <input id="downloadSlowSpeedGrace" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
+            </label>
+            <label>
+              Ignore below
+              <input id="downloadSlowSpeedMinSize" type="number" min="0" step="1" inputmode="numeric" placeholder="Bytes">
+            </label>
+          </div>
+        </div>
+
+        <p id="downloadProfileMessage" class="message modal-message" role="status"></p>
+
+        <div class="modal-actions">
+          <button id="deleteDownloadProfileButton" class="button danger" type="button">Delete profile</button>
+          <div class="button-row">
+            <button class="button secondary" type="button" data-action="cancel-download-profile">Cancel</button>
+            <button id="saveDownloadProfileButton" class="button primary" type="submit">Save profile</button>
           </div>
         </div>
       </form>

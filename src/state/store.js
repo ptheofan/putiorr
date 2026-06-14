@@ -1,6 +1,13 @@
 import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
+import {
+  DEFAULT_DOWNLOAD_POLICY,
+  DOWNLOAD_POLICY_COLUMNS,
+  DOWNLOAD_POLICY_SETTING_KEYS,
+  downloadPolicyInput,
+  normalizeDownloadPolicy,
+} from '../download/policy.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -54,7 +61,28 @@ function normalizeProfileRow(row) {
     ...rest,
     download_at: downloadAt,
     downloadAt,
+    downloadProfileId: row.download_profile_id,
     enabled: toBool(row.enabled),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+function normalizeDownloadProfileRow(row) {
+  if (!row) return undefined;
+  const policy = normalizeDownloadPolicy(downloadPolicyInput(row));
+  return {
+    id: row.id,
+    name: row.name,
+    slug: row.slug,
+    slow_speed_threshold_bytes_per_second: policy.slowSpeedThresholdBytesPerSecond,
+    slow_speed_duration_seconds: policy.slowSpeedDurationSeconds,
+    slow_speed_grace_seconds: policy.slowSpeedGraceSeconds,
+    slow_speed_min_size_bytes: policy.slowSpeedMinSizeBytes,
+    slowSpeedThresholdBytesPerSecond: policy.slowSpeedThresholdBytesPerSecond,
+    slowSpeedDurationSeconds: policy.slowSpeedDurationSeconds,
+    slowSpeedGraceSeconds: policy.slowSpeedGraceSeconds,
+    slowSpeedMinSizeBytes: policy.slowSpeedMinSizeBytes,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -62,6 +90,35 @@ function normalizeProfileRow(row) {
 
 function profileDownloadAt(input) {
   return input.download_at ?? input.downloadAt ?? input.local_path ?? input.localPath;
+}
+
+function profileDownloadProfileId(input) {
+  if (input.download_profile_id !== undefined) return input.download_profile_id;
+  if (input.downloadProfileId !== undefined) return input.downloadProfileId;
+  return undefined;
+}
+
+function normalizeOptionalId(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function downloadProfilePolicyFromConfigAndSettings(store, config) {
+  const input = {};
+  for (const [property, key] of Object.entries(DOWNLOAD_POLICY_SETTING_KEYS)) {
+    const value = store.getSetting(key);
+    if (value !== undefined) input[property] = value;
+  }
+  return normalizeDownloadPolicy(input, {
+    slowSpeedThresholdBytesPerSecond: config.slowSpeedThresholdBytesPerSecond,
+    slowSpeedDurationSeconds: config.slowSpeedDurationSeconds,
+    slowSpeedGraceSeconds: config.slowSpeedGraceSeconds,
+    slowSpeedMinSizeBytes: config.slowSpeedMinSizeBytes,
+  });
+}
+
+function downloadProfilePolicyPatch(input, fallback = DEFAULT_DOWNLOAD_POLICY) {
+  return normalizeDownloadPolicy(downloadPolicyInput(input), fallback);
 }
 
 export class StateStore {
@@ -88,11 +145,24 @@ export class StateStore {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS download_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        slug TEXT NOT NULL UNIQUE,
+        slow_speed_threshold_bytes_per_second INTEGER NOT NULL DEFAULT 0,
+        slow_speed_duration_seconds INTEGER NOT NULL DEFAULT 120,
+        slow_speed_grace_seconds INTEGER NOT NULL DEFAULT 30,
+        slow_speed_min_size_bytes INTEGER NOT NULL DEFAULT 104857600,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS profiles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         type TEXT NOT NULL DEFAULT 'custom',
         slug TEXT NOT NULL UNIQUE,
+        download_profile_id INTEGER REFERENCES download_profiles(id) ON DELETE SET NULL,
         putio_folder_name TEXT NOT NULL,
         putio_folder_id INTEGER,
         download_at TEXT NOT NULL,
@@ -155,6 +225,7 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS idx_transfer_files_status ON transfer_files(status);
     `);
     this.migrateProfileDownloadAt();
+    this.ensureColumn('profiles', 'download_profile_id', 'INTEGER REFERENCES download_profiles(id) ON DELETE SET NULL');
     this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
     this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     this.migrateMagnetTransferHashes();
@@ -229,6 +300,7 @@ export class StateStore {
     if (config.putioToken && !this.getSetting('putio_token')) {
       this.setSetting('putio_token', config.putioToken);
     }
+    const defaultDownloadProfile = this.ensureDefaultDownloadProfile(config);
     if (this.listProfiles({ includeDisabled: true }).length === 0) {
       const seedProfiles = Array.isArray(config.seedProfiles) && config.seedProfiles.length > 0
         ? config.seedProfiles
@@ -236,6 +308,7 @@ export class StateStore {
             name: config.defaultProfileName,
             type: config.defaultProfileType,
             slug: 'default',
+            download_profile_id: defaultDownloadProfile.id,
             putio_folder_name: config.putioFolder,
             downloadAt: config.targetDir,
             rpc_path: config.defaultRpcPath,
@@ -247,17 +320,21 @@ export class StateStore {
           ...profile,
           slug: profile.slug ?? profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
           type: profile.type ?? 'custom',
+          download_profile_id: profileDownloadProfileId(profile) ?? defaultDownloadProfile.id,
           enabled: profile.enabled !== false,
         });
       }
     }
+    this.assignMissingProfileDownloadProfiles(defaultDownloadProfile.id);
   }
 
   createDefaultProfile(config) {
+    const defaultDownloadProfile = this.findDefaultDownloadProfile() ?? this.ensureDefaultDownloadProfile(config);
     return this.createProfile({
         name: config.defaultProfileName,
         type: config.defaultProfileType,
         slug: 'default',
+        download_profile_id: defaultDownloadProfile.id,
         putio_folder_name: config.putioFolder,
         downloadAt: config.targetDir,
         rpc_path: config.defaultRpcPath,
@@ -265,18 +342,112 @@ export class StateStore {
     });
   }
 
+  ensureDefaultDownloadProfile(config) {
+    const existing = this.findDefaultDownloadProfile();
+    if (existing) return existing;
+    return this.createDownloadProfile({
+      name: 'Default',
+      slug: 'default',
+      ...downloadProfilePolicyFromConfigAndSettings(this, config),
+    });
+  }
+
+  assignMissingProfileDownloadProfiles(downloadProfileId) {
+    this.db.prepare(`
+      UPDATE profiles
+      SET download_profile_id = ?, updated_at = ?
+      WHERE download_profile_id IS NULL
+    `).run(downloadProfileId, nowIso());
+  }
+
+  createDownloadProfile(input) {
+    const timestamp = nowIso();
+    const policy = downloadProfilePolicyPatch(input);
+    const result = this.db.prepare(`
+      INSERT INTO download_profiles (
+        name, slug, slow_speed_threshold_bytes_per_second,
+        slow_speed_duration_seconds, slow_speed_grace_seconds,
+        slow_speed_min_size_bytes, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.name,
+      input.slug,
+      policy.slowSpeedThresholdBytesPerSecond,
+      policy.slowSpeedDurationSeconds,
+      policy.slowSpeedGraceSeconds,
+      policy.slowSpeedMinSizeBytes,
+      timestamp,
+      timestamp,
+    );
+    return this.findDownloadProfileById(Number(result.lastInsertRowid));
+  }
+
+  updateDownloadProfile(id, patch) {
+    const existing = this.findDownloadProfileById(id);
+    if (!existing) return undefined;
+    const normalizedPatch = { ...patch };
+    const currentPolicy = normalizeDownloadPolicy(downloadPolicyInput(existing));
+    const nextPolicy = downloadProfilePolicyPatch(patch, currentPolicy);
+    for (const [property, column] of Object.entries(DOWNLOAD_POLICY_COLUMNS)) {
+      if (Object.hasOwn(patch, property) || Object.hasOwn(patch, column)) {
+        normalizedPatch[column] = nextPolicy[property];
+      }
+    }
+
+    const allowed = [
+      'name',
+      'slug',
+      'slow_speed_threshold_bytes_per_second',
+      'slow_speed_duration_seconds',
+      'slow_speed_grace_seconds',
+      'slow_speed_min_size_bytes',
+    ];
+    const keys = allowed.filter((key) => Object.hasOwn(normalizedPatch, key));
+    if (keys.length === 0) return existing;
+    const assignments = keys.map((key) => `${key} = ?`).join(', ');
+    const values = keys.map((key) => normalizedPatch[key]);
+    values.push(nowIso(), id);
+    this.db.prepare(`UPDATE download_profiles SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
+    return this.findDownloadProfileById(id);
+  }
+
+  deleteDownloadProfile(id) {
+    this.db.prepare('DELETE FROM download_profiles WHERE id = ?').run(id);
+  }
+
+  findDownloadProfileById(id) {
+    const row = this.db.prepare('SELECT * FROM download_profiles WHERE id = ?').get(id);
+    return normalizeDownloadProfileRow(row);
+  }
+
+  findDownloadProfileBySlug(slug) {
+    const row = this.db.prepare('SELECT * FROM download_profiles WHERE slug = ?').get(slug);
+    return normalizeDownloadProfileRow(row);
+  }
+
+  findDefaultDownloadProfile() {
+    return this.findDownloadProfileBySlug('default') ?? this.listDownloadProfiles()[0];
+  }
+
+  listDownloadProfiles() {
+    return this.db.prepare('SELECT * FROM download_profiles ORDER BY id ASC').all().map(normalizeDownloadProfileRow);
+  }
+
   createProfile(input) {
     const timestamp = nowIso();
+    const downloadProfileId = profileDownloadProfileId(input);
     const result = this.db.prepare(`
       INSERT INTO profiles (
-        name, type, slug, putio_folder_name, putio_folder_id,
+        name, type, slug, download_profile_id, putio_folder_name, putio_folder_id,
         download_at, rpc_path, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.name,
       input.type ?? 'custom',
       input.slug,
+      downloadProfileId == null ? null : normalizeOptionalId(downloadProfileId),
       input.putio_folder_name,
       input.putio_folder_id ?? null,
       profileDownloadAt(input),
@@ -294,10 +465,15 @@ export class StateStore {
     const normalizedPatch = { ...patch };
     const nextDownloadAt = profileDownloadAt(patch);
     if (nextDownloadAt !== undefined) normalizedPatch.download_at = nextDownloadAt;
+    const nextDownloadProfileId = profileDownloadProfileId(patch);
+    if (nextDownloadProfileId !== undefined) {
+      normalizedPatch.download_profile_id = nextDownloadProfileId == null ? null : normalizeOptionalId(nextDownloadProfileId);
+    }
     const allowed = [
       'name',
       'type',
       'slug',
+      'download_profile_id',
       'putio_folder_name',
       'putio_folder_id',
       'download_at',

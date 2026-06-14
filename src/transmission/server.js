@@ -196,10 +196,7 @@ export class TransmissionRpcServer {
       const method = req.method ?? 'GET';
 
       if (method === 'GET' && requestPath === '/api/settings') {
-        jsonResponse(res, 200, {
-          tokenConfigured: Boolean(this.service.getPutioToken()),
-          downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
-        }, this.sessionId);
+        jsonResponse(res, 200, this.settingsResponse(), this.sessionId);
         return;
       }
 
@@ -215,10 +212,7 @@ export class TransmissionRpcServer {
         if (body.downloadPolicy !== undefined) {
           saveDownloadPolicyToStore(this.service.store, body.downloadPolicy, this.config);
         }
-        jsonResponse(res, 200, {
-          tokenConfigured: Boolean(this.service.getPutioToken()),
-          downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
-        }, this.sessionId);
+        jsonResponse(res, 200, this.settingsResponse(), this.sessionId);
         return;
       }
 
@@ -258,6 +252,50 @@ export class TransmissionRpcServer {
 
       if (method === 'GET' && requestPath === '/api/profiles') {
         jsonResponse(res, 200, this.service.store.listProfiles({ includeDisabled: true }), this.sessionId);
+        return;
+      }
+
+      if (method === 'GET' && requestPath === '/api/download-profiles') {
+        jsonResponse(res, 200, this.service.store.listDownloadProfiles(), this.sessionId);
+        return;
+      }
+
+      if (method === 'POST' && requestPath === '/api/download-profiles') {
+        const downloadProfile = this.service.store.createDownloadProfile(
+          normalizeDownloadProfileInput(await readJsonBody(req)),
+        );
+        jsonResponse(res, 201, downloadProfile, this.sessionId);
+        return;
+      }
+
+      const downloadProfileMatch = requestPath.match(/^\/api\/download-profiles\/(\d+)$/);
+      if (downloadProfileMatch && method === 'PUT') {
+        const id = Number(downloadProfileMatch[1]);
+        const existingDownloadProfile = this.service.store.findDownloadProfileById(id);
+        if (!existingDownloadProfile) throw new Error('Download profile not found');
+        const patch = normalizeDownloadProfileInput(await readJsonBody(req), { partial: true });
+        if (existingDownloadProfile.slug === 'default') patch.slug = 'default';
+        const downloadProfile = this.service.store.updateDownloadProfile(
+          id,
+          patch,
+        );
+        jsonResponse(res, 200, downloadProfile, this.sessionId);
+        return;
+      }
+
+      if (downloadProfileMatch && method === 'DELETE') {
+        const id = Number(downloadProfileMatch[1]);
+        const downloadProfile = this.service.store.findDownloadProfileById(id);
+        if (!downloadProfile) throw new Error('Download profile not found');
+        const defaultDownloadProfile = this.service.store.findDefaultDownloadProfile();
+        if (defaultDownloadProfile?.id === id || downloadProfile.slug === 'default') {
+          throw new Error('Default download profile cannot be deleted');
+        }
+        this.service.store.deleteDownloadProfile(id);
+        if (defaultDownloadProfile) {
+          this.service.store.assignMissingProfileDownloadProfiles(defaultDownloadProfile.id);
+        }
+        jsonResponse(res, 200, { ok: true }, this.sessionId);
         return;
       }
 
@@ -301,6 +339,15 @@ export class TransmissionRpcServer {
       logger.warn('api request failed', { path: requestPath, error: error.message });
       jsonResponse(res, 400, { error: error.message }, this.sessionId);
     }
+  }
+
+  settingsResponse() {
+    const defaultDownloadProfile = this.service.store.findDefaultDownloadProfile();
+    return {
+      tokenConfigured: Boolean(this.service.getPutioToken()),
+      defaultDownloadProfileId: defaultDownloadProfile?.id,
+      downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
+    };
   }
 
   async serveWeb(_req, res, requestPath) {
@@ -618,6 +665,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const name = input.name == null ? undefined : String(input.name).trim();
   const type = input.type == null ? undefined : String(input.type).trim().toLowerCase();
   const slug = input.slug == null ? undefined : slugify(input.slug || name);
+  const downloadProfileId = input.download_profile_id ?? input.downloadProfileId;
   const putioFolderName = input.putio_folder_name ?? input.putioFolderName;
   const downloadAt = input.downloadAt ?? input.download_at ?? input.local_path ?? input.localPath;
   const rpcPath = input.rpc_path ?? input.rpcPath;
@@ -625,6 +673,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (name !== undefined) output.name = name;
   if (type !== undefined) output.type = type || 'custom';
   if (slug !== undefined) output.slug = slug;
+  if (downloadProfileId !== undefined) output.download_profile_id = normalizeOptionalId(downloadProfileId);
   if (putioFolderName !== undefined) output.putio_folder_name = String(putioFolderName).trim();
   if (downloadAt !== undefined) output.download_at = path.resolve(String(downloadAt).trim());
   if (rpcPath !== undefined) output.rpc_path = normalizeRpcPath(rpcPath);
@@ -644,6 +693,62 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   }
 
   return output;
+}
+
+function normalizeDownloadProfileInput(input, { partial = false } = {}) {
+  const policySource = input.downloadPolicy && typeof input.downloadPolicy === 'object'
+    ? { ...input.downloadPolicy, ...input }
+    : input;
+  const output = {};
+  const name = input.name == null ? undefined : String(input.name).trim();
+  const slug = input.slug == null ? undefined : slugify(input.slug || name);
+
+  if (name !== undefined) output.name = name;
+  if (slug !== undefined) output.slug = slug;
+  copyNonNegativePolicyValue(
+    output,
+    policySource,
+    'slowSpeedThresholdBytesPerSecond',
+    'slow_speed_threshold_bytes_per_second',
+  );
+  copyNonNegativePolicyValue(
+    output,
+    policySource,
+    'slowSpeedDurationSeconds',
+    'slow_speed_duration_seconds',
+  );
+  copyNonNegativePolicyValue(
+    output,
+    policySource,
+    'slowSpeedGraceSeconds',
+    'slow_speed_grace_seconds',
+  );
+  copyNonNegativePolicyValue(
+    output,
+    policySource,
+    'slowSpeedMinSizeBytes',
+    'slow_speed_min_size_bytes',
+  );
+
+  if (!partial) {
+    for (const key of ['name', 'slug']) {
+      if (!output[key]) throw new Error(`${key} is required`);
+    }
+  }
+
+  return output;
+}
+
+function copyNonNegativePolicyValue(output, input, camelKey, snakeKey) {
+  const value = input[camelKey] ?? input[snakeKey];
+  if (value === undefined) return;
+  const parsed = Number.parseInt(value, 10);
+  output[snakeKey] = Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizeOptionalId(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function slugify(value) {

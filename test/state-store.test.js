@@ -4,6 +4,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 
 test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
@@ -74,6 +75,35 @@ test('profile rows migrate local_path to downloadAt', async () => {
     assert.equal(profile.downloadAt, '/staged');
     assert.equal(profile.download_at, '/staged');
     assert.equal(Object.hasOwn(profile, 'local_path'), false);
+  } finally {
+    store.close();
+  }
+});
+
+test('seed creates a default download profile and attaches RR profiles', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
+  const config = loadConfig({
+    PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
+    PUTIORR_STATE_PATH: ':memory:',
+    PUTIORR_SLOW_SPEED_THRESHOLD_BYTES_PER_SECOND: '2048',
+    PUTIORR_SLOW_SPEED_DURATION_SECONDS: '45',
+    PUTIORR_SLOW_SPEED_GRACE_SECONDS: '10',
+    PUTIORR_SLOW_SPEED_MIN_SIZE_BYTES: '1048576',
+  }, root);
+  const store = new StateStore(':memory:');
+  try {
+    store.seedFromConfig(config);
+
+    const [downloadProfile] = store.listDownloadProfiles();
+    const rrProfile = store.findProfileBySlug('default');
+
+    assert.equal(downloadProfile.slug, 'default');
+    assert.equal(downloadProfile.slowSpeedThresholdBytesPerSecond, 2048);
+    assert.equal(downloadProfile.slowSpeedDurationSeconds, 45);
+    assert.equal(downloadProfile.slowSpeedGraceSeconds, 10);
+    assert.equal(downloadProfile.slowSpeedMinSizeBytes, 1048576);
+    assert.equal(rrProfile.download_profile_id, downloadProfile.id);
+    assert.equal(rrProfile.downloadProfileId, downloadProfile.id);
   } finally {
     store.close();
   }
