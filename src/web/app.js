@@ -21,6 +21,7 @@ const el = {
   testConnectionButton: document.querySelector('#testConnectionButton'),
   addProfileButton: document.querySelector('#addProfileButton'),
   profilesBody: document.querySelector('#profilesBody'),
+  linkDownloadProfilesButton: document.querySelector('#linkDownloadProfilesButton'),
   addDownloadProfileButton: document.querySelector('#addDownloadProfileButton'),
   downloadProfilesBody: document.querySelector('#downloadProfilesBody'),
   profileWizard: document.querySelector('#profileWizard'),
@@ -62,6 +63,12 @@ const el = {
   downloadProfileMessage: document.querySelector('#downloadProfileMessage'),
   saveDownloadProfileButton: document.querySelector('#saveDownloadProfileButton'),
   deleteDownloadProfileButton: document.querySelector('#deleteDownloadProfileButton'),
+  profileLinksDialog: document.querySelector('#profileLinksDialog'),
+  profileLinksForm: document.querySelector('#profileLinksForm'),
+  profileLinksClose: document.querySelector('#profileLinksClose'),
+  profileLinksList: document.querySelector('#profileLinksList'),
+  profileLinksMessage: document.querySelector('#profileLinksMessage'),
+  saveProfileLinksButton: document.querySelector('#saveProfileLinksButton'),
   downloadsList: document.querySelector('#downloadsList'),
   refreshButton: document.querySelector('#refreshButton'),
 };
@@ -622,6 +629,11 @@ function createDefaultProfile(type) {
 
 function renderDownloadProfileOptions(selectedId = defaultDownloadProfileId()) {
   el.wizardDownloadProfile.replaceChildren();
+  populateDownloadProfileSelect(el.wizardDownloadProfile, selectedId);
+}
+
+function populateDownloadProfileSelect(select, selectedId = defaultDownloadProfileId()) {
+  select.replaceChildren();
   const profiles = state.downloadProfiles.length > 0
     ? state.downloadProfiles
     : [{
@@ -632,11 +644,11 @@ function renderDownloadProfileOptions(selectedId = defaultDownloadProfileId()) {
     const option = document.createElement('option');
     option.value = downloadProfile.id == null ? '' : String(downloadProfile.id);
     option.textContent = downloadProfile.name || 'Default';
-    el.wizardDownloadProfile.appendChild(option);
+    select.appendChild(option);
   }
   const nextValue = selectedId == null ? '' : String(selectedId);
-  if (Array.from(el.wizardDownloadProfile.options).some((option) => option.value === nextValue)) {
-    el.wizardDownloadProfile.value = nextValue;
+  if (Array.from(select.options).some((option) => option.value === nextValue)) {
+    select.value = nextValue;
   }
 }
 
@@ -816,6 +828,104 @@ async function deleteDownloadProfileById(id = el.downloadProfileId.value) {
   await loadAll();
 }
 
+function openProfileLinksDialog() {
+  renderProfileLinksList();
+  setProfileLinksMessage('');
+
+  if (typeof el.profileLinksDialog.showModal === 'function') {
+    el.profileLinksDialog.showModal();
+  } else {
+    el.profileLinksDialog.setAttribute('open', '');
+  }
+  el.profileLinksList.querySelector('select')?.focus();
+}
+
+function closeProfileLinksDialog() {
+  if (el.profileLinksDialog.open && typeof el.profileLinksDialog.close === 'function') {
+    el.profileLinksDialog.close();
+  } else {
+    el.profileLinksDialog.removeAttribute('open');
+  }
+}
+
+function renderProfileLinksList() {
+  el.profileLinksList.replaceChildren();
+  if (state.profiles.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'Create an RR profile before linking download profiles.';
+    el.profileLinksList.appendChild(empty);
+    return;
+  }
+
+  for (const profile of state.profiles) {
+    el.profileLinksList.appendChild(createProfileLinkRow(profile));
+  }
+}
+
+function createProfileLinkRow(profile) {
+  const row = document.createElement('div');
+  const selectedId = currentProfileDownloadProfileId(profile);
+  row.className = 'link-row';
+  row.dataset.id = profile.id || '';
+  row.dataset.initialDownloadProfileId = selectedId == null ? '' : String(selectedId);
+  row.innerHTML = `
+    <div class="link-profile">
+      <strong data-role="name"></strong>
+      <span data-role="meta"></span>
+    </div>
+    <label>
+      Download profile
+      <select data-role="download-profile"></select>
+    </label>
+  `;
+
+  setText(row.querySelector('[data-role="name"]'), profileDisplayName(profile));
+  setText(row.querySelector('[data-role="meta"]'), `${profileType(profile.type).label} · ${profile.rpc_path || 'No RPC path'}`);
+  populateDownloadProfileSelect(row.querySelector('[data-role="download-profile"]'), selectedId);
+  return row;
+}
+
+function currentProfileDownloadProfileId(profile) {
+  return profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId();
+}
+
+async function saveProfileLinksFromDialog() {
+  const rows = Array.from(el.profileLinksList.querySelectorAll('.link-row[data-id]'));
+  const changes = rows.map((row) => {
+    const select = row.querySelector('[data-role="download-profile"]');
+    return {
+      id: row.dataset.id,
+      initialDownloadProfileId: row.dataset.initialDownloadProfileId,
+      downloadProfileId: select?.value ?? '',
+    };
+  }).filter((change) => change.id && change.downloadProfileId !== change.initialDownloadProfileId);
+
+  if (changes.length === 0) {
+    setProfileLinksMessage('No link changes to save.', 'neutral');
+    return;
+  }
+
+  el.saveProfileLinksButton.disabled = true;
+  try {
+    const savedProfiles = await Promise.all(changes.map((change) => api(`/api/profiles/${change.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        download_profile_id: numericSelectValue(change.downloadProfileId),
+      }),
+    })));
+    for (const profile of savedProfiles) upsertProfileState(profile);
+    renderProfiles();
+    renderDownloadProfiles();
+    closeProfileLinksDialog();
+    setMessage('RR profile links saved.', 'ok');
+  } catch (error) {
+    setProfileLinksMessage(error.message, 'error');
+  } finally {
+    el.saveProfileLinksButton.disabled = false;
+  }
+}
+
 function updateWizardPreview() {
   const profile = getWizardPayload();
   const settings = getClientSettingsFromProfile(profile);
@@ -941,6 +1051,11 @@ function setWizardMessage(message, tone = 'neutral') {
 function setDownloadProfileMessage(message, tone = 'neutral') {
   el.downloadProfileMessage.textContent = message;
   el.downloadProfileMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+}
+
+function setProfileLinksMessage(message, tone = 'neutral') {
+  el.profileLinksMessage.textContent = message;
+  el.profileLinksMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
 }
 
 function profileType(type) {
@@ -1439,6 +1554,7 @@ async function pollOAuth(manual) {
 }
 
 el.addProfileButton.addEventListener('click', () => openProfileWizard(createDefaultProfile(DEFAULT_PROFILE_TYPE)));
+el.linkDownloadProfilesButton.addEventListener('click', openProfileLinksDialog);
 el.addDownloadProfileButton.addEventListener('click', () => openDownloadProfileDialog(createDefaultDownloadProfile()));
 el.profileWizardForm.addEventListener('submit', (event) => {
   event.preventDefault();
@@ -1485,6 +1601,15 @@ el.downloadProfileDialog.addEventListener('click', (event) => {
 });
 el.deleteDownloadProfileButton.addEventListener('click', () => {
   deleteDownloadProfileById().catch((error) => setDownloadProfileMessage(error.message, 'error'));
+});
+el.profileLinksForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveProfileLinksFromDialog().catch((error) => setProfileLinksMessage(error.message, 'error'));
+});
+el.profileLinksClose.addEventListener('click', closeProfileLinksDialog);
+el.profileLinksDialog.querySelector('[data-action="cancel-profile-links"]').addEventListener('click', closeProfileLinksDialog);
+el.profileLinksDialog.addEventListener('click', (event) => {
+  if (event.target === el.profileLinksDialog) closeProfileLinksDialog();
 });
 el.refreshButton.addEventListener('click', () => {
   if (!requestStateRefresh()) {

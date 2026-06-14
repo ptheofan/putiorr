@@ -96,10 +96,16 @@
               <h2>Download profiles</h2>
               <p>Tune slow-speed reset separately for music, episodes, movies, and other download shapes.</p>
             </div>
-            <button id="addDownloadProfileButton" class="button primary" type="button">
-              <span aria-hidden="true">＋</span>
-              Add profile
-            </button>
+            <div class="button-row section-actions">
+              <button id="linkDownloadProfilesButton" class="button secondary" type="button">
+                <span aria-hidden="true">↔</span>
+                Link RR profiles
+              </button>
+              <button id="addDownloadProfileButton" class="button primary" type="button">
+                <span aria-hidden="true">＋</span>
+                Add profile
+              </button>
+            </div>
           </div>
 
           <div id="downloadProfilesBody" class="profiles-list"></div>
@@ -279,6 +285,30 @@
           <div class="button-row">
             <button class="button secondary" type="button" data-action="cancel-download-profile">Cancel</button>
             <button id="saveDownloadProfileButton" class="button primary" type="submit">Save profile</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="profileLinksDialog" class="modal compact-modal">
+      <form id="profileLinksForm" class="download-profile-form">
+        <div class="modal-head">
+          <div>
+            <h2>Link RR profiles</h2>
+            <p>Choose which download profile each RR profile should use for local copies.</p>
+          </div>
+          <button id="profileLinksClose" class="icon-button" type="button" aria-label="Close profile links">×</button>
+        </div>
+
+        <div id="profileLinksList" class="modal-body link-list"></div>
+
+        <p id="profileLinksMessage" class="message modal-message" role="status"></p>
+
+        <div class="modal-actions">
+          <span></span>
+          <div class="button-row">
+            <button class="button secondary" type="button" data-action="cancel-profile-links">Cancel</button>
+            <button id="saveProfileLinksButton" class="button primary" type="submit">Save links</button>
           </div>
         </div>
       </form>

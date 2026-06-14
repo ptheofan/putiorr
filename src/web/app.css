@@ -213,6 +213,10 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.section-actions {
+  justify-content: flex-end;
+}
+
 .button,
 .icon-button {
   border: 0;
@@ -513,6 +517,38 @@ select:focus {
   padding: 0 18px;
 }
 
+.link-list {
+  gap: 10px;
+}
+
+.link-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #edf1f2;
+  border-radius: 8px;
+  background: #f8fbfb;
+}
+
+.link-profile {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.link-profile strong {
+  font-size: 14px;
+  line-height: 1.3;
+}
+
+.link-profile span {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .wizard-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
@@ -646,7 +682,8 @@ select:focus {
 }
 
 #profileWizardMessage:empty,
-#downloadProfileMessage:empty {
+#downloadProfileMessage:empty,
+#profileLinksMessage:empty {
   display: none;
 }
 
@@ -943,6 +980,7 @@ td.center input {
   .download-summary,
   .file-row,
   .wizard-layout,
+  .link-row,
   .field-pair,
   .field-pair.compact,
   .check-grid {
