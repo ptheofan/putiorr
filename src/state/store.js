@@ -746,12 +746,15 @@ export class StateStore {
       UPDATE transfer_files
       SET transfer_id = ?, relative_path = ?, size = ?,
           downloaded_bytes = CASE
-            WHEN status = 'complete' THEN downloaded_bytes
+            WHEN status IN ('complete', 'deleted') THEN downloaded_bytes
             ELSE ?
           END,
-          download_speed = ?,
+          download_speed = CASE
+            WHEN status = 'deleted' THEN 0
+            ELSE ?
+          END,
           status = CASE
-            WHEN status = 'complete' THEN status
+            WHEN status IN ('complete', 'deleted') THEN status
             ELSE ?
           END,
           updated_at = ?
@@ -783,6 +786,7 @@ export class StateStore {
     return this.db.prepare(`
       SELECT * FROM transfer_files
       WHERE transfer_id = ?
+        AND status != 'deleted'
       ORDER BY relative_path ASC
     `).all(transferId).map(normalizeFileRow);
   }
@@ -800,6 +804,10 @@ export class StateStore {
   }
 
   updateTransferFile(id, patch) {
+    const existing = this.findTransferFileById(id);
+    if (!existing) return undefined;
+    if (existing.status === 'deleted' && patch.status !== 'deleted') return existing;
+
     const allowed = ['downloaded_bytes', 'download_speed', 'status', 'attempts', 'error_string'];
     const keys = allowed.filter((key) => Object.hasOwn(patch, key));
     if (keys.length === 0) return this.findTransferFileById(id);
@@ -808,6 +816,15 @@ export class StateStore {
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE transfer_files SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
     return this.findTransferFileById(id);
+  }
+
+  markTransferFileDeleted(id) {
+    return this.updateTransferFile(id, {
+      downloaded_bytes: 0,
+      download_speed: 0,
+      status: 'deleted',
+      error_string: '',
+    });
   }
 
   getTransferFileStats(transferId) {
@@ -820,6 +837,7 @@ export class StateStore {
         COALESCE(SUM(downloaded_bytes), 0) AS downloaded_size
       FROM transfer_files
       WHERE transfer_id = ?
+        AND status != 'deleted'
     `).get(transferId);
   }
 }

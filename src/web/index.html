@@ -436,6 +436,36 @@
       </form>
     </dialog>
 
+    <dialog id="deleteConfirmDialog" class="modal compact-modal">
+      <form id="deleteConfirmForm" class="confirm-form">
+        <div class="modal-head">
+          <div>
+            <h2 id="deleteConfirmTitle">Delete download</h2>
+            <p id="deleteConfirmIntro">Confirm this delete action.</p>
+          </div>
+          <button id="deleteConfirmClose" class="icon-button" type="button" aria-label="Close delete confirmation">×</button>
+        </div>
+
+        <div class="modal-body confirm-body">
+          <p class="warning-copy">It is usually safer to do this from the Activity page in your RR software so it can update its own queue state.</p>
+          <label class="checkbox-row">
+            <input id="deleteFromPutio" type="checkbox" checked>
+            <span id="deleteFromPutioLabel">Also delete from put.io</span>
+          </label>
+        </div>
+
+        <p id="deleteConfirmMessage" class="message modal-message" role="status"></p>
+
+        <div class="modal-actions">
+          <span></span>
+          <div class="button-row">
+            <button class="button secondary" type="button" data-action="cancel-delete">Cancel</button>
+            <button id="deleteConfirmButton" class="button danger" type="submit">Delete</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>

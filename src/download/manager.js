@@ -267,19 +267,33 @@ export class DownloadManager {
     );
     await mkdir(path.dirname(targetPath), { recursive: true });
 
+    if (this.isFileDeletedOrTransferRemoved(file)) {
+      await this.discardLocalFile(targetPath);
+      return;
+    }
+
     if (await fileExistsWithSize(targetPath, Number(file.size))) {
-      this.store.updateTransferFile(file.id, {
+      const updated = this.store.updateTransferFile(file.id, {
         status: 'complete',
         downloaded_bytes: Number(file.size),
         download_speed: 0,
         error_string: '',
       });
+      if (updated?.status === 'deleted') {
+        await this.discardLocalFile(targetPath);
+        return;
+      }
       await this.finalizeTransferIfComplete(transfer.id);
       return;
     }
 
     const downloadUrl = await this.service.getPutio().getDownloadUrl(file.putio_file_id);
     await this.downloadToPath(downloadUrl, targetPath, file);
+
+    if (this.isFileDeletedOrTransferRemoved(file)) {
+      await this.discardLocalFile(targetPath);
+      return;
+    }
 
     this.store.updateTransferFile(file.id, {
       status: 'complete',
@@ -288,6 +302,21 @@ export class DownloadManager {
       error_string: '',
     });
     await this.finalizeTransferIfComplete(transfer.id);
+  }
+
+  isFileDeletedOrTransferRemoved(file) {
+    const transfer = this.store.findTransferById(file.transfer_id);
+    if (!transfer || transfer.removed_at) return true;
+    return this.store.findTransferFileById(file.id)?.status === 'deleted';
+  }
+
+  async discardLocalFile(targetPath) {
+    await unlink(targetPath).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
+    await unlink(`${targetPath}.part`).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+    });
   }
 
   async downloadToPath(downloadUrl, targetPath, file) {
@@ -503,12 +532,16 @@ export class DownloadManager {
 
   async updateAfterSlowReset(file, partPath, message, resetCount) {
     const downloadedBytes = await sizeOf(partPath);
-    this.store.updateTransferFile(file.id, {
+    const updated = this.store.updateTransferFile(file.id, {
       downloaded_bytes: downloadedBytes,
       download_speed: 0,
       status: 'downloading',
       error_string: message,
     });
+    if (updated?.status === 'deleted') {
+      this.activeFileRates.delete(file.id);
+      return;
+    }
     this.activeFileRates.set(file.id, {
       transferId: file.transfer_id,
       bytesPerSecond: 0,
@@ -526,11 +559,15 @@ export class DownloadManager {
   updateLocalProgressMetrics(file, downloadedBytes, bytesPerSecond) {
     const size = Number(file.size ?? 0);
     const downloaded = Math.max(0, Math.min(Number(downloadedBytes ?? 0), size > 0 ? size : Number.MAX_SAFE_INTEGER));
-    this.store.updateTransferFile(file.id, {
+    const updated = this.store.updateTransferFile(file.id, {
       downloaded_bytes: downloaded,
       download_speed: Math.max(0, Math.round(Number(bytesPerSecond ?? 0))),
       status: 'downloading',
     });
+    if (updated?.status === 'deleted') {
+      this.activeFileRates.delete(file.id);
+      return;
+    }
     this.activeFileRates.set(file.id, {
       transferId: file.transfer_id,
       bytesPerSecond: Math.max(0, Math.round(Number(bytesPerSecond ?? 0))),

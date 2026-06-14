@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
-import { deleteLocalData, extractCategory } from '../download/paths.js';
+import { deleteLocalData, deleteLocalFileData, extractCategory } from '../download/paths.js';
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
 import { calculateTransmissionProgress } from '../transmission/progress.js';
@@ -37,6 +37,15 @@ function deriveNameFromSource(source) {
 
 function clampUnit(value) {
   return Math.min(1, Math.max(0, Number(value) || 0));
+}
+
+const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
+
+function remoteDeleteErrorMessage(errors) {
+  const messages = errors
+    .map((error) => error?.message)
+    .filter(Boolean);
+  return `Failed to delete from put.io${messages.length > 0 ? `: ${messages.join('; ')}` : ''}`;
 }
 
 function putioTransferToStoreInput(transfer, fallback = {}) {
@@ -207,6 +216,7 @@ export class TransferService {
       const profile = byFolderId.get(remote.saveParentId);
       if (!profile) continue;
       const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
+      if (existing?.removed_at) continue;
       rows.push(this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
         profile_id: profile.id,
         hash: existing?.hash,
@@ -266,7 +276,136 @@ export class TransferService {
     return {};
   }
 
-  async removeRemoteTransfer(transfer) {
+  async deleteDownloadBucket(transferId, { deleteRemote = true } = {}) {
+    const transfer = this.store.findTransfer(transferId);
+    if (!transfer || transfer.removed_at) {
+      throw new Error('Download bucket not found');
+    }
+
+    if (deleteRemote) {
+      await this.removeRemoteTransfer(transfer, { throwOnError: true });
+    }
+
+    const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
+    const targetDir = path.join(profile.download_at, transfer.category ?? '');
+    const fileCount = this.store.listFilesForTransfer(transfer.id).length;
+    await deleteLocalData(targetDir, transfer.name);
+    this.store.markTransferRemoved(transfer.id);
+
+    logger.info('download bucket deleted from dashboard', {
+      id: transfer.id,
+      hash: transfer.hash,
+      deleteRemote,
+      fileCount,
+    });
+
+    return {
+      ok: true,
+      bucketDeleted: true,
+      transferId: transfer.id,
+      filesDeleted: fileCount,
+    };
+  }
+
+  async deleteDownloadFiles(transferId, fileIds, { deleteRemote = true } = {}) {
+    const transfer = this.store.findTransfer(transferId);
+    if (!transfer || transfer.removed_at) {
+      throw new Error('Download bucket not found');
+    }
+
+    const requestedIds = new Set(
+      (Array.isArray(fileIds) ? fileIds : [])
+        .map((id) => Number(id))
+        .filter((id) => Number.isInteger(id) && id > 0),
+    );
+    const visibleFiles = this.store.listFilesForTransfer(transfer.id);
+    const files = visibleFiles.filter((file) => requestedIds.has(Number(file.id)));
+    if (files.length === 0) {
+      throw new Error('No files selected');
+    }
+
+    if (files.length === visibleFiles.length) {
+      return this.deleteDownloadBucket(transfer.id, { deleteRemote });
+    }
+
+    if (deleteRemote) {
+      await this.removeRemoteFiles(files, { throwOnError: true });
+    }
+
+    this.store.transaction(() => {
+      for (const file of files) {
+        this.store.markTransferFileDeleted(file.id);
+      }
+    });
+
+    const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
+    const targetDir = path.join(profile.download_at, transfer.category ?? '');
+    for (const file of files) {
+      await deleteLocalFileData(targetDir, transfer.name, file.relative_path);
+    }
+
+    this.refreshTransferAfterFileDeletion(transfer.id);
+
+    logger.info('download files deleted from dashboard', {
+      id: transfer.id,
+      hash: transfer.hash,
+      deleteRemote,
+      fileCount: files.length,
+    });
+
+    return {
+      ok: true,
+      bucketDeleted: false,
+      transferId: transfer.id,
+      filesDeleted: files.length,
+    };
+  }
+
+  refreshTransferAfterFileDeletion(transferId) {
+    const transfer = this.store.findTransferById(transferId);
+    if (!transfer || transfer.removed_at) return undefined;
+    const stats = this.store.getTransferFileStats(transferId);
+    const totalFiles = Number(stats.total_files ?? 0);
+    const completedFiles = Number(stats.completed_files ?? 0);
+    const totalSize = Number(stats.total_size ?? 0);
+    const downloadedSize = Number(stats.downloaded_size ?? 0);
+    const patch = {
+      downloaded_ever: downloadedSize,
+      total_size: totalSize || Number(transfer.total_size ?? 0),
+    };
+
+    if (totalFiles > 0 && completedFiles === totalFiles && READY_REMOTE_STATUSES.has(transfer.putio_status)) {
+      patch.lifecycle = 'processed';
+      patch.percent_done = 100;
+      patch.download_speed = 0;
+      patch.eta = -1;
+    }
+
+    return this.store.updateTransfer(transferId, patch);
+  }
+
+  async removeRemoteFiles(files, { throwOnError = false } = {}) {
+    const errors = [];
+    const putio = this.getPutio();
+    for (const file of files) {
+      try {
+        await putio.deleteFile(file.putio_file_id);
+      } catch (error) {
+        errors.push(error);
+        logger.warn('failed to delete put.io file', {
+          transferFileId: file.id,
+          putioFileId: file.putio_file_id,
+          error: error.message,
+        });
+      }
+    }
+    if (errors.length > 0 && throwOnError) {
+      throw new Error(remoteDeleteErrorMessage(errors));
+    }
+    return errors;
+  }
+
+  async removeRemoteTransfer(transfer, { throwOnError = false } = {}) {
     const errors = [];
     const putio = this.getPutio();
     if (transfer.putio_file_id) {
@@ -293,6 +432,9 @@ export class TransferService {
           error: error.message,
         });
       }
+    }
+    if (errors.length > 0 && throwOnError) {
+      throw new Error(remoteDeleteErrorMessage(errors));
     }
     return errors;
   }

@@ -5,6 +5,8 @@ const state = {
   downloads: [],
   expandedDownloads: new Set(),
   fileListScrollTops: new Map(),
+  selectedFilesByDownload: new Map(),
+  pendingDelete: undefined,
   putioConnectionPromptShown: false,
   putioAdvancedOpen: false,
   putioAccount: {
@@ -114,6 +116,15 @@ const el = {
   profileLinksMessage: document.querySelector('#profileLinksMessage'),
   saveProfileLinksButton: document.querySelector('#saveProfileLinksButton'),
   downloadsList: document.querySelector('#downloadsList'),
+  deleteConfirmDialog: document.querySelector('#deleteConfirmDialog'),
+  deleteConfirmForm: document.querySelector('#deleteConfirmForm'),
+  deleteConfirmTitle: document.querySelector('#deleteConfirmTitle'),
+  deleteConfirmIntro: document.querySelector('#deleteConfirmIntro'),
+  deleteConfirmClose: document.querySelector('#deleteConfirmClose'),
+  deleteFromPutio: document.querySelector('#deleteFromPutio'),
+  deleteFromPutioLabel: document.querySelector('#deleteFromPutioLabel'),
+  deleteConfirmMessage: document.querySelector('#deleteConfirmMessage'),
+  deleteConfirmButton: document.querySelector('#deleteConfirmButton'),
 };
 
 const PROFILE_TYPES = {
@@ -552,6 +563,11 @@ async function loadAll() {
   state.downloads = downloads;
   render();
   if (!consumeOAuthLanding()) promptForMissingPutioConnection();
+}
+
+async function refreshDownloads() {
+  state.downloads = await api('/api/downloads');
+  renderDownloads();
 }
 
 function applyDownloadsUpdate(message) {
@@ -1673,21 +1689,47 @@ function createDownloadRow(download) {
         ${progressLine('Local', 0, 'local-bar', 'local-progress', 'local')}
       </div>
       <div>
-        <div class="metric-label">Speed / ETA</div>
-        <strong data-role="download-speed"></strong>
-        <div class="download-meta" data-role="download-eta"></div>
+        <div class="download-actions">
+          <div>
+            <div class="metric-label">Speed / ETA</div>
+            <strong data-role="download-speed"></strong>
+            <div class="download-meta" data-role="download-eta"></div>
+          </div>
+          <button class="button danger compact-button" type="button" data-action="delete-bucket">Delete bucket</button>
+        </div>
       </div>
     </div>
     <div class="file-panel" data-role="file-panel" hidden>
       <div class="file-panel-head">
-        <strong>Files</strong>
-        <span data-role="file-panel-summary"></span>
+        <div class="file-panel-title">
+          <strong>Files</strong>
+          <span data-role="file-panel-summary"></span>
+        </div>
+        <div class="file-panel-actions">
+          <label class="file-select-all">
+            <input type="checkbox" data-action="select-all-files">
+            <span>Select all</span>
+          </label>
+          <button class="button danger compact-button" type="button" data-action="delete-selected-files" disabled>Delete selected</button>
+        </div>
       </div>
       <div class="file-list" data-role="file-list"></div>
     </div>
   `;
   row.querySelector('[data-action="toggle-files"]').addEventListener('click', () => {
     toggleFilePanel(row.dataset.id);
+  });
+  row.querySelector('[data-action="delete-bucket"]').addEventListener('click', () => {
+    const download = findDownload(row.dataset.id);
+    if (download) openBucketDelete(download);
+  });
+  row.querySelector('[data-action="select-all-files"]').addEventListener('change', (event) => {
+    const download = findDownload(row.dataset.id);
+    if (download) setFileSelectionForDownload(download, event.target.checked);
+  });
+  row.querySelector('[data-action="delete-selected-files"]').addEventListener('click', () => {
+    const download = findDownload(row.dataset.id);
+    if (download) openSelectedFilesDelete(download);
   });
   const fileList = row.querySelector('[data-role="file-list"]');
   fileList.addEventListener('scroll', () => {
@@ -1747,10 +1789,24 @@ function populateFilePanel(row, download, fileItems) {
   const panel = row.querySelector('[data-role="file-panel"]');
   const list = row.querySelector('[data-role="file-list"]');
   const summary = row.querySelector('[data-role="file-panel-summary"]');
+  const selectAll = row.querySelector('[data-action="select-all-files"]');
+  const deleteSelected = row.querySelector('[data-action="delete-selected-files"]');
 
   setAttribute(button, 'aria-expanded', String(expanded));
   button.classList.toggle('open', expanded);
   setHidden(panel, !expanded);
+
+  const selectedIds = selectedFileIdsForDownload(download.id);
+  const visibleIds = new Set(fileItems.map((file) => String(file.id)));
+  const selectedVisibleCount = [...selectedIds].filter((id) => visibleIds.has(id)).length;
+  selectAll.checked = fileItems.length > 0 && selectedVisibleCount === fileItems.length;
+  selectAll.indeterminate = selectedVisibleCount > 0 && selectedVisibleCount < fileItems.length;
+  selectAll.disabled = fileItems.length === 0;
+  deleteSelected.disabled = selectedVisibleCount === 0;
+  setText(
+    deleteSelected,
+    selectedVisibleCount > 0 ? `Delete selected (${selectedVisibleCount})` : 'Delete selected',
+  );
 
   const completed = fileItems.filter((file) => file.status === 'complete').length;
   const downloading = fileItems.filter((file) => file.status === 'downloading').length;
@@ -1779,7 +1835,7 @@ function populateFilePanel(row, download, fileItems) {
     const id = String(file.id);
     let fileRow = existingById.get(id);
     if (!fileRow) fileRow = createFileRow(file);
-    updateFileRow(fileRow, file);
+    updateFileRow(fileRow, file, download);
     seen.add(id);
     placeChildAt(list, fileRow, index);
   });
@@ -1805,6 +1861,10 @@ function createFileRow(file) {
   row.className = 'file-row';
   row.dataset.id = file.id;
   row.innerHTML = `
+    <label class="file-select">
+      <input type="checkbox" data-action="select-file">
+      <span class="sr-only">Select file</span>
+    </label>
     <div class="file-main">
       <div class="file-name" data-role="file-name"></div>
       <div class="download-meta" data-role="file-size"></div>
@@ -1814,12 +1874,21 @@ function createFileRow(file) {
       <span class="bar local" data-role="file-bar"><span></span></span>
       <span data-role="file-progress"></span>
     </div>
+    <button class="icon-button danger file-delete-button" type="button" data-action="delete-file" aria-label="Delete file" title="Delete file">×</button>
   `;
-  updateFileRow(row, file);
+  row.querySelector('[data-action="select-file"]').addEventListener('change', (event) => {
+    const downloadId = row.closest('.download-row')?.dataset.id;
+    if (downloadId) toggleFileSelection(downloadId, row.dataset.id, event.target.checked);
+  });
+  row.querySelector('[data-action="delete-file"]').addEventListener('click', () => {
+    const download = findDownload(row.closest('.download-row')?.dataset.id);
+    const currentFile = findDownloadFile(download, row.dataset.id);
+    if (download && currentFile) openSingleFileDelete(download, currentFile);
+  });
   return row;
 }
 
-function updateFileRow(row, file) {
+function updateFileRow(row, file, download) {
   const progress = clampPercent(file.progress);
   const status = file.status || 'pending';
   const speed = Number(file.speed ?? 0);
@@ -1831,11 +1900,191 @@ function updateFileRow(row, file) {
   const statusBadge = row.querySelector('[data-role="file-status"]');
 
   setDataValue(row, 'id', file.id);
+  const checkbox = row.querySelector('[data-action="select-file"]');
+  checkbox.checked = selectedFileIdsForDownload(download.id).has(String(file.id));
+  checkbox.setAttribute('aria-label', `Select ${file.relativePath || 'file'}`);
   setText(row.querySelector('[data-role="file-name"]'), file.relativePath || 'Unknown file');
   setText(row.querySelector('[data-role="file-size"]'), sizeText);
   setText(statusBadge, statusLabel(file.status));
   setDataValue(statusBadge, 'status', status);
   setProgressValue(row, 'file-bar', 'file-progress', progress);
+}
+
+function findDownload(downloadId) {
+  return state.downloads.find((download) => String(download.id) === String(downloadId));
+}
+
+function downloadFileItems(download) {
+  return Array.isArray(download?.files?.items) ? download.files.items : [];
+}
+
+function findDownloadFile(download, fileId) {
+  return downloadFileItems(download).find((file) => String(file.id) === String(fileId));
+}
+
+function selectedFileIdsForDownload(downloadId) {
+  return state.selectedFilesByDownload.get(String(downloadId)) ?? new Set();
+}
+
+function editableSelectedFileIdsForDownload(downloadId) {
+  const key = String(downloadId);
+  let selected = state.selectedFilesByDownload.get(key);
+  if (!selected) {
+    selected = new Set();
+    state.selectedFilesByDownload.set(key, selected);
+  }
+  return selected;
+}
+
+function toggleFileSelection(downloadId, fileId, selected) {
+  const key = String(downloadId);
+  const selectedIds = editableSelectedFileIdsForDownload(key);
+  if (selected) selectedIds.add(String(fileId));
+  else selectedIds.delete(String(fileId));
+  if (selectedIds.size === 0) state.selectedFilesByDownload.delete(key);
+  renderDownloads();
+}
+
+function setFileSelectionForDownload(download, selected) {
+  const key = String(download.id);
+  if (!selected) {
+    state.selectedFilesByDownload.delete(key);
+    renderDownloads();
+    return;
+  }
+  state.selectedFilesByDownload.set(
+    key,
+    new Set(downloadFileItems(download).map((file) => String(file.id))),
+  );
+  renderDownloads();
+}
+
+function selectedVisibleFiles(download) {
+  const selectedIds = selectedFileIdsForDownload(download.id);
+  return downloadFileItems(download).filter((file) => selectedIds.has(String(file.id)));
+}
+
+function openBucketDelete(download) {
+  const files = downloadFileItems(download);
+  openDeleteConfirm({
+    type: 'bucket',
+    downloadId: String(download.id),
+    fileIds: files.map((file) => Number(file.id)),
+  });
+}
+
+function openSingleFileDelete(download, file) {
+  const files = downloadFileItems(download);
+  if (files.length === 1) {
+    openBucketDelete(download);
+    return;
+  }
+  openDeleteConfirm({
+    type: 'files',
+    downloadId: String(download.id),
+    fileIds: [Number(file.id)],
+  });
+}
+
+function openSelectedFilesDelete(download) {
+  const files = downloadFileItems(download);
+  const selected = selectedVisibleFiles(download);
+  if (selected.length === 0) return;
+  if (selected.length === files.length) {
+    openBucketDelete(download);
+    return;
+  }
+  openDeleteConfirm({
+    type: 'files',
+    downloadId: String(download.id),
+    fileIds: selected.map((file) => Number(file.id)),
+  });
+}
+
+function openDeleteConfirm(pendingDelete) {
+  const download = findDownload(pendingDelete.downloadId);
+  if (!download) return;
+  const count = pendingDelete.type === 'bucket'
+    ? downloadFileItems(download).length
+    : pendingDelete.fileIds.length;
+  const fileWord = count === 1 ? 'file' : 'files';
+  state.pendingDelete = pendingDelete;
+  el.deleteFromPutio.checked = true;
+  setDeleteConfirmMessage('');
+
+  if (pendingDelete.type === 'bucket') {
+    setText(el.deleteConfirmTitle, 'Delete bucket');
+    setText(
+      el.deleteConfirmIntro,
+      `This will delete "${download.name}" and all ${count} ${fileWord} from putiorr.`,
+    );
+    setText(el.deleteFromPutioLabel, 'Also delete this bucket from put.io');
+  } else {
+    setText(el.deleteConfirmTitle, `Delete ${count} ${fileWord}`);
+    setText(
+      el.deleteConfirmIntro,
+      `This will delete ${count} selected ${fileWord} from "${download.name}" in putiorr.`,
+    );
+    setText(el.deleteFromPutioLabel, count === 1
+      ? 'Also delete this file from put.io'
+      : 'Also delete these files from put.io');
+  }
+
+  el.deleteConfirmButton.disabled = false;
+  if (!el.deleteConfirmDialog.open) el.deleteConfirmDialog.showModal();
+}
+
+function closeDeleteConfirm() {
+  state.pendingDelete = undefined;
+  setDeleteConfirmMessage('');
+  if (el.deleteConfirmDialog.open) el.deleteConfirmDialog.close();
+}
+
+function setDeleteConfirmMessage(message, tone = 'neutral') {
+  el.deleteConfirmMessage.textContent = message;
+  el.deleteConfirmMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+}
+
+async function confirmPendingDelete() {
+  const pendingDelete = state.pendingDelete;
+  if (!pendingDelete) return;
+
+  el.deleteConfirmButton.disabled = true;
+  setDeleteConfirmMessage('Deleting...', 'neutral');
+  const deleteRemote = Boolean(el.deleteFromPutio.checked);
+
+  try {
+    const result = pendingDelete.type === 'bucket'
+      ? await api(`/api/downloads/${pendingDelete.downloadId}/delete`, {
+          method: 'POST',
+          body: JSON.stringify({ deleteRemote }),
+        })
+      : await api(`/api/downloads/${pendingDelete.downloadId}/files/delete`, {
+          method: 'POST',
+          body: JSON.stringify({
+            fileIds: pendingDelete.fileIds,
+            deleteRemote,
+          }),
+        });
+
+    if (result.bucketDeleted) {
+      state.selectedFilesByDownload.delete(String(pendingDelete.downloadId));
+      state.expandedDownloads.delete(String(pendingDelete.downloadId));
+      state.fileListScrollTops.delete(String(pendingDelete.downloadId));
+    } else {
+      const selected = selectedFileIdsForDownload(pendingDelete.downloadId);
+      for (const fileId of pendingDelete.fileIds) selected.delete(String(fileId));
+      if (selected.size === 0) state.selectedFilesByDownload.delete(String(pendingDelete.downloadId));
+    }
+
+    closeDeleteConfirm();
+    await refreshDownloads();
+    requestStateRefresh();
+  } catch (error) {
+    setDeleteConfirmMessage(error.message, 'error');
+  } finally {
+    el.deleteConfirmButton.disabled = false;
+  }
 }
 
 function progressLine(label, value, barRole, valueRole, className = '') {
@@ -1902,11 +2151,24 @@ function rememberFileListScrollTops() {
 
 function pruneDownloadUiState() {
   const ids = new Set(state.downloads.map((download) => String(download.id)));
+  const downloadsById = new Map(state.downloads.map((download) => [String(download.id), download]));
   for (const id of state.expandedDownloads) {
     if (!ids.has(id)) state.expandedDownloads.delete(id);
   }
   for (const id of state.fileListScrollTops.keys()) {
     if (!ids.has(id)) state.fileListScrollTops.delete(id);
+  }
+  for (const [id, selectedFileIds] of state.selectedFilesByDownload.entries()) {
+    const download = downloadsById.get(id);
+    if (!download) {
+      state.selectedFilesByDownload.delete(id);
+      continue;
+    }
+    const visibleFileIds = new Set(downloadFileItems(download).map((file) => String(file.id)));
+    for (const fileId of selectedFileIds) {
+      if (!visibleFileIds.has(fileId)) selectedFileIds.delete(fileId);
+    }
+    if (selectedFileIds.size === 0) state.selectedFilesByDownload.delete(id);
   }
 }
 
@@ -2260,6 +2522,15 @@ el.putioDialogClose.addEventListener('click', closePutioDialog);
 el.putioDialog.querySelector('[data-action="cancel-putio"]').addEventListener('click', closePutioDialog);
 el.putioDialog.addEventListener('click', (event) => {
   if (event.target === el.putioDialog) closePutioDialog();
+});
+el.deleteConfirmForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  confirmPendingDelete();
+});
+el.deleteConfirmClose.addEventListener('click', closeDeleteConfirm);
+el.deleteConfirmDialog.querySelector('[data-action="cancel-delete"]').addEventListener('click', closeDeleteConfirm);
+el.deleteConfirmDialog.addEventListener('click', (event) => {
+  if (event.target === el.deleteConfirmDialog) closeDeleteConfirm();
 });
 
 loadAll().catch((error) => setMessage(error.message, 'error'));

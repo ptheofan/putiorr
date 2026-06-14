@@ -1,4 +1,4 @@
-import { rm, stat } from 'node:fs/promises';
+import { rm, rmdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 export function extractCategory(targetDir, downloadDir) {
@@ -45,4 +45,27 @@ export async function fileExistsWithSize(filePath, size) {
 export async function deleteLocalData(targetDir, transferName) {
   const localPath = resolveInside(targetDir, transferName);
   await rm(localPath, { recursive: true, force: true });
+}
+
+export async function deleteLocalFileData(targetDir, transferName, relativePath) {
+  const transferRoot = resolveInside(targetDir, transferName);
+  const localPath = resolveInside(transferRoot, relativePath);
+  await rm(localPath, { force: true });
+  await rm(`${localPath}.part`, { force: true });
+  await removeEmptyParents(path.dirname(localPath), transferRoot);
+}
+
+async function removeEmptyParents(startDir, stopDir) {
+  const stop = path.resolve(stopDir);
+  let current = path.resolve(startDir);
+
+  while (current !== stop && current.startsWith(stop + path.sep)) {
+    try {
+      await rmdir(current);
+    } catch (error) {
+      if (['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) return;
+      throw error;
+    }
+    current = path.dirname(current);
+  }
 }

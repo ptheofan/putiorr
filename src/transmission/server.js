@@ -567,6 +567,28 @@ export class TransmissionRpcServer {
         return;
       }
 
+      const downloadDeleteMatch = requestPath.match(/^\/api\/downloads\/(\d+)\/delete$/);
+      if (downloadDeleteMatch && method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await this.service.deleteDownloadBucket(Number(downloadDeleteMatch[1]), {
+          deleteRemote: body.deleteRemote !== false,
+        });
+        this.scheduleWebSocketDownloadsBroadcast('downloads:delete-bucket');
+        jsonResponse(res, 200, result, this.sessionId);
+        return;
+      }
+
+      const downloadFilesDeleteMatch = requestPath.match(/^\/api\/downloads\/(\d+)\/files\/delete$/);
+      if (downloadFilesDeleteMatch && method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = await this.service.deleteDownloadFiles(Number(downloadFilesDeleteMatch[1]), body.fileIds, {
+          deleteRemote: body.deleteRemote !== false,
+        });
+        this.scheduleWebSocketDownloadsBroadcast('downloads:delete-files');
+        jsonResponse(res, 200, result, this.sessionId);
+        return;
+      }
+
       if (method === 'POST' && requestPath === '/api/poll') {
         await this.service.refreshRemoteTransfers();
         this.scheduleWebSocketDownloadsBroadcast('downloads');
