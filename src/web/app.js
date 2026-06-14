@@ -646,20 +646,20 @@ function createDownloadProfileCard(downloadProfile) {
     </div>
     <dl class="profile-facts">
       <div>
-        <dt>Threshold</dt>
-        <dd data-role="threshold"></dd>
+        <dt>Startup grace</dt>
+        <dd data-role="grace"></dd>
+      </div>
+      <div>
+        <dt>Ignore below</dt>
+        <dd data-role="min-size"></dd>
       </div>
       <div>
         <dt>Duration</dt>
         <dd data-role="duration"></dd>
       </div>
       <div>
-        <dt>Grace</dt>
-        <dd data-role="grace"></dd>
-      </div>
-      <div>
-        <dt>Ignore below</dt>
-        <dd data-role="min-size"></dd>
+        <dt>Slow threshold</dt>
+        <dd data-role="threshold"></dd>
       </div>
     </dl>
     <div class="profile-actions" aria-label="Download profile actions">
