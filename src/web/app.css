@@ -302,17 +302,20 @@ select:focus {
 
 .profiles-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
+  gap: 12px;
 }
 
 .profile-card {
   display: grid;
-  gap: 10px;
-  padding: 11px;
+  grid-template-rows: auto 1fr auto;
+  gap: 0;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(23, 35, 38, 0.04);
 }
 
 .profile-card-main {
@@ -320,6 +323,8 @@ select:focus {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
+  min-width: 0;
+  padding: 14px 14px 10px;
 }
 
 .profile-eyebrow,
@@ -339,7 +344,7 @@ select:focus {
 }
 
 .profile-card p {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 12px;
   line-height: 1.4;
   display: -webkit-box;
@@ -350,15 +355,24 @@ select:focus {
 
 .profile-facts {
   display: grid;
-  gap: 6px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 10px 12px;
   margin: 0;
+  padding: 10px 14px 12px;
+  border-top: 1px solid #edf1f2;
 }
 
 .profile-facts div {
   display: grid;
-  grid-template-columns: 62px minmax(0, 1fr);
-  gap: 6px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3px;
   align-items: start;
+  min-width: 0;
+}
+
+.profile-facts div:last-child {
+  grid-column: 1 / -1;
 }
 
 .profile-facts dt {
@@ -385,15 +399,54 @@ select:focus {
 .profile-actions {
   display: flex;
   justify-content: flex-end;
-  gap: 6px;
+  align-items: center;
+  gap: 2px;
   flex-wrap: wrap;
+  min-height: 48px;
+  padding: 4px 8px;
+  border-top: 1px solid #edf1f2;
 }
 
-.profile-actions .button,
-.profile-actions .icon-button {
-  min-height: 32px;
-  padding: 6px 9px;
+.profile-card .status {
+  flex: 0 0 auto;
+  min-height: 20px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.15;
+  font-weight: 800;
+}
+
+.profile-action {
+  border: 0;
+  min-height: 36px;
+  border-radius: 6px;
+  padding: 0 10px;
+  background: transparent;
+  color: #314244;
   font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.profile-action.primary {
+  color: var(--accent-strong);
+}
+
+.profile-action.danger {
+  color: var(--danger);
+}
+
+.profile-action:hover {
+  background: #edf4f4;
+}
+
+.profile-action:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: 1px;
+}
+
+.profile-action.danger:hover {
+  background: #fff0ee;
 }
 
 .modal {

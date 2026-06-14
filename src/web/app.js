@@ -409,13 +409,9 @@ function createProfileCard(profile) {
         <h3 data-role="name"></h3>
         <p data-role="summary"></p>
       </div>
-      <span data-role="status" class="status"></span>
+      <span data-role="status" class="profile-status status"></span>
     </div>
     <dl class="profile-facts">
-      <div>
-        <dt>RPC</dt>
-        <dd data-role="rpc"></dd>
-      </div>
       <div>
         <dt>Put.io</dt>
         <dd data-role="putio"></dd>
@@ -424,14 +420,14 @@ function createProfileCard(profile) {
         <dt>Download</dt>
         <dd data-role="download"></dd>
       </div>
+      <div>
+        <dt>RPC</dt>
+        <dd data-role="rpc"></dd>
+      </div>
     </dl>
-    <div class="profile-actions">
-      <button data-action="setup" class="button secondary" type="button">
-        <span aria-hidden="true">↗</span>
-        Setup
-      </button>
-      <button data-action="edit" class="button secondary" type="button">Edit</button>
-      <button data-action="delete" class="icon-button danger" type="button">Delete</button>
+    <div class="profile-actions" aria-label="Profile actions">
+      <button data-action="edit" class="profile-action primary" type="button">Edit</button>
+      <button data-action="delete" class="profile-action danger" type="button">Delete</button>
     </div>
   `;
 
@@ -442,10 +438,9 @@ function createProfileCard(profile) {
   setProfileFact(card, 'putio', profile.putio_folder_name || 'Not set');
   setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
   const status = card.querySelector('[data-role="status"]');
-  status.className = `status ${profile.enabled === false ? 'warn' : 'ok'}`;
+  status.className = `profile-status status ${profile.enabled === false ? 'warn' : 'ok'}`;
   setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
 
-  card.querySelector('[data-action="setup"]').addEventListener('click', () => openProfileWizard(profile));
   card.querySelector('[data-action="edit"]').addEventListener('click', () => openProfileWizard(profile));
   card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteProfileById(profile.id));
   return card;
@@ -464,8 +459,8 @@ function profileSummary(profile) {
   });
   const rootHint = profileType(profile.type).root;
   return rootHint
-    ? `${payload.appLabel} imports from ${payload.directory}/${payload.category} to its ${rootHint} library root.`
-    : `${payload.appLabel} sends downloads to category ${payload.category}.`;
+    ? `Imports to ${rootHint}.`
+    : `Uses category ${payload.category}.`;
 }
 
 function upsertProfileState(profile) {
