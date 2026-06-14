@@ -19,6 +19,10 @@ RUN pnpm install --frozen-lockfile
 
 FROM dev-deps AS dev
 ENV NODE_ENV=development
+ARG PUTIORR_PUTIO_APP_ID=9354
+ARG PUTIORR_PUTIO_OAUTH_RELAY_URL=https://ptheofan.github.io/putiorr/putio-oauth-relay.html
+ENV PUTIORR_PUTIO_APP_ID=$PUTIORR_PUTIO_APP_ID
+ENV PUTIORR_PUTIO_OAUTH_RELAY_URL=$PUTIORR_PUTIO_OAUTH_RELAY_URL
 
 COPY src ./src
 
@@ -33,6 +37,10 @@ CMD ["pnpm", "run", "dev"]
 
 FROM base AS production
 ENV NODE_ENV=production
+ARG PUTIORR_PUTIO_APP_ID=9354
+ARG PUTIORR_PUTIO_OAUTH_RELAY_URL=https://ptheofan.github.io/putiorr/putio-oauth-relay.html
+ENV PUTIORR_PUTIO_APP_ID=$PUTIORR_PUTIO_APP_ID
+ENV PUTIORR_PUTIO_OAUTH_RELAY_URL=$PUTIORR_PUTIO_OAUTH_RELAY_URL
 
 COPY --from=prod-deps /app ./
 COPY src ./src

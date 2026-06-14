@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>putiorr Put.io OAuth relay</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #f5f7f8;
+        color: #172326;
+      }
+
+      main {
+        width: min(460px, calc(100vw - 32px));
+        border: 1px solid #d9e2e4;
+        border-radius: 8px;
+        background: #fff;
+        padding: 22px;
+        box-shadow: 0 18px 50px rgba(23, 35, 38, 0.08);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 20px;
+      }
+
+      p {
+        margin: 0;
+        color: #647275;
+        line-height: 1.5;
+      }
+
+      .error {
+        color: #b42318;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Put.io connection</h1>
+      <p id="message">Returning to putiorr...</p>
+    </main>
+
+    <script>
+      function decodeBase64UrlJson(value) {
+        const base64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, '=');
+        return JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(padded), (char) => char.charCodeAt(0))));
+      }
+
+      function isAllowedCallback(url) {
+        if (url.protocol === 'https:') return true;
+        if (url.protocol !== 'http:') return false;
+        return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+      }
+
+      function callbackWithToken(callbackUrl, token, state) {
+        const url = new URL(callbackUrl);
+        if (!isAllowedCallback(url)) {
+          throw new Error('The putorr callback URL is not allowed by this relay.');
+        }
+        const fragment = new URLSearchParams();
+        fragment.set('access_token', token);
+        fragment.set('state', state);
+        url.hash = fragment.toString();
+        return url.toString();
+      }
+
+      (function relay() {
+        const message = document.querySelector('#message');
+        try {
+          const query = new URLSearchParams(window.location.search.slice(1));
+          const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+          const params = fragment.toString() ? fragment : query;
+          const error = params.get('error_description') || params.get('error');
+          if (error) throw new Error(error);
+          const token = params.get('access_token') || params.get('oauth_token') || params.get('token');
+          const state = params.get('state');
+          if (!token) throw new Error('put.io did not return an OAuth token.');
+          if (!state) throw new Error('put.io did not return OAuth state.');
+          const payload = decodeBase64UrlJson(state);
+          if (payload.v !== 1 || !payload.callbackUrl) {
+            throw new Error('The OAuth state is not a putiorr relay state.');
+          }
+          window.location.replace(callbackWithToken(payload.callbackUrl, token, state));
+        } catch (error) {
+          message.className = 'error';
+          message.textContent = error.message;
+        }
+      })();
+    </script>
+  </body>
+</html>
