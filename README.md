@@ -386,7 +386,7 @@ policy.
 | `PUTIORR_PUTIO_TOKEN` | unset | Optional initial put.io token; UI-stored token wins after OAuth |
 | `PUTIORR_PUTIO_APP_ID` | `3270` | put.io OAuth app id |
 | `PUTIORR_PUTIO_FOLDER` | `putiorr` | Default put.io folder for the default profile |
-| `PUTIORR_DEFAULT_PROFILE_NAME` | `Default` | Name for the default profile |
+| `PUTIORR_DEFAULT_PROFILE_NAME` | `Custom` | Name for the fallback custom profile |
 | `PUTIORR_DEFAULT_PROFILE_TYPE` | `custom` | Type for the default profile |
 | `PUTIORR_DEFAULT_RPC_PATH` | `/transmission/rpc` | Default Transmission RPC path |
 | `PUTIORR_PROFILES_JSON` | `[]` | Optional seed profiles as JSON |

@@ -70,7 +70,7 @@ export function loadConfig(env = process.env, cwd = process.cwd(), options = {})
     putioToken: sourceEnv.PUTIORR_PUTIO_TOKEN ?? '',
     putioAppId: sourceEnv.PUTIORR_PUTIO_APP_ID ?? '3270',
     putioFolder: (sourceEnv.PUTIORR_PUTIO_FOLDER ?? 'putiorr').toLowerCase(),
-    defaultProfileName: sourceEnv.PUTIORR_DEFAULT_PROFILE_NAME ?? 'Default',
+    defaultProfileName: sourceEnv.PUTIORR_DEFAULT_PROFILE_NAME ?? 'Custom',
     defaultProfileType: sourceEnv.PUTIORR_DEFAULT_PROFILE_TYPE ?? 'custom',
     defaultRpcPath: sourceEnv.PUTIORR_DEFAULT_RPC_PATH ?? '/transmission/rpc',
     seedProfiles: jsonFromEnv(sourceEnv.PUTIORR_PROFILES_JSON, []),
