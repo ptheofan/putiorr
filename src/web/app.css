@@ -219,9 +219,9 @@ select:focus {
   border-color: var(--accent);
 }
 
-.byte-input {
+.unit-input {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 112px;
   align-items: center;
   min-height: 38px;
   border: 1px solid var(--line);
@@ -230,13 +230,17 @@ select:focus {
   overflow: hidden;
 }
 
-.byte-input:focus-within {
+.unit-input.byte-input {
+  grid-template-columns: 88px minmax(0, 1fr) 96px;
+}
+
+.unit-input:focus-within {
   outline: 2px solid rgba(15, 118, 110, 0.22);
   border-color: var(--accent);
 }
 
-.byte-input input,
-.byte-input select {
+.unit-input input,
+.unit-input select {
   min-height: 36px;
   border: 0;
   border-radius: 0;
@@ -244,23 +248,29 @@ select:focus {
   background: transparent;
 }
 
-.byte-input input:focus,
-.byte-input select:focus {
+.unit-input input:focus,
+.unit-input select:focus {
   outline: 0;
   border-color: transparent;
 }
 
-.byte-input input[type="number"] {
+.unit-input input[type="number"] {
   min-width: 0;
   padding-left: 8px;
+  background: #ffffff;
 }
 
-.byte-input select {
-  width: auto;
-  min-width: 82px;
+.unit-input select {
+  width: 100%;
   border-left: 1px solid #edf1f2;
+  background: #f3f7f6;
   color: #2c3a3d;
   font-weight: 750;
+}
+
+.unit-prefix {
+  width: 88px;
+  background: #f8fbfb;
 }
 
 .byte-disable {
@@ -282,10 +292,11 @@ select:focus {
   min-height: 16px;
   margin: 0;
   padding: 0;
+  accent-color: var(--accent);
 }
 
-.byte-input.is-disabled input[type="number"],
-.byte-input.is-disabled select {
+.unit-input.is-disabled input[type="number"],
+.unit-input.is-disabled select {
   color: var(--muted);
   background: #f7faf9;
 }
@@ -639,6 +650,10 @@ select:focus {
   gap: 0;
   min-height: 0;
   overflow: auto;
+}
+
+.download-profile-layout {
+  grid-template-columns: minmax(0, 1.6fr) minmax(250px, 0.75fr);
 }
 
 .wizard-questions {

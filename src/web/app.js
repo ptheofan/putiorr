@@ -61,7 +61,11 @@ const el = {
   downloadSlowSpeedThresholdAmount: document.querySelector('#downloadSlowSpeedThresholdAmount'),
   downloadSlowSpeedThresholdUnit: document.querySelector('#downloadSlowSpeedThresholdUnit'),
   downloadSlowSpeedDuration: document.querySelector('#downloadSlowSpeedDuration'),
+  downloadSlowSpeedDurationAmount: document.querySelector('#downloadSlowSpeedDurationAmount'),
+  downloadSlowSpeedDurationUnit: document.querySelector('#downloadSlowSpeedDurationUnit'),
   downloadSlowSpeedGrace: document.querySelector('#downloadSlowSpeedGrace'),
+  downloadSlowSpeedGraceAmount: document.querySelector('#downloadSlowSpeedGraceAmount'),
+  downloadSlowSpeedGraceUnit: document.querySelector('#downloadSlowSpeedGraceUnit'),
   downloadSlowSpeedMinSize: document.querySelector('#downloadSlowSpeedMinSize'),
   downloadSlowSpeedMinSizeDisabled: document.querySelector('#downloadSlowSpeedMinSizeDisabled'),
   downloadSlowSpeedMinSizeAmount: document.querySelector('#downloadSlowSpeedMinSizeAmount'),
@@ -129,6 +133,10 @@ const BYTE_UNITS = {
   bytes: 1,
   mb: 1024 * 1024,
   gb: 1024 * 1024 * 1024,
+};
+const TIME_UNITS = {
+  seconds: 1,
+  minutes: 60,
 };
 
 const WIZARD_HELP = {
@@ -302,7 +310,7 @@ const DOWNLOAD_PROFILE_HELP = {
     ],
     tips: [
       'Start around 60 to 120 seconds for large files.',
-      'Lower this only when resets are too slow to recover stuck copies.',
+      'Enter an integer amount and choose seconds or minutes from the unit selector.',
     ],
     valueLabel: 'Reset after',
     value: (profile) => `${profile.slowSpeedDurationSeconds}s below threshold`,
@@ -315,7 +323,7 @@ const DOWNLOAD_PROFILE_HELP = {
     ],
     tips: [
       'Keep a small grace period for fast local disks.',
-      'Increase it if large files frequently start slowly before reaching normal speed.',
+      'Enter an integer amount and choose seconds or minutes from the unit selector.',
     ],
     valueLabel: 'Grace period',
     value: (profile) => `${profile.slowSpeedGraceSeconds}s before checks start`,
@@ -489,6 +497,13 @@ function setByteInput(hiddenInput, disabledInput, amountInput, unitInput, value)
   updateByteInputDisabledState(disabledInput, amountInput, unitInput);
 }
 
+function setTimeInput(hiddenInput, amountInput, unitInput, value) {
+  const seconds = Math.max(0, Number.parseInt(value ?? 0, 10) || 0);
+  hiddenInput.value = String(seconds);
+  amountInput.value = String(seconds);
+  unitInput.value = 'seconds';
+}
+
 function splitBytesForInput(bytes) {
   if (bytes > 0 && bytes % BYTE_UNITS.gb === 0) {
     return { amount: bytes / BYTE_UNITS.gb, unit: 'gb' };
@@ -504,6 +519,10 @@ function byteInputValue(disabledInput, amountInput, unitInput) {
   return integerInputValue(amountInput) * (BYTE_UNITS[unitInput.value] ?? BYTE_UNITS.bytes);
 }
 
+function timeInputValue(amountInput, unitInput) {
+  return integerInputValue(amountInput) * (TIME_UNITS[unitInput.value] ?? TIME_UNITS.seconds);
+}
+
 function syncByteInput(hiddenInput, disabledInput, amountInput, unitInput) {
   amountInput.value = amountInput.value.replace(/[^\d]/g, '');
   if (!disabledInput.checked && amountInput.value === '' && document.activeElement === disabledInput) {
@@ -511,6 +530,11 @@ function syncByteInput(hiddenInput, disabledInput, amountInput, unitInput) {
   }
   hiddenInput.value = String(byteInputValue(disabledInput, amountInput, unitInput));
   updateByteInputDisabledState(disabledInput, amountInput, unitInput);
+}
+
+function syncTimeInput(hiddenInput, amountInput, unitInput) {
+  amountInput.value = amountInput.value.replace(/[^\d]/g, '');
+  hiddenInput.value = String(timeInputValue(amountInput, unitInput));
 }
 
 function updateByteInputDisabledState(disabledInput, amountInput, unitInput) {
@@ -876,8 +900,18 @@ function openDownloadProfileDialog(downloadProfile = createDefaultDownloadProfil
     el.downloadSlowSpeedThresholdUnit,
     downloadProfile.slowSpeedThresholdBytesPerSecond ?? 0,
   );
-  setNumberInput(el.downloadSlowSpeedDuration, downloadProfile.slowSpeedDurationSeconds ?? 120);
-  setNumberInput(el.downloadSlowSpeedGrace, downloadProfile.slowSpeedGraceSeconds ?? 30);
+  setTimeInput(
+    el.downloadSlowSpeedDuration,
+    el.downloadSlowSpeedDurationAmount,
+    el.downloadSlowSpeedDurationUnit,
+    downloadProfile.slowSpeedDurationSeconds ?? 120,
+  );
+  setTimeInput(
+    el.downloadSlowSpeedGrace,
+    el.downloadSlowSpeedGraceAmount,
+    el.downloadSlowSpeedGraceUnit,
+    downloadProfile.slowSpeedGraceSeconds ?? 30,
+  );
   setByteInput(
     el.downloadSlowSpeedMinSize,
     el.downloadSlowSpeedMinSizeDisabled,
@@ -927,8 +961,8 @@ function getDownloadProfilePayload() {
       el.downloadSlowSpeedThresholdAmount,
       el.downloadSlowSpeedThresholdUnit,
     ),
-    slowSpeedDurationSeconds: numberInputValue(el.downloadSlowSpeedDuration),
-    slowSpeedGraceSeconds: numberInputValue(el.downloadSlowSpeedGrace),
+    slowSpeedDurationSeconds: timeInputValue(el.downloadSlowSpeedDurationAmount, el.downloadSlowSpeedDurationUnit),
+    slowSpeedGraceSeconds: timeInputValue(el.downloadSlowSpeedGraceAmount, el.downloadSlowSpeedGraceUnit),
     slowSpeedMinSizeBytes: byteInputValue(
       el.downloadSlowSpeedMinSizeDisabled,
       el.downloadSlowSpeedMinSizeAmount,
@@ -940,6 +974,7 @@ function getDownloadProfilePayload() {
 function updateDownloadProfileHelp(event) {
   const fieldId = getDownloadProfileHelpFieldFromEvent(event);
   if (fieldId) el.downloadProfileDialog.dataset.activeHelpField = fieldId;
+  syncDownloadProfileTimeInputs();
   syncDownloadProfileByteInputs();
   setDownloadProfileHelpForField(el.downloadProfileDialog.dataset.activeHelpField || DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD);
 }
@@ -962,6 +997,11 @@ function syncDownloadProfileByteInputs() {
     el.downloadSlowSpeedMinSizeAmount,
     el.downloadSlowSpeedMinSizeUnit,
   );
+}
+
+function syncDownloadProfileTimeInputs() {
+  syncTimeInput(el.downloadSlowSpeedDuration, el.downloadSlowSpeedDurationAmount, el.downloadSlowSpeedDurationUnit);
+  syncTimeInput(el.downloadSlowSpeedGrace, el.downloadSlowSpeedGraceAmount, el.downloadSlowSpeedGraceUnit);
 }
 
 function setDownloadProfileHelpForField(fieldId = DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD, profile = getDownloadProfilePayload()) {
@@ -1827,8 +1867,10 @@ for (const input of [
   el.downloadSlowSpeedThresholdDisabled,
   el.downloadSlowSpeedThresholdAmount,
   el.downloadSlowSpeedThresholdUnit,
-  el.downloadSlowSpeedDuration,
-  el.downloadSlowSpeedGrace,
+  el.downloadSlowSpeedDurationAmount,
+  el.downloadSlowSpeedDurationUnit,
+  el.downloadSlowSpeedGraceAmount,
+  el.downloadSlowSpeedGraceUnit,
   el.downloadSlowSpeedMinSizeDisabled,
   el.downloadSlowSpeedMinSizeAmount,
   el.downloadSlowSpeedMinSizeUnit,

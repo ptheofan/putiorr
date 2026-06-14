@@ -265,14 +265,21 @@
             <section class="wizard-step">
               <div class="step-label">Slow-speed reset</div>
               <div class="field-pair">
-                <label>
-                  Startup grace
-                  <input id="downloadSlowSpeedGrace" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds">
-                </label>
+                <div class="field-control" data-help-field="downloadSlowSpeedGrace">
+                  <span id="downloadSlowSpeedGraceLabel" class="field-label">Startup grace</span>
+                  <div class="unit-input time-input">
+                    <input id="downloadSlowSpeedGraceAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedGraceLabel" placeholder="30">
+                    <select id="downloadSlowSpeedGraceUnit" aria-label="Startup grace unit">
+                      <option value="seconds">seconds</option>
+                      <option value="minutes">minutes</option>
+                    </select>
+                  </div>
+                  <input id="downloadSlowSpeedGrace" type="hidden">
+                </div>
                 <div class="field-control" data-help-field="downloadSlowSpeedMinSize">
                   <span id="downloadSlowSpeedMinSizeLabel" class="field-label">Ignore below</span>
-                  <div class="byte-input">
-                    <label class="byte-disable" title="Disable ignore-below size">
+                  <div class="unit-input byte-input">
+                    <label class="unit-prefix byte-disable" title="Disable ignore-below size">
                       <input id="downloadSlowSpeedMinSizeDisabled" type="checkbox" aria-label="Disable ignore-below size">
                       <span>Off</span>
                     </label>
@@ -287,14 +294,21 @@
                 </div>
               </div>
               <div class="field-pair">
-                <label>
-                  Duration
-                  <input id="downloadSlowSpeedDuration" type="number" min="0" step="1" inputmode="numeric" placeholder="Seconds below threshold">
-                </label>
+                <div class="field-control" data-help-field="downloadSlowSpeedDuration">
+                  <span id="downloadSlowSpeedDurationLabel" class="field-label">Duration</span>
+                  <div class="unit-input time-input">
+                    <input id="downloadSlowSpeedDurationAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedDurationLabel" placeholder="120">
+                    <select id="downloadSlowSpeedDurationUnit" aria-label="Duration unit">
+                      <option value="seconds">seconds</option>
+                      <option value="minutes">minutes</option>
+                    </select>
+                  </div>
+                  <input id="downloadSlowSpeedDuration" type="hidden">
+                </div>
                 <div class="field-control" data-help-field="downloadSlowSpeedThreshold">
                   <span id="downloadSlowSpeedThresholdLabel" class="field-label">Slow threshold</span>
-                  <div class="byte-input">
-                    <label class="byte-disable" title="Disable slow-speed reset">
+                  <div class="unit-input byte-input">
+                    <label class="unit-prefix byte-disable" title="Disable slow-speed reset">
                       <input id="downloadSlowSpeedThresholdDisabled" type="checkbox" aria-label="Disable slow-speed reset">
                       <span>Off</span>
                     </label>
