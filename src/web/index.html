@@ -91,7 +91,12 @@
           <button id="putioDialogClose" class="icon-button" type="button" aria-label="Close Put.io connection">×</button>
         </div>
 
-        <section class="wizard-step">
+        <div class="putio-tabs" role="tablist" aria-label="Put.io connection method">
+          <button id="putioOauthTab" class="putio-tab" type="button" role="tab" aria-selected="true" aria-controls="putioOauthPanel" data-putio-tab="oauth">Put.io OAuth</button>
+          <button id="putioTokenTab" class="putio-tab" type="button" role="tab" aria-selected="false" aria-controls="putioTokenPanel" data-putio-tab="token" tabindex="-1">Direct Token</button>
+        </div>
+
+        <section id="putioOauthPanel" class="putio-tab-panel wizard-step" role="tabpanel" aria-labelledby="putioOauthTab" data-putio-panel="oauth">
           <div class="step-label">Connect</div>
           <div class="button-row putio-connect-actions">
             <button id="oauthStartButton" class="button primary" type="button">
@@ -102,22 +107,25 @@
               <span aria-hidden="true">✓</span>
               Test connection
             </button>
+            <button id="putioDisconnectButton" class="button danger" type="button">
+              Disconnect
+            </button>
+          </div>
+
+          <div id="oauthPanel" class="oauth-panel" hidden>
+            <div>
+              <div class="oauth-code" id="oauthCode">----</div>
+              <p>Open <a id="oauthLink" href="https://put.io/link" target="_blank" rel="noreferrer">put.io/link</a> and enter this code. This page will keep checking for authorization.</p>
+            </div>
+            <button id="oauthPollButton" class="button secondary" type="button">
+              <span aria-hidden="true">⟳</span>
+              Check now
+            </button>
           </div>
         </section>
 
-        <div id="oauthPanel" class="oauth-panel" hidden>
-          <div>
-            <div class="oauth-code" id="oauthCode">----</div>
-            <p>Open <a id="oauthLink" href="https://put.io/link" target="_blank" rel="noreferrer">put.io/link</a> and enter this code. This page will keep checking for authorization.</p>
-          </div>
-          <button id="oauthPollButton" class="button secondary" type="button">
-            <span aria-hidden="true">⟳</span>
-            Check now
-          </button>
-        </div>
-
-        <section class="wizard-step">
-          <div class="step-label">Manual token</div>
+        <section id="putioTokenPanel" class="putio-tab-panel wizard-step" role="tabpanel" aria-labelledby="putioTokenTab" data-putio-panel="token" hidden>
+          <div class="step-label">Direct Token</div>
           <label>
             OAuth token
             <input id="putioToken" name="putioToken" type="password" autocomplete="off" placeholder="Paste a token to connect or rotate">
@@ -128,9 +136,8 @@
 
         <div class="modal-actions">
           <button class="button secondary" type="button" data-action="cancel-putio">Cancel</button>
-          <button class="button primary" type="submit">
-            <span aria-hidden="true">●</span>
-            Save token
+          <button id="savePutioTokenButton" class="button primary" type="submit">
+            Save
           </button>
         </div>
       </form>

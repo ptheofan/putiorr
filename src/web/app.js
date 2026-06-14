@@ -13,15 +13,19 @@ const el = {
   putioStatusButton: document.querySelector('#putioStatusButton'),
   putioDialog: document.querySelector('#putioDialog'),
   putioDialogClose: document.querySelector('#putioDialogClose'),
+  putioTabButtons: [...document.querySelectorAll('[data-putio-tab]')],
+  putioTabPanels: [...document.querySelectorAll('[data-putio-panel]')],
   settingsForm: document.querySelector('#settingsForm'),
   putioToken: document.querySelector('#putioToken'),
   settingsMessage: document.querySelector('#settingsMessage'),
   oauthStartButton: document.querySelector('#oauthStartButton'),
+  putioDisconnectButton: document.querySelector('#putioDisconnectButton'),
   oauthPanel: document.querySelector('#oauthPanel'),
   oauthCode: document.querySelector('#oauthCode'),
   oauthLink: document.querySelector('#oauthLink'),
   oauthPollButton: document.querySelector('#oauthPollButton'),
   testConnectionButton: document.querySelector('#testConnectionButton'),
+  savePutioTokenButton: document.querySelector('#savePutioTokenButton'),
   addProfileButton: document.querySelector('#addProfileButton'),
   profilesBody: document.querySelector('#profilesBody'),
   linkDownloadProfilesButton: document.querySelector('#linkDownloadProfilesButton'),
@@ -131,6 +135,7 @@ const DEFAULT_CLIENT_HOST = 'putiorr';
 const DEFAULT_CLIENT_PORT = '9091';
 const DEFAULT_HELP_FIELD = 'wizardProfileType';
 const DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD = 'downloadProfileName';
+const PUTIO_CONNECTION_TABS = ['oauth', 'token'];
 const BYTE_UNITS = {
   bytes: 1,
   mb: 1024 * 1024,
@@ -479,10 +484,41 @@ function renderConnection() {
     stopOAuthPolling();
     el.oauthPanel.hidden = true;
   }
+  el.putioDisconnectButton.hidden = !connected;
 }
 
-function openPutioDialog() {
+function activePutioTab() {
+  return PUTIO_CONNECTION_TABS.includes(el.putioDialog.dataset.activeTab)
+    ? el.putioDialog.dataset.activeTab
+    : 'oauth';
+}
+
+function focusPutioTab(tab = activePutioTab()) {
+  if (tab === 'token') {
+    el.putioToken.focus();
+    return;
+  }
+  el.oauthStartButton.focus();
+}
+
+function setPutioTab(tab, { focus = true } = {}) {
+  const activeTab = PUTIO_CONNECTION_TABS.includes(tab) ? tab : 'oauth';
+  el.putioDialog.dataset.activeTab = activeTab;
+  for (const button of el.putioTabButtons) {
+    const selected = button.dataset.putioTab === activeTab;
+    button.setAttribute('aria-selected', selected ? 'true' : 'false');
+    button.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of el.putioTabPanels) {
+    panel.hidden = panel.dataset.putioPanel !== activeTab;
+  }
+  el.savePutioTokenButton.hidden = activeTab !== 'token';
+  if (focus) focusPutioTab(activeTab);
+}
+
+function openPutioDialog(tab = activePutioTab()) {
   renderConnection();
+  setPutioTab(tab, { focus: false });
   if (!el.putioDialog.open) {
     if (typeof el.putioDialog.showModal === 'function') {
       el.putioDialog.showModal();
@@ -490,13 +526,13 @@ function openPutioDialog() {
       el.putioDialog.setAttribute('open', '');
     }
   }
-  el.putioToken.focus();
+  focusPutioTab(activePutioTab());
 }
 
 function promptForMissingPutioConnection() {
   if (state.putioConnectionPromptShown || state.settings?.tokenConfigured) return;
   state.putioConnectionPromptShown = true;
-  openPutioDialog();
+  openPutioDialog('oauth');
   setMessage('Put.io not connected. Connect with OAuth or paste a token.', 'warn');
 }
 
@@ -1804,7 +1840,7 @@ el.settingsForm.addEventListener('submit', async (event) => {
   state.settings = settings;
   el.putioToken.value = '';
   renderConnection();
-  setMessage('Settings saved.', 'ok');
+  setMessage('Token saved.', 'ok');
   requestStateRefresh();
 });
 
@@ -1816,6 +1852,31 @@ el.testConnectionButton.addEventListener('click', async () => {
       body: JSON.stringify(token ? { putioToken: token } : {}),
     });
     setMessage(`Connected to put.io${result.username ? ` as ${result.username}` : ''}.`, 'ok');
+  } catch (error) {
+    setMessage(error.message, 'error');
+  }
+});
+
+el.putioDisconnectButton.addEventListener('click', async () => {
+  try {
+    stopOAuthPolling();
+    const settings = await api('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ putioToken: '' }),
+    });
+    state.settings = settings;
+    el.putioToken.value = '';
+    el.oauthPanel.hidden = true;
+    oauth.code = '';
+    renderConnection();
+    setPutioTab('oauth', { focus: false });
+    setMessage(
+      settings.tokenConfigured
+        ? 'Stored token removed, but an environment token is still configured.'
+        : 'Put.io disconnected.',
+      settings.tokenConfigured ? 'warn' : 'ok',
+    );
+    requestStateRefresh();
   } catch (error) {
     setMessage(error.message, 'error');
   }
@@ -1951,7 +2012,18 @@ el.profileLinksDialog.querySelector('[data-action="cancel-profile-links"]').addE
 el.profileLinksDialog.addEventListener('click', (event) => {
   if (event.target === el.profileLinksDialog) closeProfileLinksDialog();
 });
-el.putioStatusButton.addEventListener('click', openPutioDialog);
+for (const button of el.putioTabButtons) {
+  button.addEventListener('click', () => setPutioTab(button.dataset.putioTab));
+  button.addEventListener('keydown', (event) => {
+    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+    event.preventDefault();
+    const currentIndex = PUTIO_CONNECTION_TABS.indexOf(activePutioTab());
+    const direction = event.key === 'ArrowRight' ? 1 : -1;
+    const nextIndex = (currentIndex + direction + PUTIO_CONNECTION_TABS.length) % PUTIO_CONNECTION_TABS.length;
+    setPutioTab(PUTIO_CONNECTION_TABS[nextIndex]);
+  });
+}
+el.putioStatusButton.addEventListener('click', () => openPutioDialog('oauth'));
 el.putioDialogClose.addEventListener('click', closePutioDialog);
 el.putioDialog.querySelector('[data-action="cancel-putio"]').addEventListener('click', closePutioDialog);
 el.putioDialog.addEventListener('click', (event) => {

@@ -675,8 +675,51 @@ select.input-control-addon {
   max-height: calc(100vh - 32px);
 }
 
+.putio-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 12px 18px 0;
+  border-bottom: 1px solid #edf1f2;
+}
+
+.putio-tab {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  min-height: 40px;
+  padding: 8px 12px 10px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.putio-tab:hover {
+  color: var(--text);
+  background: #f8fbfb;
+}
+
+.putio-tab:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: -2px;
+}
+
+.putio-tab[aria-selected="true"] {
+  color: var(--accent-strong);
+  border-bottom-color: var(--accent);
+}
+
+.putio-tab-panel {
+  min-height: 0;
+  overflow: auto;
+}
+
 .putio-connect-actions {
   justify-content: flex-start;
+}
+
+.putio-connect-actions #putioDisconnectButton {
+  margin-left: auto;
 }
 
 .modal-body {
@@ -1170,6 +1213,19 @@ td.center input {
 
   .putio-status-button {
     align-self: flex-start;
+  }
+
+  .putio-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .putio-tab {
+    width: 100%;
+  }
+
+  .putio-connect-actions #putioDisconnectButton {
+    margin-left: 0;
   }
 
   .profile-card-main,
