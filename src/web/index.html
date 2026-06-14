@@ -14,8 +14,7 @@
           <span>putiorr</span>
         </div>
         <nav class="nav" aria-label="Main navigation">
-          <a href="#connection" class="nav-link active">Connection</a>
-          <a href="#profiles" class="nav-link">RR profiles</a>
+          <a href="#profiles" class="nav-link active">RR profiles</a>
           <a href="#download-profiles" class="nav-link">Download profiles</a>
           <a href="#downloads" class="nav-link">Downloads</a>
         </nav>
@@ -27,53 +26,11 @@
             <h1>putiorr</h1>
             <p>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</p>
           </div>
-          <button id="refreshButton" class="button secondary" type="button">
-            <span aria-hidden="true">↻</span>
-            Refresh
+          <button id="putioStatusButton" class="putio-status-button" type="button" data-state="unknown" aria-label="Put.io connection status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>Put.io</span>
           </button>
         </header>
-
-        <section id="connection" class="panel">
-          <div class="section-head">
-            <div>
-              <h2>Put.io connection</h2>
-              <p id="connectionState">Checking connection state...</p>
-            </div>
-            <span id="connectionBadge" class="status neutral">Unknown</span>
-          </div>
-
-          <form id="settingsForm" class="form-grid">
-            <label>
-              OAuth token
-              <input id="putioToken" name="putioToken" type="password" autocomplete="off" placeholder="Paste a token to connect or rotate">
-            </label>
-            <div class="button-row">
-              <button id="oauthStartButton" class="button primary" type="button">
-                <span aria-hidden="true">↗</span>
-                Connect with put.io
-              </button>
-              <button id="testConnectionButton" class="button secondary" type="button">
-                <span aria-hidden="true">✓</span>
-                Test connection
-              </button>
-              <button class="button secondary" type="submit">
-                <span aria-hidden="true">●</span>
-                Save settings
-              </button>
-            </div>
-          </form>
-          <div id="oauthPanel" class="oauth-panel" hidden>
-            <div>
-              <div class="oauth-code" id="oauthCode">----</div>
-              <p>Open <a id="oauthLink" href="https://put.io/link" target="_blank" rel="noreferrer">put.io/link</a> and enter this code. This page will keep checking for authorization.</p>
-            </div>
-            <button id="oauthPollButton" class="button secondary" type="button">
-              <span aria-hidden="true">⟳</span>
-              Check now
-            </button>
-          </div>
-          <p id="settingsMessage" class="message" role="status"></p>
-        </section>
 
         <section id="profiles" class="panel">
           <div class="section-head">
@@ -123,6 +80,61 @@
         </section>
       </main>
     </div>
+
+    <dialog id="putioDialog" class="modal putio-modal">
+      <form id="settingsForm" class="putio-form">
+        <div class="modal-head">
+          <div>
+            <h2>Put.io connection</h2>
+            <p id="connectionState">Checking connection state...</p>
+          </div>
+          <button id="putioDialogClose" class="icon-button" type="button" aria-label="Close Put.io connection">×</button>
+        </div>
+
+        <section class="wizard-step">
+          <div class="step-label">Connect</div>
+          <div class="button-row putio-connect-actions">
+            <button id="oauthStartButton" class="button primary" type="button">
+              <span aria-hidden="true">↗</span>
+              Connect with put.io
+            </button>
+            <button id="testConnectionButton" class="button secondary" type="button">
+              <span aria-hidden="true">✓</span>
+              Test connection
+            </button>
+          </div>
+        </section>
+
+        <div id="oauthPanel" class="oauth-panel" hidden>
+          <div>
+            <div class="oauth-code" id="oauthCode">----</div>
+            <p>Open <a id="oauthLink" href="https://put.io/link" target="_blank" rel="noreferrer">put.io/link</a> and enter this code. This page will keep checking for authorization.</p>
+          </div>
+          <button id="oauthPollButton" class="button secondary" type="button">
+            <span aria-hidden="true">⟳</span>
+            Check now
+          </button>
+        </div>
+
+        <section class="wizard-step">
+          <div class="step-label">Manual token</div>
+          <label>
+            OAuth token
+            <input id="putioToken" name="putioToken" type="password" autocomplete="off" placeholder="Paste a token to connect or rotate">
+          </label>
+        </section>
+
+        <p id="settingsMessage" class="message modal-message" role="status"></p>
+
+        <div class="modal-actions">
+          <button class="button secondary" type="button" data-action="cancel-putio">Cancel</button>
+          <button class="button primary" type="submit">
+            <span aria-hidden="true">●</span>
+            Save token
+          </button>
+        </div>
+      </form>
+    </dialog>
 
     <dialog id="profileWizard" class="modal">
       <form id="profileWizardForm" class="wizard-form">

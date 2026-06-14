@@ -5,11 +5,14 @@ const state = {
   downloads: [],
   expandedDownloads: new Set(),
   fileListScrollTops: new Map(),
+  putioConnectionPromptShown: false,
 };
 
 const el = {
   connectionState: document.querySelector('#connectionState'),
-  connectionBadge: document.querySelector('#connectionBadge'),
+  putioStatusButton: document.querySelector('#putioStatusButton'),
+  putioDialog: document.querySelector('#putioDialog'),
+  putioDialogClose: document.querySelector('#putioDialogClose'),
   settingsForm: document.querySelector('#settingsForm'),
   putioToken: document.querySelector('#putioToken'),
   settingsMessage: document.querySelector('#settingsMessage'),
@@ -86,7 +89,6 @@ const el = {
   profileLinksMessage: document.querySelector('#profileLinksMessage'),
   saveProfileLinksButton: document.querySelector('#saveProfileLinksButton'),
   downloadsList: document.querySelector('#downloadsList'),
-  refreshButton: document.querySelector('#refreshButton'),
 };
 
 const PROFILE_TYPES = {
@@ -371,7 +373,13 @@ async function api(path, options = {}) {
 
 function setMessage(message, tone = 'neutral') {
   el.settingsMessage.textContent = message;
-  el.settingsMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+  el.settingsMessage.style.color = tone === 'error'
+    ? '#b42318'
+    : tone === 'ok'
+      ? '#16803f'
+      : tone === 'warn'
+        ? '#b7791f'
+        : '#647275';
 }
 
 function stopOAuthPolling() {
@@ -443,6 +451,7 @@ async function loadAll() {
   state.downloadProfiles = downloadProfiles;
   state.downloads = downloads;
   render();
+  promptForMissingPutioConnection();
 }
 
 function applyDownloadsUpdate(message) {
@@ -460,13 +469,42 @@ function render() {
 function renderConnection() {
   const connected = Boolean(state.settings?.tokenConfigured);
   el.connectionState.textContent = connected
-    ? 'A put.io token is configured. You can test or rotate it here.'
-    : 'No put.io token is configured. Add one before RPC clients can add downloads.';
-  el.connectionBadge.textContent = connected ? 'Connected' : 'Needs token';
-  el.connectionBadge.className = `status ${connected ? 'ok' : 'warn'}`;
+    ? 'A put.io token is configured. You can test the connection or rotate the token.'
+    : 'No put.io token is configured. Connect with OAuth or paste a token before RPC clients can add downloads.';
+  const stateName = connected ? 'connected' : 'needs-token';
+  el.putioStatusButton.dataset.state = stateName;
+  el.putioStatusButton.title = connected ? 'Put.io connected' : 'Put.io needs a token';
+  el.putioStatusButton.setAttribute('aria-label', connected ? 'Put.io connected. Open connection settings.' : 'Put.io needs a token. Open connection settings.');
   if (connected) {
     stopOAuthPolling();
     el.oauthPanel.hidden = true;
+  }
+}
+
+function openPutioDialog() {
+  renderConnection();
+  if (!el.putioDialog.open) {
+    if (typeof el.putioDialog.showModal === 'function') {
+      el.putioDialog.showModal();
+    } else {
+      el.putioDialog.setAttribute('open', '');
+    }
+  }
+  el.putioToken.focus();
+}
+
+function promptForMissingPutioConnection() {
+  if (state.putioConnectionPromptShown || state.settings?.tokenConfigured) return;
+  state.putioConnectionPromptShown = true;
+  openPutioDialog();
+  setMessage('Put.io not connected. Connect with OAuth or paste a token.', 'warn');
+}
+
+function closePutioDialog() {
+  if (el.putioDialog.open && typeof el.putioDialog.close === 'function') {
+    el.putioDialog.close();
+  } else {
+    el.putioDialog.removeAttribute('open');
   }
 }
 
@@ -1913,10 +1951,11 @@ el.profileLinksDialog.querySelector('[data-action="cancel-profile-links"]').addE
 el.profileLinksDialog.addEventListener('click', (event) => {
   if (event.target === el.profileLinksDialog) closeProfileLinksDialog();
 });
-el.refreshButton.addEventListener('click', () => {
-  if (!requestStateRefresh()) {
-    loadAll().catch((error) => setMessage(error.message, 'error'));
-  }
+el.putioStatusButton.addEventListener('click', openPutioDialog);
+el.putioDialogClose.addEventListener('click', closePutioDialog);
+el.putioDialog.querySelector('[data-action="cancel-putio"]').addEventListener('click', closePutioDialog);
+el.putioDialog.addEventListener('click', (event) => {
+  if (event.target === el.putioDialog) closePutioDialog();
 });
 
 loadAll().catch((error) => setMessage(error.message, 'error'));
