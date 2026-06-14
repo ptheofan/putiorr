@@ -78,23 +78,23 @@ ghcr.io/ptheofan/putiorr
 ```
 
 Publishing happens when a GitHub Release is published. Use a semver tag such as
-`v1.0.2`; the workflow builds the Dockerfile `production` target for
+`v1.1.0`; the workflow builds the Dockerfile `production` target for
 `linux/amd64` and `linux/arm64`.
 
 Release tags produce image tags like:
 
 ```text
-ghcr.io/ptheofan/putiorr:v1.0.2
-ghcr.io/ptheofan/putiorr:1.0.2
-ghcr.io/ptheofan/putiorr:1.0
+ghcr.io/ptheofan/putiorr:v1.1.0
+ghcr.io/ptheofan/putiorr:1.1.0
+ghcr.io/ptheofan/putiorr:1.1
 ghcr.io/ptheofan/putiorr:latest
 ```
 
 Prereleases do not receive the `latest` tag.
 
 Before publishing a release, run the **Release Gate** GitHub Actions workflow on
-`main` with the intended tag. For package version `1.0.2`, use release tag
-`v1.0.2`.
+`main` with the intended tag. For package version `1.1.0`, use release tag
+`v1.1.0`.
 
 The release workflow also runs the release gate after a GitHub Release is
 published. It checks that the release tag matches `package.json` and that README
