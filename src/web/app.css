@@ -410,6 +410,27 @@ select.input-control-addon {
   color: #193235;
 }
 
+.button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.text-button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.text-button:hover {
+  text-decoration: underline;
+}
+
 .icon-button.danger {
   color: var(--danger);
   background: #fff0ee;
@@ -731,6 +752,50 @@ select.input-control-addon {
   border-bottom-color: var(--accent);
 }
 
+.message-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  margin: 12px 18px 0;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfb;
+}
+
+.message-box[hidden] {
+  display: none;
+}
+
+.message-box[data-tone="ok"] {
+  border-color: rgba(22, 128, 63, 0.24);
+  background: rgba(22, 128, 63, 0.08);
+}
+
+.message-box[data-tone="warn"] {
+  border-color: rgba(183, 121, 31, 0.26);
+  background: #fff8eb;
+}
+
+.message-box[data-tone="error"] {
+  border-color: rgba(180, 35, 24, 0.22);
+  background: #fff0ee;
+}
+
+.message-box .message {
+  min-height: 0;
+  color: #2c3a3d;
+  line-height: 1.45;
+}
+
+.message-box .icon-button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
 .putio-tab-panel {
   min-height: 0;
   overflow: auto;
@@ -742,6 +807,51 @@ select.input-control-addon {
 
 .putio-connect-actions #putioDisconnectButton {
   margin-left: auto;
+}
+
+.putio-connected-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(22, 128, 63, 0.24);
+  border-radius: 8px;
+  background: rgba(22, 128, 63, 0.08);
+}
+
+.putio-connected-panel[hidden] {
+  display: none;
+}
+
+.putio-connected-panel .status-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(22, 128, 63, 0.14);
+}
+
+.putio-connected-panel span:not(.status-dot) {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.putio-connected-panel strong {
+  display: block;
+  margin-top: 2px;
+  color: #172326;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.putio-advanced-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .putio-advanced {
@@ -957,11 +1067,15 @@ select.input-control-addon {
 
 .modal-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   align-items: center;
   padding: 12px 18px 14px;
   border-top: 1px solid var(--line);
+}
+
+.modal-actions [data-action="cancel-putio"] {
+  margin-right: auto;
 }
 
 .table-wrap {
@@ -1281,11 +1395,20 @@ td.center input {
     align-items: stretch;
   }
 
+  .putio-advanced-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .profile-card-main,
   .preview-head,
   .modal-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .modal-actions [data-action="cancel-putio"] {
+    margin-right: 0;
   }
 
   .profile-facts div {
