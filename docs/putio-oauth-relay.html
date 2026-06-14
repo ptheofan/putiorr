@@ -3,7 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2a6863">
     <title>putiorr Put.io OAuth relay</title>
+    <link rel="icon" href="favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="icons/favicon-48x48.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+    <link rel="manifest" href="manifest.webmanifest">
     <style>
       :root {
         color-scheme: light;
@@ -28,6 +35,22 @@
         box-shadow: 0 18px 50px rgba(23, 35, 38, 0.08);
       }
 
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 14px;
+        color: #172326;
+        font-size: 20px;
+        font-weight: 750;
+      }
+
+      .brand img {
+        display: block;
+        width: 34px;
+        height: 34px;
+      }
+
       h1 {
         margin: 0 0 8px;
         font-size: 20px;
@@ -46,6 +69,10 @@
   </head>
   <body>
     <main>
+      <div class="brand">
+        <img src="icons/putiorr-icon-64.png" alt="">
+        <span>putiorr</span>
+      </div>
       <h1>Put.io connection</h1>
       <p id="message">Returning to putiorr...</p>
     </main>

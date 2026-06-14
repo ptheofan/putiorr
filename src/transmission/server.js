@@ -19,7 +19,11 @@ const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
   '.svg': 'image/svg+xml',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 };
 
 function jsonResponse(res, status, body, sessionId) {
@@ -100,11 +104,20 @@ function oauthCallbackHtml() {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#2a6863">
     <title>Put.io connection</title>
+    <link rel="icon" href="/favicon.ico" sizes="any">
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48x48.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png">
+    <link rel="manifest" href="/manifest.webmanifest">
     <style>
       :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f7f8; color: #172326; }
       main { width: min(460px, calc(100vw - 32px)); border: 1px solid #d9e2e4; border-radius: 8px; background: #fff; padding: 22px; box-shadow: 0 18px 50px rgba(23, 35, 38, 0.08); }
+      .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; color: #172326; font-size: 20px; font-weight: 750; }
+      .brand img { display: block; width: 34px; height: 34px; }
       h1 { margin: 0 0 8px; font-size: 20px; }
       p { margin: 0; color: #647275; line-height: 1.5; }
       .ok { color: #16803f; }
@@ -113,6 +126,10 @@ function oauthCallbackHtml() {
   </head>
   <body>
     <main>
+      <div class="brand">
+        <img src="/icons/putiorr-icon-64.png" alt="">
+        <span>putiorr</span>
+      </div>
       <h1>Put.io connection</h1>
       <p id="message">Completing authorization...</p>
     </main>
