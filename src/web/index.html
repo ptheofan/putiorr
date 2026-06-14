@@ -114,6 +114,29 @@
 
           <p id="oauthSetupHint" class="oauth-setup-hint"></p>
 
+          <section class="putio-advanced" aria-labelledby="putioAdvancedTitle">
+            <div class="putio-advanced-head">
+              <div>
+                <h3 id="putioAdvancedTitle">Advanced</h3>
+                <p>Override the baked OAuth defaults for this instance.</p>
+              </div>
+              <button id="resetPutioOAuthSettingsButton" class="button secondary" type="button">Reset</button>
+            </div>
+            <div class="field-pair">
+              <label>
+                OAuth relay url
+                <input id="putioOAuthRelayUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://ptheofan.github.io/putiorr/putio-oauth-relay.html">
+              </label>
+              <label>
+                App Id
+                <input id="putioOAuthAppId" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="9354">
+              </label>
+            </div>
+            <div class="button-row">
+              <button id="savePutioOAuthSettingsButton" class="button secondary" type="button">Save OAuth settings</button>
+            </div>
+          </section>
+
           <div id="oauthPanel" class="oauth-panel" hidden>
             <div>
               <div class="oauth-code" id="oauthCode">OAuth</div>

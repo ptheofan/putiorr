@@ -21,6 +21,10 @@ const el = {
   oauthStartButton: document.querySelector('#oauthStartButton'),
   putioDisconnectButton: document.querySelector('#putioDisconnectButton'),
   oauthSetupHint: document.querySelector('#oauthSetupHint'),
+  putioOAuthRelayUrl: document.querySelector('#putioOAuthRelayUrl'),
+  putioOAuthAppId: document.querySelector('#putioOAuthAppId'),
+  savePutioOAuthSettingsButton: document.querySelector('#savePutioOAuthSettingsButton'),
+  resetPutioOAuthSettingsButton: document.querySelector('#resetPutioOAuthSettingsButton'),
   oauthPanel: document.querySelector('#oauthPanel'),
   oauthCode: document.querySelector('#oauthCode'),
   oauthLink: document.querySelector('#oauthLink'),
@@ -490,15 +494,18 @@ function renderConnection() {
     el.oauthPanel.hidden = true;
   }
   el.putioDisconnectButton.hidden = !connected;
+  el.putioOAuthRelayUrl.value = putioOAuth.relayUrl ?? putioOAuth.defaultRelayUrl ?? '';
+  el.putioOAuthAppId.value = putioOAuth.appId ?? putioOAuth.defaultAppId ?? '';
+  el.resetPutioOAuthSettingsButton.disabled = !putioOAuth.overridesConfigured;
   if (putioRedirectUri) {
     el.oauthCallbackUrl.textContent = putioRedirectUri;
   }
   el.oauthStartButton.disabled = Boolean(putioOAuth.requiresCustomApp);
   el.oauthStartButton.title = putioOAuth.requiresCustomApp
-    ? 'Create your own put.io OAuth app and set PUTIORR_PUTIO_APP_ID first.'
+    ? 'Change the Put.io OAuth App Id under Advanced first.'
     : '';
   if (putioOAuth.requiresCustomApp) {
-    el.oauthSetupHint.textContent = `OAuth redirect needs your own put.io app. App id ${putioOAuth.appId} is put.io's Swagger test API. Register ${putioRedirectUri} as the callback URL, set PUTIORR_PUTIO_APP_ID, then restart putiorr.`;
+    el.oauthSetupHint.textContent = `OAuth redirect needs your own put.io app. App id ${putioOAuth.appId} is put.io's Swagger test API. Register ${putioRedirectUri} as the callback URL, then change App Id under Advanced or set PUTIORR_PUTIO_APP_ID.`;
   } else if (putioOAuth.mode === 'hosted-relay') {
     el.oauthSetupHint.textContent = `Hosted relay mode. Register ${putioRedirectUri} as the put.io callback URL. After put.io authorizes, the relay returns to ${putioOAuth.redirectUri}.`;
   } else {
@@ -1876,8 +1883,48 @@ function slugify(value) {
     || 'profile';
 }
 
+async function savePutioOAuthSettings() {
+  const appId = el.putioOAuthAppId.value.trim();
+  const relayUrl = el.putioOAuthRelayUrl.value.trim();
+  if (!appId) {
+    setMessage('Put.io OAuth App Id is required.', 'error');
+    el.putioOAuthAppId.focus();
+    return;
+  }
+  const settings = await api('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({
+      putioOAuth: {
+        appId,
+        relayUrl,
+      },
+    }),
+  });
+  state.settings = settings;
+  renderConnection();
+  setMessage('OAuth settings saved.', 'ok');
+}
+
+async function resetPutioOAuthSettings() {
+  const settings = await api('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({
+      putioOAuth: {
+        reset: true,
+      },
+    }),
+  });
+  state.settings = settings;
+  renderConnection();
+  setMessage('OAuth settings reset to baked defaults.', 'ok');
+}
+
 el.settingsForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  if (activePutioTab() === 'oauth') {
+    await savePutioOAuthSettings().catch((error) => setMessage(error.message, 'error'));
+    return;
+  }
   const token = el.putioToken.value.trim();
   if (!token && !state.settings?.tokenConfigured) {
     setMessage('Paste a put.io token before saving settings.', 'error');
@@ -1893,6 +1940,14 @@ el.settingsForm.addEventListener('submit', async (event) => {
   renderConnection();
   setMessage('Token saved.', 'ok');
   requestStateRefresh();
+});
+
+el.savePutioOAuthSettingsButton.addEventListener('click', () => {
+  savePutioOAuthSettings().catch((error) => setMessage(error.message, 'error'));
+});
+
+el.resetPutioOAuthSettingsButton.addEventListener('click', () => {
+  resetPutioOAuthSettings().catch((error) => setMessage(error.message, 'error'));
 });
 
 el.testConnectionButton.addEventListener('click', async () => {

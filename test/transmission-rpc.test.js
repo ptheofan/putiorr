@@ -75,23 +75,6 @@ async function createHarness(env = {}) {
     putioFactory: () => putio,
   });
   const rpcServer = new TransmissionRpcServer({ config, service });
-  rpcServer.oauth = {
-    startRedirect({ redirectUri, state }) {
-      const authUrl = new URL('https://api.put.io/v2/oauth2/authenticate');
-      authUrl.searchParams.set('client_id', config.putioAppId);
-      authUrl.searchParams.set('response_type', 'token');
-      authUrl.searchParams.set('redirect_uri', redirectUri);
-      authUrl.searchParams.set('state', state);
-      return {
-        authUrl: authUrl.toString(),
-        putioRedirectUri: redirectUri,
-      };
-    },
-    async poll(code) {
-      if (code !== 'ABCD') return { status: 'WAITING', oauthToken: '' };
-      return { status: 'OK', oauthToken: 'oauth-token-from-putio' };
-    },
-  };
   await rpcServer.start();
   const { port } = rpcServer.server.address();
   const url = `http://127.0.0.1:${port}/transmission/rpc`;
@@ -661,6 +644,11 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(typeof settingsBody.defaultDownloadProfileId, 'number');
   assert.equal(settingsBody.downloadPolicy.slowSpeedThresholdBytesPerSecond, 0);
   assert.equal(settingsBody.putioOAuth.appId, '12345');
+  assert.equal(settingsBody.putioOAuth.defaultAppId, '12345');
+  assert.equal(settingsBody.putioOAuth.appIdOverridden, false);
+  assert.equal(settingsBody.putioOAuth.relayUrl, 'https://ptheofan.github.io/putiorr/putio-oauth-relay.html');
+  assert.equal(settingsBody.putioOAuth.defaultRelayUrl, 'https://ptheofan.github.io/putiorr/putio-oauth-relay.html');
+  assert.equal(settingsBody.putioOAuth.relayUrlOverridden, false);
   assert.equal(settingsBody.putioOAuth.redirectUri, harness.url.replace('/transmission/rpc', '/api/oauth/callback'));
   assert.equal(settingsBody.putioOAuth.requiresCustomApp, false);
 
@@ -735,6 +723,79 @@ test('web API exposes settings and profile CRUD', async (t) => {
   });
   assert.equal(update.status, 200);
   assert.equal((await update.json()).enabled, false);
+});
+
+test('web API stores and resets put.io OAuth setting overrides', async (t) => {
+  const harness = await createHarness({
+    PUTIORR_PUTIO_TOKEN: '',
+  });
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const relayUrl = 'https://example.github.io/putiorr/custom-relay.html/';
+  const update = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      putioOAuth: {
+        appId: '7777',
+        relayUrl,
+      },
+    }),
+  });
+  assert.equal(update.status, 200);
+  const updated = await update.json();
+  assert.equal(updated.putioOAuth.appId, '7777');
+  assert.equal(updated.putioOAuth.defaultAppId, '12345');
+  assert.equal(updated.putioOAuth.appIdOverridden, true);
+  assert.equal(updated.putioOAuth.relayUrl, 'https://example.github.io/putiorr/custom-relay.html');
+  assert.equal(updated.putioOAuth.defaultRelayUrl, 'https://ptheofan.github.io/putiorr/putio-oauth-relay.html');
+  assert.equal(updated.putioOAuth.relayUrlOverridden, true);
+  assert.equal(updated.putioOAuth.overridesConfigured, true);
+  assert.equal(updated.putioOAuth.mode, 'hosted-relay');
+
+  const startResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/start'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(startResponse.status, 200);
+  const startBody = await startResponse.json();
+  const authUrl = new URL(startBody.authUrl);
+  assert.equal(authUrl.searchParams.get('client_id'), '7777');
+  assert.equal(authUrl.searchParams.get('redirect_uri'), 'https://example.github.io/putiorr/custom-relay.html');
+
+  const selfHostedUpdate = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      putioOAuth: {
+        appId: '7777',
+        relayUrl: '',
+      },
+    }),
+  });
+  assert.equal(selfHostedUpdate.status, 200);
+  const selfHosted = await selfHostedUpdate.json();
+  assert.equal(selfHosted.putioOAuth.mode, 'self-hosted');
+  assert.equal(selfHosted.putioOAuth.putioRedirectUri, selfHosted.putioOAuth.redirectUri);
+
+  const reset = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      putioOAuth: {
+        reset: true,
+      },
+    }),
+  });
+  assert.equal(reset.status, 200);
+  const resetBody = await reset.json();
+  assert.equal(resetBody.putioOAuth.appId, '12345');
+  assert.equal(resetBody.putioOAuth.relayUrl, 'https://ptheofan.github.io/putiorr/putio-oauth-relay.html');
+  assert.equal(resetBody.putioOAuth.overridesConfigured, false);
 });
 
 test('web API starts and completes put.io OAuth flow', async (t) => {

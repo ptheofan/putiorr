@@ -17,8 +17,6 @@ services:
       PUTIORR_STATE_PATH: /data/putiorr-config/putiorr.sqlite
       PUTIORR_TARGET_DIR: /putiorr
       PUTIORR_PUTIO_TOKEN: ${PUTIORR_PUTIO_TOKEN:-}
-      PUTIORR_PUTIO_APP_ID: ${PUTIORR_PUTIO_APP_ID:-9354}
-      PUTIORR_PUTIO_OAUTH_RELAY_URL: ${PUTIORR_PUTIO_OAUTH_RELAY_URL:-https://ptheofan.github.io/putiorr/putio-oauth-relay.html}
       PUTIORR_PROFILES_JSON: >
         [
           {
