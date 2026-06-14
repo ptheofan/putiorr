@@ -267,24 +267,24 @@
               <div class="field-pair">
                 <div class="field-control" data-help-field="downloadSlowSpeedGrace">
                   <span id="downloadSlowSpeedGraceLabel" class="field-label">Startup grace</span>
-                  <div class="unit-input time-input">
-                    <input id="downloadSlowSpeedGraceAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedGraceLabel" placeholder="30">
-                    <select id="downloadSlowSpeedGraceUnit" aria-label="Startup grace unit">
-                      <option value="seconds">seconds</option>
-                      <option value="minutes">minutes</option>
+                  <div class="input-control time-input">
+                    <input id="downloadSlowSpeedGraceAmount" class="input-control-field" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedGraceLabel" placeholder="30">
+                    <select id="downloadSlowSpeedGraceUnit" class="input-control-addon input-control-suffix" aria-label="Startup grace unit">
+                      <option value="seconds">sec</option>
+                      <option value="minutes">min</option>
                     </select>
                   </div>
                   <input id="downloadSlowSpeedGrace" type="hidden">
                 </div>
                 <div class="field-control" data-help-field="downloadSlowSpeedMinSize">
                   <span id="downloadSlowSpeedMinSizeLabel" class="field-label">Ignore below</span>
-                  <div class="unit-input byte-input">
-                    <label class="unit-prefix byte-disable" title="Disable ignore-below size">
+                  <div class="input-control byte-input">
+                    <label class="input-control-addon input-control-prefix byte-disable" title="Disable ignore-below size">
                       <input id="downloadSlowSpeedMinSizeDisabled" type="checkbox" aria-label="Disable ignore-below size">
                       <span>Off</span>
                     </label>
-                    <input id="downloadSlowSpeedMinSizeAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedMinSizeLabel" placeholder="100">
-                    <select id="downloadSlowSpeedMinSizeUnit" aria-label="Ignore below unit">
+                    <input id="downloadSlowSpeedMinSizeAmount" class="input-control-field" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedMinSizeLabel" placeholder="100">
+                    <select id="downloadSlowSpeedMinSizeUnit" class="input-control-addon input-control-suffix" aria-label="Ignore below unit">
                       <option value="bytes">bytes</option>
                       <option value="mb">MB</option>
                       <option value="gb">GB</option>
@@ -296,24 +296,24 @@
               <div class="field-pair">
                 <div class="field-control" data-help-field="downloadSlowSpeedDuration">
                   <span id="downloadSlowSpeedDurationLabel" class="field-label">Duration</span>
-                  <div class="unit-input time-input">
-                    <input id="downloadSlowSpeedDurationAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedDurationLabel" placeholder="120">
-                    <select id="downloadSlowSpeedDurationUnit" aria-label="Duration unit">
-                      <option value="seconds">seconds</option>
-                      <option value="minutes">minutes</option>
+                  <div class="input-control time-input">
+                    <input id="downloadSlowSpeedDurationAmount" class="input-control-field" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedDurationLabel" placeholder="120">
+                    <select id="downloadSlowSpeedDurationUnit" class="input-control-addon input-control-suffix" aria-label="Duration unit">
+                      <option value="seconds">sec</option>
+                      <option value="minutes">min</option>
                     </select>
                   </div>
                   <input id="downloadSlowSpeedDuration" type="hidden">
                 </div>
                 <div class="field-control" data-help-field="downloadSlowSpeedThreshold">
                   <span id="downloadSlowSpeedThresholdLabel" class="field-label">Slow threshold</span>
-                  <div class="unit-input byte-input">
-                    <label class="unit-prefix byte-disable" title="Disable slow-speed reset">
+                  <div class="input-control byte-input">
+                    <label class="input-control-addon input-control-prefix byte-disable" title="Disable slow-speed reset">
                       <input id="downloadSlowSpeedThresholdDisabled" type="checkbox" aria-label="Disable slow-speed reset">
                       <span>Off</span>
                     </label>
-                    <input id="downloadSlowSpeedThresholdAmount" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedThresholdLabel" placeholder="100">
-                    <select id="downloadSlowSpeedThresholdUnit" aria-label="Slow threshold unit">
+                    <input id="downloadSlowSpeedThresholdAmount" class="input-control-field" type="number" min="0" step="1" inputmode="numeric" aria-labelledby="downloadSlowSpeedThresholdLabel" placeholder="100">
+                    <select id="downloadSlowSpeedThresholdUnit" class="input-control-addon input-control-suffix" aria-label="Slow threshold unit">
                       <option value="bytes">bytes/s</option>
                       <option value="mb">MB/s</option>
                       <option value="gb">GB/s</option>

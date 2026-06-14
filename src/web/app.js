@@ -299,7 +299,7 @@ const DOWNLOAD_PROFILE_HELP = {
     ],
     valueLabel: 'Current threshold',
     value: (profile) => profile.slowSpeedThresholdBytesPerSecond > 0
-      ? formatSpeed(profile.slowSpeedThresholdBytesPerSecond)
+      ? formatWholeSpeed(profile.slowSpeedThresholdBytesPerSecond)
       : 'Off: slow-speed reset disabled',
   },
   downloadSlowSpeedDuration: {
@@ -339,7 +339,7 @@ const DOWNLOAD_PROFILE_HELP = {
       'Enter an integer amount and choose bytes, MB, or GB from the unit selector.',
     ],
     valueLabel: 'Ignored files',
-    value: (profile) => `Below ${formatBytes(profile.slowSpeedMinSizeBytes)}`,
+    value: (profile) => `Below ${formatWholeBytes(profile.slowSpeedMinSizeBytes)}`,
   },
 };
 
@@ -676,12 +676,12 @@ function createDownloadProfileCard(downloadProfile) {
     card,
     'threshold',
     Number(downloadProfile.slowSpeedThresholdBytesPerSecond) > 0
-      ? formatSpeed(downloadProfile.slowSpeedThresholdBytesPerSecond)
+      ? formatWholeSpeed(downloadProfile.slowSpeedThresholdBytesPerSecond)
       : 'Off',
   );
   setProfileFact(card, 'duration', `${Number(downloadProfile.slowSpeedDurationSeconds ?? 0)}s`);
   setProfileFact(card, 'grace', `${Number(downloadProfile.slowSpeedGraceSeconds ?? 0)}s`);
-  setProfileFact(card, 'min-size', formatBytes(downloadProfile.slowSpeedMinSizeBytes));
+  setProfileFact(card, 'min-size', formatWholeBytes(downloadProfile.slowSpeedMinSizeBytes));
 
   card.querySelector('[data-action="edit"]').addEventListener('click', () => openDownloadProfileDialog(downloadProfile));
   const deleteButton = card.querySelector('[data-action="delete"]');
@@ -1694,12 +1694,30 @@ function formatBytes(value) {
   return `${Math.round(bytes)} B`;
 }
 
+function formatWholeBytes(value) {
+  const bytes = Number(value ?? 0);
+  if (bytes <= 0) return '0 B';
+  if (bytes >= 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024 / 1024)} GB`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${Math.round(bytes)} B`;
+}
+
 function formatSpeed(value) {
   const bytes = Number(value ?? 0);
   if (bytes <= 0) return 'Idle';
   if (bytes >= 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB/s`;
   if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB/s`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB/s`;
+  return `${Math.round(bytes)} B/s`;
+}
+
+function formatWholeSpeed(value) {
+  const bytes = Number(value ?? 0);
+  if (bytes <= 0) return 'Idle';
+  if (bytes >= 1024 * 1024 * 1024) return `${Math.round(bytes / 1024 / 1024 / 1024)} GB/s`;
+  if (bytes >= 1024 * 1024) return `${Math.round(bytes / 1024 / 1024)} MB/s`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB/s`;
   return `${Math.round(bytes)} B/s`;
 }
 
