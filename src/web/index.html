@@ -112,14 +112,17 @@
             </button>
           </div>
 
+          <p id="oauthSetupHint" class="oauth-setup-hint"></p>
+
           <div id="oauthPanel" class="oauth-panel" hidden>
             <div>
-              <div class="oauth-code" id="oauthCode">----</div>
-              <p>Open <a id="oauthLink" href="https://put.io/link" target="_blank" rel="noreferrer">put.io/link</a> and enter this code. This page will keep checking for authorization.</p>
+              <div class="oauth-code" id="oauthCode">OAuth</div>
+              <p>Redirecting to put.io authorization. If your browser does not redirect, use <a id="oauthLink" href="https://app.put.io/settings/account/oauth/apps" target="_blank" rel="noreferrer">this authorization link</a>.</p>
+              <p class="oauth-callback-row">Put.io redirect URI: <code id="oauthCallbackUrl"></code></p>
             </div>
             <button id="oauthPollButton" class="button secondary" type="button">
               <span aria-hidden="true">⟳</span>
-              Check now
+              Check connection
             </button>
           </div>
         </section>

@@ -12,6 +12,8 @@ const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const WEB_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
 const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+const PUTIO_SWAGGER_APP_ID = '3270';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -25,6 +27,15 @@ function jsonResponse(res, status, body, sessionId) {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader(SESSION_HEADER, sessionId);
   res.end(JSON.stringify(body));
+}
+
+function htmlResponse(res, status, body, sessionId) {
+  res.statusCode = status;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader(SESSION_HEADER, sessionId);
+  res.end(body);
 }
 
 async function readJsonBody(req) {
@@ -74,11 +85,90 @@ function websocketFrame(payload, opcode = 0x1) {
   return Buffer.concat([header, body]);
 }
 
+function firstHeaderValue(value) {
+  if (Array.isArray(value)) return firstHeaderValue(value[0]);
+  return String(value ?? '').split(',')[0].trim();
+}
+
+function encodeOAuthState(payload) {
+  return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
+}
+
+function oauthCallbackHtml() {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Put.io connection</title>
+    <style>
+      :root { color-scheme: light; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #f5f7f8; color: #172326; }
+      main { width: min(460px, calc(100vw - 32px)); border: 1px solid #d9e2e4; border-radius: 8px; background: #fff; padding: 22px; box-shadow: 0 18px 50px rgba(23, 35, 38, 0.08); }
+      h1 { margin: 0 0 8px; font-size: 20px; }
+      p { margin: 0; color: #647275; line-height: 1.5; }
+      .ok { color: #16803f; }
+      .error { color: #b42318; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Put.io connection</h1>
+      <p id="message">Completing authorization...</p>
+    </main>
+    <script>
+      (async () => {
+        const message = document.querySelector('#message');
+        const query = new URLSearchParams(window.location.search.slice(1));
+        const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+        const params = fragment.toString() ? fragment : query;
+        window.history.replaceState(null, document.title, window.location.pathname);
+        const error = params.get('error_description') || params.get('error');
+        if (error) throw new Error(error);
+        const oauthToken = params.get('access_token') || params.get('oauth_token') || params.get('token');
+        const state = params.get('state');
+        if (!oauthToken) throw new Error('put.io did not return an OAuth token.');
+        const response = await fetch('/api/oauth/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ oauthToken, state }),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || 'Could not save the put.io token.');
+        message.className = 'ok';
+        message.textContent = window.opener
+          ? 'Put.io connected. You can close this window.'
+          : 'Put.io connected. Returning to putiorr...';
+        window.sessionStorage.setItem('putiorr:oauth-result', JSON.stringify({
+          status: 'connected',
+        }));
+        if (window.opener) {
+          window.opener.postMessage({ type: 'putiorr:putio-oauth-complete' }, window.location.origin);
+          window.setTimeout(() => window.close(), 1200);
+        } else {
+          window.setTimeout(() => window.location.replace('/?putioOAuth=connected'), 1200);
+        }
+      })().catch((error) => {
+        const message = document.querySelector('#message');
+        message.className = 'error';
+        message.textContent = error.message;
+        window.sessionStorage.setItem('putiorr:oauth-result', JSON.stringify({
+          status: 'error',
+          message: error.message,
+        }));
+        window.setTimeout(() => window.location.replace('/?putioOAuth=error'), 1800);
+      });
+    </script>
+  </body>
+</html>`;
+}
+
 export class TransmissionRpcServer {
   constructor({ config, service }) {
     this.config = config;
     this.service = service;
     this.oauth = new PutioOAuthClient({ appId: config.putioAppId });
+    this.oauthStates = new Map();
     this.sessionId = crypto.randomBytes(24).toString('hex');
     this.liveReloadClients = new Set();
     this.liveReloadWatcher = undefined;
@@ -123,6 +213,53 @@ export class TransmissionRpcServer {
         else resolve();
       });
     });
+  }
+
+  cleanupOAuthStates() {
+    const now = Date.now();
+    for (const [state, record] of this.oauthStates.entries()) {
+      if (record.expiresAt <= now) this.oauthStates.delete(state);
+    }
+  }
+
+  createOAuthState({ callbackUrl } = {}) {
+    this.cleanupOAuthStates();
+    const nonce = crypto.randomBytes(24).toString('hex');
+    const state = this.config.putioOAuthRelayUrl
+      ? encodeOAuthState({
+          v: 1,
+          nonce,
+          callbackUrl,
+        })
+      : nonce;
+    this.oauthStates.set(state, { expiresAt: Date.now() + OAUTH_STATE_TTL_MS });
+    return state;
+  }
+
+  consumeOAuthState(state) {
+    this.cleanupOAuthStates();
+    const normalizedState = String(state ?? '').trim();
+    if (!normalizedState) return false;
+    if (!this.oauthStates.has(normalizedState)) return false;
+    this.oauthStates.delete(normalizedState);
+    return true;
+  }
+
+  publicBaseUrl(req) {
+    if (this.config.publicUrl) return this.config.publicUrl;
+    const protocol = firstHeaderValue(req.headers['x-forwarded-proto']) || 'http';
+    const host = firstHeaderValue(req.headers['x-forwarded-host'])
+      || firstHeaderValue(req.headers.host)
+      || `127.0.0.1:${this.config.listenPort}`;
+    return `${protocol}://${host}`.replace(/\/+$/, '');
+  }
+
+  oauthRedirectUri(req) {
+    return new URL('/api/oauth/callback', this.publicBaseUrl(req)).toString();
+  }
+
+  putioAuthorizeRedirectUri() {
+    return this.config.putioOAuthRelayUrl || undefined;
   }
 
   async handle(req, res) {
@@ -196,7 +333,7 @@ export class TransmissionRpcServer {
       const method = req.method ?? 'GET';
 
       if (method === 'GET' && requestPath === '/api/settings') {
-        jsonResponse(res, 200, this.settingsResponse(), this.sessionId);
+        jsonResponse(res, 200, this.settingsResponse(req), this.sessionId);
         return;
       }
 
@@ -212,7 +349,7 @@ export class TransmissionRpcServer {
         if (body.downloadPolicy !== undefined) {
           saveDownloadPolicyToStore(this.service.store, body.downloadPolicy, this.config);
         }
-        jsonResponse(res, 200, this.settingsResponse(), this.sessionId);
+        jsonResponse(res, 200, this.settingsResponse(req), this.sessionId);
         return;
       }
 
@@ -229,8 +366,41 @@ export class TransmissionRpcServer {
         return;
       }
 
+      if (method === 'GET' && requestPath === '/api/oauth/callback') {
+        htmlResponse(res, 200, oauthCallbackHtml(), this.sessionId);
+        return;
+      }
+
       if (method === 'POST' && requestPath === '/api/oauth/start') {
-        const result = await this.oauth.start();
+        const redirectUri = this.oauthRedirectUri(req);
+        const putioRedirectUri = this.putioAuthorizeRedirectUri() || redirectUri;
+        if (this.config.putioAppId === PUTIO_SWAGGER_APP_ID) {
+          throw new Error(
+            `Put.io OAuth redirect requires your own put.io OAuth app. `
+            + `The default app id ${PUTIO_SWAGGER_APP_ID} is put.io's Swagger test API and will reject `
+            + `${putioRedirectUri}. Create a put.io app, add that callback URL, set PUTIORR_PUTIO_APP_ID, and restart putiorr.`,
+          );
+        }
+        const state = this.createOAuthState({ callbackUrl: redirectUri });
+        const result = this.oauth.startRedirect({ redirectUri: putioRedirectUri, state });
+        jsonResponse(res, 200, {
+          mode: 'redirect',
+          ...result,
+          redirectUri,
+          putioRedirectUri,
+        }, this.sessionId);
+        return;
+      }
+
+      if (method === 'POST' && requestPath === '/api/oauth/complete') {
+        const body = await readJsonBody(req);
+        const token = String(body.oauthToken ?? '').trim();
+        if (!token) throw new Error('Put.io OAuth token is required');
+        if (!this.consumeOAuthState(body.state)) throw new Error('Put.io OAuth state is invalid or expired');
+        this.service.store.setSetting('putio_token', token);
+        this.service.putioClient = undefined;
+        this.service.putioToken = undefined;
+        const result = this.settingsResponse(req);
         jsonResponse(res, 200, result, this.sessionId);
         return;
       }
@@ -341,10 +511,25 @@ export class TransmissionRpcServer {
     }
   }
 
-  settingsResponse() {
+  settingsResponse(req) {
     const defaultDownloadProfile = this.service.store.findDefaultDownloadProfile();
+    const redirectUri = req
+      ? this.oauthRedirectUri(req)
+      : new URL(
+          '/api/oauth/callback',
+          this.config.publicUrl || `http://127.0.0.1:${this.config.listenPort}`,
+        ).toString();
+    const putioRedirectUri = this.putioAuthorizeRedirectUri() || redirectUri;
     return {
       tokenConfigured: Boolean(this.service.getPutioToken()),
+      putioOAuth: {
+        appId: this.config.putioAppId,
+        redirectUri,
+        putioRedirectUri,
+        relayUrl: this.config.putioOAuthRelayUrl,
+        mode: this.config.putioOAuthRelayUrl ? 'hosted-relay' : 'self-hosted',
+        requiresCustomApp: this.config.putioAppId === PUTIO_SWAGGER_APP_ID,
+      },
       defaultDownloadProfileId: defaultDownloadProfile?.id,
       downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
     };

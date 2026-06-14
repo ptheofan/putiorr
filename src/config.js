@@ -1,6 +1,9 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
+const DEFAULT_PUTIO_APP_ID = '9354';
+const DEFAULT_PUTIO_OAUTH_RELAY_URL = 'https://ptheofan.github.io/putiorr/putio-oauth-relay.html';
+
 function boolFromEnv(value, fallback) {
   if (value == null || value === '') return fallback;
   return ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
@@ -68,7 +71,12 @@ export function loadConfig(env = process.env, cwd = process.cwd(), options = {})
     listenHost: sourceEnv.PUTIORR_LISTEN_HOST ?? '0.0.0.0',
     listenPort: intFromEnv(sourceEnv.PUTIORR_LISTEN_PORT, 9091),
     putioToken: sourceEnv.PUTIORR_PUTIO_TOKEN ?? '',
-    putioAppId: sourceEnv.PUTIORR_PUTIO_APP_ID ?? '3270',
+    putioAppId: sourceEnv.PUTIORR_PUTIO_APP_ID ?? DEFAULT_PUTIO_APP_ID,
+    publicUrl: (sourceEnv.PUTIORR_PUBLIC_URL ?? '').replace(/\/+$/, ''),
+    putioOAuthRelayUrl: (
+      sourceEnv.PUTIORR_PUTIO_OAUTH_RELAY_URL
+      ?? DEFAULT_PUTIO_OAUTH_RELAY_URL
+    ).replace(/\/+$/, ''),
     putioFolder: (sourceEnv.PUTIORR_PUTIO_FOLDER ?? 'putiorr').toLowerCase(),
     defaultProfileName: sourceEnv.PUTIORR_DEFAULT_PROFILE_NAME ?? 'Custom',
     defaultProfileType: sourceEnv.PUTIORR_DEFAULT_PROFILE_TYPE ?? 'custom',

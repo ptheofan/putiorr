@@ -55,7 +55,7 @@ class FakePutio {
   }
 }
 
-async function createHarness() {
+async function createHarness(env = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'putiorr-rpc-'));
   const config = loadConfig({
     PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
@@ -63,6 +63,8 @@ async function createHarness() {
     PUTIORR_LISTEN_HOST: '127.0.0.1',
     PUTIORR_LISTEN_PORT: '0',
     PUTIORR_PUTIO_TOKEN: 'test-token',
+    PUTIORR_PUTIO_APP_ID: '12345',
+    ...env,
   }, root);
   const store = new StateStore(':memory:');
   store.seedFromConfig(config);
@@ -74,11 +76,15 @@ async function createHarness() {
   });
   const rpcServer = new TransmissionRpcServer({ config, service });
   rpcServer.oauth = {
-    async start() {
+    startRedirect({ redirectUri, state }) {
+      const authUrl = new URL('https://api.put.io/v2/oauth2/authenticate');
+      authUrl.searchParams.set('client_id', config.putioAppId);
+      authUrl.searchParams.set('response_type', 'token');
+      authUrl.searchParams.set('redirect_uri', redirectUri);
+      authUrl.searchParams.set('state', state);
       return {
-        code: 'ABCD',
-        qrCodeUrl: 'https://example.test/qr',
-        linkUrl: 'https://put.io/link',
+        authUrl: authUrl.toString(),
+        putioRedirectUri: redirectUri,
       };
     },
     async poll(code) {
@@ -654,6 +660,9 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(settingsBody.tokenConfigured, true);
   assert.equal(typeof settingsBody.defaultDownloadProfileId, 'number');
   assert.equal(settingsBody.downloadPolicy.slowSpeedThresholdBytesPerSecond, 0);
+  assert.equal(settingsBody.putioOAuth.appId, '12345');
+  assert.equal(settingsBody.putioOAuth.redirectUri, harness.url.replace('/transmission/rpc', '/api/oauth/callback'));
+  assert.equal(settingsBody.putioOAuth.requiresCustomApp, false);
 
   const settingsUpdate = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'), {
     method: 'PUT',
@@ -729,7 +738,9 @@ test('web API exposes settings and profile CRUD', async (t) => {
 });
 
 test('web API starts and completes put.io OAuth flow', async (t) => {
-  const harness = await createHarness();
+  const harness = await createHarness({
+    PUTIORR_PUTIO_OAUTH_RELAY_URL: '',
+  });
   t.after(async () => {
     await harness.rpcServer.stop();
     harness.store.close();
@@ -744,19 +755,94 @@ test('web API starts and completes put.io OAuth flow', async (t) => {
   });
   assert.equal(startResponse.status, 200);
   const startBody = await startResponse.json();
-  assert.equal(startBody.code, 'ABCD');
-  assert.equal(startBody.linkUrl, 'https://put.io/link');
+  assert.equal(startBody.mode, 'redirect');
+  assert.equal(startBody.redirectUri, harness.url.replace('/transmission/rpc', '/api/oauth/callback'));
+  assert.equal(startBody.putioRedirectUri, startBody.redirectUri);
+  const authUrl = new URL(startBody.authUrl);
+  assert.equal(authUrl.origin + authUrl.pathname, 'https://api.put.io/v2/oauth2/authenticate');
+  assert.equal(authUrl.searchParams.get('client_id'), harness.config.putioAppId);
+  assert.equal(authUrl.searchParams.get('response_type'), 'token');
+  assert.equal(authUrl.searchParams.get('redirect_uri'), startBody.redirectUri);
+  const state = authUrl.searchParams.get('state');
+  assert.ok(state);
 
-  const pollResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/poll'), {
+  const callbackResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/callback'));
+  assert.equal(callbackResponse.status, 200);
+  assert.match(await callbackResponse.text(), /Completing authorization/);
+
+  const completeResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/complete'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ code: 'ABCD' }),
+    body: JSON.stringify({ state, oauthToken: 'oauth-token-from-putio' }),
   });
-  assert.equal(pollResponse.status, 200);
-  const pollBody = await pollResponse.json();
-  assert.equal(pollBody.status, 'OK');
-  assert.equal(pollBody.tokenConfigured, true);
+  assert.equal(completeResponse.status, 200);
+  const completeBody = await completeResponse.json();
+  assert.equal(completeBody.tokenConfigured, true);
   assert.equal(harness.store.getSetting('putio_token'), 'oauth-token-from-putio');
+});
+
+test('web API starts put.io OAuth through hosted relay when configured', async (t) => {
+  const relayUrl = 'https://example.github.io/putiorr/putio-oauth-relay.html';
+  const harness = await createHarness({
+    PUTIORR_PUTIO_OAUTH_RELAY_URL: relayUrl,
+    PUTIORR_PUTIO_TOKEN: '',
+  });
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const startResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/start'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(startResponse.status, 200);
+  const startBody = await startResponse.json();
+  assert.equal(startBody.redirectUri, harness.url.replace('/transmission/rpc', '/api/oauth/callback'));
+  assert.equal(startBody.putioRedirectUri, relayUrl);
+  const authUrl = new URL(startBody.authUrl);
+  assert.equal(authUrl.searchParams.get('redirect_uri'), relayUrl);
+  const state = authUrl.searchParams.get('state');
+  const relayState = JSON.parse(Buffer.from(state, 'base64url').toString('utf8'));
+  assert.equal(relayState.v, 1);
+  assert.equal(relayState.callbackUrl, startBody.redirectUri);
+
+  const completeResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/complete'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ state, oauthToken: 'relay-token-from-putio' }),
+  });
+  assert.equal(completeResponse.status, 200);
+  assert.equal((await completeResponse.json()).tokenConfigured, true);
+  assert.equal(harness.store.getSetting('putio_token'), 'relay-token-from-putio');
+});
+
+test('web API rejects redirect OAuth with put.io Swagger app id', async (t) => {
+  const harness = await createHarness({
+    PUTIORR_PUTIO_APP_ID: '3270',
+    PUTIORR_PUTIO_TOKEN: '',
+  });
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const settingsResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/settings'));
+  assert.equal(settingsResponse.status, 200);
+  const settingsBody = await settingsResponse.json();
+  assert.equal(settingsBody.putioOAuth.requiresCustomApp, true);
+  assert.equal(settingsBody.putioOAuth.redirectUri, harness.url.replace('/transmission/rpc', '/api/oauth/callback'));
+
+  const startResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/oauth/start'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  assert.equal(startResponse.status, 400);
+  const body = await startResponse.json();
+  assert.match(body.error, /Swagger test API/);
+  assert.match(body.error, /PUTIORR_PUTIO_APP_ID/);
 });
 
 test('websocket streams only targeted download updates', async (t) => {

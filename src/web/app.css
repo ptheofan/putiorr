@@ -462,6 +462,28 @@ select.input-control-addon {
   font-weight: 750;
 }
 
+.oauth-setup-hint {
+  margin: 0;
+  border: 1px solid #f2d8a7;
+  border-radius: 8px;
+  background: #fff8eb;
+  color: #7a4b00;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.oauth-callback-row {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.oauth-callback-row code {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
 .profiles-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));

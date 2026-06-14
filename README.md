@@ -153,7 +153,7 @@ services:
       PUTIORR_LISTEN_PORT: 9091
       PUTIORR_STATE_PATH: /data/putiorr-config/putiorr.sqlite
       PUTIORR_TARGET_DIR: /putiorr
-      PUTIORR_PUTIO_APP_ID: "3270"
+      PUTIORR_PUBLIC_URL: https://putiorr.example.com
       PUTIORR_WORKERS: "4"
       PUTIORR_CLEANUP_REMOTE_FILES: "true"
     ports:
@@ -193,16 +193,53 @@ services:
 
 Open the putiorr web UI and use **Connect with put.io**.
 
-The UI will show a short code and link to <https://put.io/link>. Authorize the
-code there, then putiorr stores the OAuth token in its SQLite database. The
-token survives container restarts as long as `PUTIORR_STATE_PATH` is on a
-persistent volume.
+The UI opens put.io's OAuth authorization page. There are two supported
+redirect modes.
+
+### Hosted relay mode
+
+Hosted relay mode is the default. The Docker image bakes in putiorr's public
+put.io app id and GitHub Pages relay URL, so normal installs do not need OAuth
+environment variables.
+
+Register this callback URL in the put.io app:
+
+```text
+https://ptheofan.github.io/putiorr/putio-oauth-relay.html
+```
+
+These values are baked into the image and can still be overridden by forks or
+custom builds:
+
+```yaml
+PUTIORR_PUTIO_APP_ID: "9354"
+PUTIORR_PUTIO_OAUTH_RELAY_URL: https://ptheofan.github.io/putiorr/putio-oauth-relay.html
+```
+
+Only the put.io **Client ID** is public and safe to bake in. Do not put the
+client secret or the app owner's OAuth token in GitHub Actions, GitHub Pages,
+or any static file. The relay is static JavaScript and only passes the returned
+token back to the user's putiorr instance.
+
+### Self-hosted redirect mode
+
+If you do not use the hosted relay, put.io must redirect directly to the putiorr
+instance:
+
+```text
+https://your-putiorr-host/api/oauth/callback
+```
+
+Set `PUTIORR_PUBLIC_URL` to the externally reachable putiorr base URL and add
+the callback URL above to your put.io OAuth app. After authorization, putiorr
+stores the OAuth token in its SQLite database. The token survives container
+restarts as long as `PUTIORR_STATE_PATH` is on a persistent volume.
 
 Manual token paste is also available in the UI.
 
-`PUTIORR_PUTIO_APP_ID` defaults to `3270`. You can create your own put.io app
-and set its app id if you prefer. The current flow uses put.io's out-of-band
-device/link authorization, so no callback URL is required by putiorr.
+Self-hosted OAuth redirect requires your own put.io OAuth app id and an empty
+`PUTIORR_PUTIO_OAUTH_RELAY_URL`. The old default `3270` belongs to put.io's
+Swagger test API and will reject your self-hosted callback URL.
 
 ## Configure RR Profiles
 
@@ -384,7 +421,9 @@ policy.
 | `PUTIORR_TARGET_DIR` | `./downloads` | Default local download root |
 | `PUTIORR_STATE_PATH` | `./data/putiorr.sqlite` | SQLite state database |
 | `PUTIORR_PUTIO_TOKEN` | unset | Optional initial put.io token; UI-stored token wins after OAuth |
-| `PUTIORR_PUTIO_APP_ID` | `3270` | put.io OAuth app id |
+| `PUTIORR_PUTIO_APP_ID` | `9354` | Public putorr put.io OAuth app id |
+| `PUTIORR_PUBLIC_URL` | request host | Public putiorr base URL used to build the self-hosted put.io OAuth callback |
+| `PUTIORR_PUTIO_OAUTH_RELAY_URL` | `https://ptheofan.github.io/putiorr/putio-oauth-relay.html` | Hosted relay URL registered as the put.io OAuth callback; set empty for self-hosted redirect |
 | `PUTIORR_PUTIO_FOLDER` | `putiorr` | Default put.io folder for the default profile |
 | `PUTIORR_DEFAULT_PROFILE_NAME` | `Custom` | Name for the fallback custom profile |
 | `PUTIORR_DEFAULT_PROFILE_TYPE` | `custom` | Type for the default profile |
