@@ -170,7 +170,7 @@
                   <input id="wizardProfileName" type="text" autocomplete="off" placeholder="Sonarr">
                 </label>
               </div>
-              <p class="field-help">The preset fills sensible defaults. The display name becomes the *arr category, so Sonarr uses category <strong>sonarr</strong> by default.</p>
+              <p class="field-help">The preset fills sensible defaults. The display name becomes the *arr download-client category.</p>
             </section>
 
             <section class="wizard-step">
@@ -185,7 +185,7 @@
                   <input id="wizardDownloadAt" type="text" autocomplete="off" placeholder="/putiorr">
                 </label>
               </div>
-              <p class="field-help">This path must also be mounted in Sonarr/Radarr/Lidarr. The category creates the final folder, such as <strong>/putiorr/sonarr</strong>.</p>
+              <p class="field-help">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
             </section>
 
             <section class="wizard-step">
@@ -217,52 +217,23 @@
             </section>
           </div>
 
-          <aside class="setup-preview" aria-live="polite">
+          <aside class="setup-preview context-help" aria-live="polite">
             <div class="preview-head">
               <div>
-                <span class="step-label">Generated setup</span>
-                <h3 id="wizardClientTitle">Sonarr download client</h3>
+                <span id="wizardHelpKicker" class="step-label">Field guide</span>
+                <h3 id="wizardHelpTitle">App preset</h3>
               </div>
               <button id="copyClientSettingsButton" class="button secondary" type="button">
                 <span aria-hidden="true">⧉</span>
-                Copy
+                Copy settings
               </button>
             </div>
-            <dl class="settings-list">
-              <div>
-                <dt>Name</dt>
-                <dd data-client-setting="name">putiorr</dd>
-              </div>
-              <div>
-                <dt>Host</dt>
-                <dd data-client-setting="host">putiorr</dd>
-              </div>
-              <div>
-                <dt>Port</dt>
-                <dd data-client-setting="port">9091</dd>
-              </div>
-              <div>
-                <dt>Use SSL</dt>
-                <dd data-client-setting="ssl">Off</dd>
-              </div>
-              <div>
-                <dt>URL Base</dt>
-                <dd data-client-setting="urlBase">/sonarr/transmission</dd>
-              </div>
-              <div>
-                <dt>Category</dt>
-                <dd data-client-setting="category">sonarr</dd>
-              </div>
-              <div>
-                <dt>Directory</dt>
-                <dd data-client-setting="directory">/putiorr</dd>
-              </div>
-            </dl>
+            <div id="wizardHelpBody" class="help-body"></div>
+            <ul id="wizardHelpList" class="help-list"></ul>
             <div class="endpoint-box">
-              <span>Full RPC endpoint</span>
-              <strong id="wizardFullEndpoint">http://putiorr:9091/sonarr/transmission/rpc</strong>
+              <span id="wizardHelpValueLabel">Current effect</span>
+              <strong id="wizardHelpValue">Sonarr uses /sonarr/transmission/rpc</strong>
             </div>
-            <p id="wizardSetupNote" class="field-help">In Sonarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.</p>
           </aside>
         </div>
 

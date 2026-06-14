@@ -348,30 +348,26 @@ select:focus {
   overflow: hidden;
 }
 
-.profile-facts,
-.settings-list {
+.profile-facts {
   display: grid;
   gap: 6px;
   margin: 0;
 }
 
-.profile-facts div,
-.settings-list div {
+.profile-facts div {
   display: grid;
   grid-template-columns: 62px minmax(0, 1fr);
   gap: 6px;
   align-items: start;
 }
 
-.profile-facts dt,
-.settings-list dt {
+.profile-facts dt {
   color: var(--muted);
   font-size: 11px;
   font-weight: 750;
 }
 
-.profile-facts dd,
-.settings-list dd {
+.profile-facts dd {
   margin: 0;
   color: #253437;
   font-size: 12px;
@@ -511,6 +507,36 @@ select:focus {
   padding: 18px;
   border-left: 1px solid var(--line);
   background: #f8fbfb;
+}
+
+.help-body {
+  display: grid;
+  gap: 10px;
+}
+
+.help-body:empty,
+.help-list:empty {
+  display: none;
+}
+
+.help-body p {
+  color: #2c3a3d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.help-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.help-list li {
+  padding-left: 2px;
 }
 
 .preview-head {
@@ -855,8 +881,7 @@ td.center input {
     align-items: stretch;
   }
 
-  .profile-facts div,
-  .settings-list div {
+  .profile-facts div {
     grid-template-columns: 1fr;
     gap: 3px;
   }

@@ -42,9 +42,12 @@ const el = {
   wizardClientPort: document.querySelector('#wizardClientPort'),
   wizardUseSsl: document.querySelector('#wizardUseSsl'),
   wizardEnabled: document.querySelector('#wizardEnabled'),
-  wizardClientTitle: document.querySelector('#wizardClientTitle'),
-  wizardFullEndpoint: document.querySelector('#wizardFullEndpoint'),
-  wizardSetupNote: document.querySelector('#wizardSetupNote'),
+  wizardHelpKicker: document.querySelector('#wizardHelpKicker'),
+  wizardHelpTitle: document.querySelector('#wizardHelpTitle'),
+  wizardHelpBody: document.querySelector('#wizardHelpBody'),
+  wizardHelpList: document.querySelector('#wizardHelpList'),
+  wizardHelpValueLabel: document.querySelector('#wizardHelpValueLabel'),
+  wizardHelpValue: document.querySelector('#wizardHelpValue'),
   profileWizardMessage: document.querySelector('#profileWizardMessage'),
   saveProfileButton: document.querySelector('#saveProfileButton'),
   deleteProfileButton: document.querySelector('#deleteProfileButton'),
@@ -91,6 +94,128 @@ const DEFAULT_PUTIO_FOLDER = 'putiorr';
 const DEFAULT_DOWNLOAD_FOLDER = '/putiorr';
 const DEFAULT_CLIENT_HOST = 'putiorr';
 const DEFAULT_CLIENT_PORT = '9091';
+const DEFAULT_HELP_FIELD = 'wizardProfileType';
+
+const WIZARD_HELP = {
+  wizardProfileType: {
+    title: 'App preset',
+    paragraphs: [
+      'The preset picks the normal display name and RPC path for the app you are connecting. It does not change how putiorr talks to put.io; it only gives each app its own endpoint and category.',
+      'Use Custom when another app will send Transmission RPC requests to putiorr, or when you want to name and route an endpoint yourself.',
+    ],
+    tips: [
+      'Changing the preset rewrites Display name and RPC endpoint path so they stay aligned.',
+      'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets use separate paths so their requests do not share one category by accident.',
+    ],
+    valueLabel: 'Selected setup',
+    value: (profile, settings) => `${settings.appLabel}: category ${settings.category}, URL Base ${settings.urlBase}`,
+  },
+  wizardProfileName: {
+    title: 'Display name',
+    paragraphs: [
+      'The display name is shown on the profile card and is also converted into the download-client Category.',
+      'For the usual setup, keep names simple: Sonarr becomes category sonarr, Radarr becomes category radarr, and so on.',
+    ],
+    tips: [
+      'If you create two profiles for the same app, use names that make different categories obvious, such as sonarr-4k and sonarr-anime.',
+      'Keep this value stable after a download is queued. Changing the category can make older completed downloads harder for the app to match.',
+    ],
+    valueLabel: 'Download-client Category',
+    value: (profile, settings) => settings.category,
+  },
+  wizardPutioFolder: {
+    title: 'Put.io destination folder',
+    paragraphs: [
+      'This is the remote put.io folder where putiorr asks put.io to place new transfers. It is not the local folder Sonarr or Radarr imports from.',
+      'A single put.io folder, such as putiorr, is usually enough. The local category keeps each app separated later.',
+    ],
+    tips: [
+      'Changing this affects new transfers only; it does not move existing files already on put.io.',
+      'Use a dedicated folder if you want the put.io web UI to show these app downloads separately from manual downloads.',
+    ],
+    valueLabel: 'Remote put.io folder',
+    value: (profile) => profile.putio_folder_name || DEFAULT_PUTIO_FOLDER,
+  },
+  wizardDownloadAt: {
+    title: 'Shared download folder',
+    paragraphs: [
+      'You can use a single folder for all *arr apps, for example /putiorr. When you do that, set the *arr download-client Category to the app category so imports land under /putiorr/sonarr, /putiorr/radarr, and similar app-specific folders.',
+      'This folder must be mounted in both putiorr and the *arr container. If the app cannot see this exact path, completed-download import fails even though putiorr finished copying the files.',
+    ],
+    tips: [
+      'Recommended shared setup: Directory is /putiorr and Category is sonarr, radarr, lidarr, or readarr.',
+      'If you use separate folders per app, set Directory to that app mount and still keep Category consistent with the profile.',
+      'If imports fail with a path-not-found error, compare the container volume mounts before changing this value.',
+    ],
+    valueLabel: 'Final category folder',
+    value: (profile, settings) => joinPathParts(settings.directory, settings.category),
+  },
+  wizardRpcPath: {
+    title: 'RPC endpoint path',
+    paragraphs: [
+      'This is the path putiorr exposes for Transmission RPC. In the *arr download client, use everything before /rpc as URL Base.',
+      'Keep each app on a unique endpoint path. That is what lets putiorr know which app profile and category should handle the request.',
+    ],
+    tips: [
+      'For Sonarr, /sonarr/transmission/rpc means URL Base is /sonarr/transmission.',
+      'Do not point this at an app API path. This must be a Transmission RPC path served by putiorr.',
+    ],
+    valueLabel: 'Full RPC endpoint',
+    value: (profile, settings) => settings.fullEndpoint,
+  },
+  wizardClientHost: {
+    title: 'Host from the *arr container',
+    paragraphs: [
+      'This is the host value Sonarr, Radarr, or another app should use when it connects to putiorr as a Transmission download client.',
+      'If the apps run in the same Docker Compose network, the service name is usually the right value. The default service name here is putiorr.',
+    ],
+    tips: [
+      'Use a NAS hostname, LAN IP, or reverse-proxy hostname only when the app is outside the Docker network.',
+      'The host must be reachable from the *arr container, not just from your browser.',
+    ],
+    valueLabel: 'Download-client Host',
+    value: (profile, settings) => settings.host,
+  },
+  wizardClientPort: {
+    title: 'Port',
+    paragraphs: [
+      'This is the port the *arr app should use to reach putiorr. In the normal Compose setup, containers talk to putiorr on port 9091.',
+      'A published host port may be different. Use that only when the *arr app connects from outside the container network.',
+    ],
+    tips: [
+      'Inside Docker Compose, prefer the container port rather than the host-mapped port.',
+      'If SSL is enabled through a proxy, this port must match the HTTPS endpoint the app can reach.',
+    ],
+    valueLabel: 'Download-client Port',
+    value: (profile, settings) => settings.port || '(default HTTP port)',
+  },
+  wizardUseSsl: {
+    title: 'Use SSL',
+    paragraphs: [
+      'Leave SSL off for the normal internal Docker Compose setup. The app will connect to putiorr over plain HTTP inside the private network.',
+      'Turn SSL on only when the app reaches putiorr through an HTTPS reverse proxy or another TLS endpoint.',
+    ],
+    tips: [
+      'If SSL is on, Host and Port must also point at the HTTPS endpoint.',
+      'A mismatch here usually appears as a connection timeout, TLS error, or health-check failure in the *arr download client test.',
+    ],
+    valueLabel: 'Endpoint scheme',
+    value: (profile, settings) => settings.useSsl ? 'https' : 'http',
+  },
+  wizardEnabled: {
+    title: 'Enable this profile',
+    paragraphs: [
+      'Enabled profiles accept RPC requests from the matching endpoint path. Disable a profile when you want to keep its settings but stop new requests from using it.',
+      'Disabling a profile is useful while changing app configuration because it avoids accepting new downloads with a half-finished setup.',
+    ],
+    tips: [
+      'Existing queued downloads are not deleted just because this profile is disabled.',
+      'Re-enable the profile when the corresponding *arr download client is ready to test again.',
+    ],
+    valueLabel: 'Profile state',
+    value: (profile) => profile.enabled ? 'Enabled: accepts new RPC requests' : 'Disabled: saved, but not used for new RPC requests',
+  },
+};
 
 const oauth = {
   code: '',
@@ -372,6 +497,7 @@ function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE))
   el.wizardEnabled.checked = profile.enabled !== false;
   el.deleteProfileButton.hidden = !isExisting;
   el.saveProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
+  el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
   setWizardMessage('');
   updateWizardPreview();
 
@@ -473,16 +599,45 @@ function updateWizardPreview() {
   const profile = getWizardPayload();
   const settings = getClientSettingsFromProfile(profile);
   el.profileWizardTitle.textContent = `Set up ${profile.name || settings.appLabel}`;
-  el.wizardClientTitle.textContent = `${settings.appLabel} download client`;
-  setClientSetting('name', 'putiorr');
-  setClientSetting('host', settings.host);
-  setClientSetting('port', settings.port);
-  setClientSetting('ssl', settings.useSsl ? 'On' : 'Off');
-  setClientSetting('urlBase', settings.urlBase);
-  setClientSetting('category', settings.category);
-  setClientSetting('directory', settings.directory);
-  setText(el.wizardFullEndpoint, settings.fullEndpoint);
-  setText(el.wizardSetupNote, settings.note);
+  setWizardHelpForField(el.profileWizard.dataset.activeHelpField || DEFAULT_HELP_FIELD, profile, settings);
+}
+
+function setWizardHelpForField(fieldId = DEFAULT_HELP_FIELD, profile = getWizardPayload(), settings = getClientSettingsFromProfile(profile)) {
+  const nextFieldId = WIZARD_HELP[fieldId] ? fieldId : DEFAULT_HELP_FIELD;
+  const help = WIZARD_HELP[nextFieldId];
+  el.profileWizard.dataset.activeHelpField = nextFieldId;
+  setText(el.wizardHelpKicker, 'Field guide');
+  setText(el.wizardHelpTitle, help.title);
+  setText(el.wizardHelpValueLabel, help.valueLabel || 'Current effect');
+  setText(el.wizardHelpValue, resolveWizardHelpValue(help, profile, settings));
+  renderWizardHelpParagraphs(resolveWizardHelpContent(help.paragraphs, profile, settings));
+  renderWizardHelpList(resolveWizardHelpContent(help.tips, profile, settings));
+}
+
+function resolveWizardHelpContent(content, profile, settings) {
+  return typeof content === 'function' ? content(profile, settings) : content;
+}
+
+function resolveWizardHelpValue(help, profile, settings) {
+  return typeof help.value === 'function' ? help.value(profile, settings) : help.value;
+}
+
+function renderWizardHelpParagraphs(paragraphs = []) {
+  el.wizardHelpBody.replaceChildren();
+  for (const paragraphText of paragraphs) {
+    const paragraph = document.createElement('p');
+    setText(paragraph, paragraphText);
+    el.wizardHelpBody.appendChild(paragraph);
+  }
+}
+
+function renderWizardHelpList(items = []) {
+  el.wizardHelpList.replaceChildren();
+  for (const itemText of items) {
+    const item = document.createElement('li');
+    setText(item, itemText);
+    el.wizardHelpList.appendChild(item);
+  }
 }
 
 function getClientSettingsFromProfile(profile) {
@@ -504,10 +659,6 @@ function getClientSettingsFromProfile(profile) {
     fullEndpoint: `${protocol}://${host}${portSuffix}${rpcPath}`,
     note: detail.note,
   };
-}
-
-function setClientSetting(name, value) {
-  setText(el.profileWizard.querySelector(`[data-client-setting="${name}"]`), value);
 }
 
 function getClientSettingsText() {
@@ -588,6 +739,13 @@ function normalizeRpcPath(value) {
   const pathValue = String(value ?? '').trim();
   if (!pathValue) return '';
   return pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
+}
+
+function joinPathParts(base, segment) {
+  const cleanBase = String(base || '').replace(/\/+$/, '');
+  const cleanSegment = String(segment || '').replace(/^\/+/, '');
+  if (!cleanBase) return cleanSegment ? `/${cleanSegment}` : '';
+  return cleanSegment ? `${cleanBase}/${cleanSegment}` : cleanBase;
 }
 
 function renderDownloads() {
@@ -1058,6 +1216,10 @@ el.profileWizardClose.addEventListener('click', closeProfileWizard);
 el.profileWizard.querySelector('[data-action="cancel-profile-wizard"]').addEventListener('click', closeProfileWizard);
 el.profileWizard.addEventListener('click', (event) => {
   if (event.target === el.profileWizard) closeProfileWizard();
+});
+el.profileWizardForm.addEventListener('focusin', (event) => {
+  const fieldId = event.target?.id;
+  if (WIZARD_HELP[fieldId]) setWizardHelpForField(fieldId);
 });
 el.wizardProfileType.addEventListener('change', syncWizardDefaultsForType);
 for (const input of [
