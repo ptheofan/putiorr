@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Optional release tag to validate, for example v1.1.0.
+        description: Optional release tag to validate, for example vMAJOR.MINOR.PATCH.
         required: false
         type: string
 

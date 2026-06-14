@@ -8,6 +8,7 @@ import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
 import { TRANSMISSION_STATUS } from '../src/transmission/progress.js';
 import { TransmissionRpcServer } from '../src/transmission/server.js';
+import { CURRENT_VERSION, parseSemver } from '../src/version.js';
 
 class FakePutio {
   constructor() {
@@ -56,7 +57,7 @@ class FakePutio {
   }
 }
 
-async function createHarness(env = {}) {
+async function createHarness(env = {}, serverOptions = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'putiorr-rpc-'));
   const config = loadConfig({
     PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
@@ -75,7 +76,7 @@ async function createHarness(env = {}) {
     store,
     putioFactory: () => putio,
   });
-  const rpcServer = new TransmissionRpcServer({ config, service });
+  const rpcServer = new TransmissionRpcServer({ config, service, ...serverOptions });
   await rpcServer.start();
   const { port } = rpcServer.server.address();
   const url = `http://127.0.0.1:${port}/transmission/rpc`;
@@ -986,6 +987,44 @@ test('web API stores and resets put.io OAuth setting overrides', async (t) => {
   assert.equal(resetBody.putioOAuth.appId, '12345');
   assert.equal(resetBody.putioOAuth.relayUrl, 'https://ptheofan.github.io/putiorr/putio-oauth-relay.html');
   assert.equal(resetBody.putioOAuth.overridesConfigured, false);
+});
+
+test('web API exposes cached version update status', async (t) => {
+  let versionFetches = 0;
+  const current = parseSemver(CURRENT_VERSION);
+  assert.ok(current);
+  const latestVersion = `${current.major}.${current.minor}.${current.patch + 1}`;
+  const latestTag = `v${latestVersion}`;
+  const releaseUrl = `https://github.com/ptheofan/putiorr/releases/tag/${latestTag}`;
+  const harness = await createHarness({}, {
+    fetch: async () => {
+      versionFetches += 1;
+      return new Response(JSON.stringify({
+        tag_name: latestTag,
+        html_url: releaseUrl,
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    },
+  });
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const firstResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/version'));
+  assert.equal(firstResponse.status, 200);
+  const firstBody = await firstResponse.json();
+  assert.equal(firstBody.currentVersion, CURRENT_VERSION);
+  assert.equal(firstBody.latestVersion, latestVersion);
+  assert.equal(firstBody.updateAvailable, true);
+  assert.equal(firstBody.releaseUrl, releaseUrl);
+
+  const secondResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/version'));
+  assert.equal(secondResponse.status, 200);
+  assert.deepEqual(await secondResponse.json(), firstBody);
+  assert.equal(versionFetches, 1);
 });
 
 test('web API starts and completes put.io OAuth flow', async (t) => {

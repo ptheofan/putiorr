@@ -14,6 +14,7 @@ function runGate(env = {}) {
     env: {
       ...process.env,
       RELEASE_TAG: 'v1.1.0',
+      RELEASE_GATE_LATEST_RELEASE_TAG: 'v1.1.0',
       ...env,
     },
   });
@@ -26,17 +27,32 @@ test('release gate passes for current release metadata', () => {
   assert.match(result.stdout, /Release gate passed for v1\.1\.0/);
 });
 
-test('release gate rejects stale release values in README', () => {
+test('release gate does not require README version examples', () => {
   const scratch = mkdtempSync(path.join(tmpdir(), 'putiorr-release-gate-'));
-  const staleReadme = path.join(scratch, 'README.md');
-  const current = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const genericReadme = path.join(scratch, 'README.md');
 
-  writeFileSync(staleReadme, current.replaceAll('1.1.0', '1.0.2').replaceAll('v1.1.0', 'v1.0.2'));
+  writeFileSync(genericReadme, '# putiorr\n\nRelease documentation intentionally avoids concrete versions.\n');
 
   const result = runGate({
-    RELEASE_GATE_README_MD: staleReadme,
+    RELEASE_GATE_README_MD: genericReadme,
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+});
+
+test('release gate rejects package versions older than latest release', () => {
+  const scratch = mkdtempSync(path.join(tmpdir(), 'putiorr-release-gate-'));
+  const stalePackage = path.join(scratch, 'package.json');
+  const current = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
+
+  writeFileSync(stalePackage, current.replace('"version": "1.1.0"', '"version": "1.0.2"'));
+
+  const result = runGate({
+    RELEASE_GATE_PACKAGE_JSON: stalePackage,
+    RELEASE_TAG: 'v1.0.2',
+    RELEASE_GATE_LATEST_RELEASE_TAG: 'v1.1.0',
   });
 
   assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /missing example release tag|stale release value/);
+  assert.match(result.stderr, /package\.json version 1\.0\.2 is older than latest GitHub release v1\.1\.0/);
 });
