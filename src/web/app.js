@@ -27,10 +27,70 @@ const el = {
   slowSpeedMinSize: document.querySelector('#slowSpeedMinSize'),
   addProfileButton: document.querySelector('#addProfileButton'),
   profilesBody: document.querySelector('#profilesBody'),
-  profileRowTemplate: document.querySelector('#profileRowTemplate'),
+  profileWizard: document.querySelector('#profileWizard'),
+  profileWizardForm: document.querySelector('#profileWizardForm'),
+  profileWizardTitle: document.querySelector('#profileWizardTitle'),
+  profileWizardIntro: document.querySelector('#profileWizardIntro'),
+  profileWizardClose: document.querySelector('#profileWizardClose'),
+  wizardProfileId: document.querySelector('#wizardProfileId'),
+  wizardProfileType: document.querySelector('#wizardProfileType'),
+  wizardProfileName: document.querySelector('#wizardProfileName'),
+  wizardPutioFolder: document.querySelector('#wizardPutioFolder'),
+  wizardDownloadAt: document.querySelector('#wizardDownloadAt'),
+  wizardRpcPath: document.querySelector('#wizardRpcPath'),
+  wizardClientHost: document.querySelector('#wizardClientHost'),
+  wizardClientPort: document.querySelector('#wizardClientPort'),
+  wizardUseSsl: document.querySelector('#wizardUseSsl'),
+  wizardEnabled: document.querySelector('#wizardEnabled'),
+  wizardClientTitle: document.querySelector('#wizardClientTitle'),
+  wizardFullEndpoint: document.querySelector('#wizardFullEndpoint'),
+  wizardSetupNote: document.querySelector('#wizardSetupNote'),
+  profileWizardMessage: document.querySelector('#profileWizardMessage'),
+  saveProfileButton: document.querySelector('#saveProfileButton'),
+  deleteProfileButton: document.querySelector('#deleteProfileButton'),
+  copyClientSettingsButton: document.querySelector('#copyClientSettingsButton'),
   downloadsList: document.querySelector('#downloadsList'),
   refreshButton: document.querySelector('#refreshButton'),
 };
+
+const PROFILE_TYPES = {
+  sonarr: {
+    label: 'Sonarr',
+    root: '/series',
+    note: 'In Sonarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.',
+  },
+  radarr: {
+    label: 'Radarr',
+    root: '/movies',
+    note: 'In Radarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.',
+  },
+  lidarr: {
+    label: 'Lidarr',
+    root: '/music',
+    note: 'In Lidarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.',
+  },
+  readarr: {
+    label: 'Readarr',
+    root: '/books',
+    note: 'In Readarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.',
+  },
+  prowlarr: {
+    label: 'Prowlarr',
+    root: '',
+    note: 'Prowlarr usually talks to Sonarr/Radarr/Lidarr instead of putiorr. Use this only if Prowlarr sends grabs directly to a Transmission client.',
+  },
+  custom: {
+    label: 'Custom',
+    root: '',
+    note: 'Use these Transmission-compatible values in the app that will send downloads to putiorr.',
+  },
+};
+
+const DEFAULT_PROFILE_TYPE = 'sonarr';
+const DEFAULT_PUTIO_FOLDER = 'putiorr';
+const DEFAULT_DOWNLOAD_FOLDER = '/putiorr';
+const DEFAULT_CLIENT_HOST = 'putiorr';
+const DEFAULT_CLIENT_PORT = '9091';
 
 const oauth = {
   code: '',
@@ -198,74 +258,89 @@ function updateDownloaderPolicyDirtyState() {
 
 function renderProfiles() {
   el.profilesBody.replaceChildren();
+  if (state.profiles.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state profile-empty';
+    empty.textContent = 'No RR profiles yet. Use the setup wizard to create the Sonarr, Radarr, or Lidarr endpoint.';
+    el.profilesBody.appendChild(empty);
+    return;
+  }
+
   for (const profile of state.profiles) {
-    el.profilesBody.appendChild(createProfileRow(profile));
+    el.profilesBody.appendChild(createProfileCard(profile));
   }
 }
 
-function createProfileRow(profile) {
-  const row = el.profileRowTemplate.content.firstElementChild.cloneNode(true);
-  populateProfileRow(row, profile);
-  attachProfileDirtyTracking(row);
+function createProfileCard(profile) {
+  const type = profileType(profile.type);
+  const displayName = profileDisplayName(profile, type);
+  const card = document.createElement('article');
+  card.className = 'profile-card';
+  card.dataset.id = profile.id || '';
+  card.innerHTML = `
+    <div class="profile-card-main">
+      <div>
+        <div class="profile-eyebrow" data-role="type"></div>
+        <h3 data-role="name"></h3>
+        <p data-role="summary"></p>
+      </div>
+      <span data-role="status" class="status"></span>
+    </div>
+    <dl class="profile-facts">
+      <div>
+        <dt>RPC</dt>
+        <dd data-role="rpc"></dd>
+      </div>
+      <div>
+        <dt>Put.io</dt>
+        <dd data-role="putio"></dd>
+      </div>
+      <div>
+        <dt>Download</dt>
+        <dd data-role="download"></dd>
+      </div>
+    </dl>
+    <div class="profile-actions">
+      <button data-action="setup" class="button secondary" type="button">
+        <span aria-hidden="true">↗</span>
+        Setup
+      </button>
+      <button data-action="edit" class="button secondary" type="button">Edit</button>
+      <button data-action="delete" class="icon-button danger" type="button">Delete</button>
+    </div>
+  `;
 
-  row.querySelector('[data-action="save"]').addEventListener('click', () => saveProfile(row));
-  row.querySelector('[data-action="delete"]').addEventListener('click', () => deleteProfile(row));
-  return row;
+  setText(card.querySelector('[data-role="type"]'), type.label);
+  setText(card.querySelector('[data-role="name"]'), displayName);
+  setText(card.querySelector('[data-role="summary"]'), profileSummary(profile));
+  setProfileFact(card, 'rpc', profile.rpc_path || 'Not set');
+  setProfileFact(card, 'putio', profile.putio_folder_name || 'Not set');
+  setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
+  const status = card.querySelector('[data-role="status"]');
+  status.className = `status ${profile.enabled === false ? 'warn' : 'ok'}`;
+  setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
+
+  card.querySelector('[data-action="setup"]').addEventListener('click', () => openProfileWizard(profile));
+  card.querySelector('[data-action="edit"]').addEventListener('click', () => openProfileWizard(profile));
+  card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteProfileById(profile.id));
+  return card;
 }
 
-function populateProfileRow(row, profile) {
-  row.dataset.id = profile.id || '';
-  setInput(row, 'name', profile.name ?? '');
-  setInput(row, 'type', profile.type ?? 'custom');
-  setInput(row, 'putio_folder_name', profile.putio_folder_name ?? '');
-  setInput(row, 'downloadAt', profile.downloadAt ?? profile.download_at ?? '');
-  setInput(row, 'rpc_path', profile.rpc_path ?? '');
-  row.querySelector('[data-field="enabled"]').checked = profile.enabled !== false;
-  setProfileBaseline(row);
+function setProfileFact(card, role, value) {
+  const element = card.querySelector(`[data-role="${role}"]`);
+  setText(element, value);
+  setAttribute(element, 'title', value);
 }
 
-function setInput(row, field, value) {
-  row.querySelector(`[data-field="${field}"]`).value = value;
-}
-
-function getProfilePayload(row) {
-  return {
-    name: row.querySelector('[data-field="name"]').value.trim(),
-    type: row.querySelector('[data-field="type"]').value,
-    slug: slugify(row.querySelector('[data-field="name"]').value),
-    putio_folder_name: row.querySelector('[data-field="putio_folder_name"]').value.trim(),
-    downloadAt: row.querySelector('[data-field="downloadAt"]').value.trim(),
-    rpc_path: row.querySelector('[data-field="rpc_path"]').value.trim(),
-    enabled: row.querySelector('[data-field="enabled"]').checked,
-  };
-}
-
-function attachProfileDirtyTracking(row) {
-  for (const field of row.querySelectorAll('[data-field]')) {
-    field.addEventListener('input', () => updateProfileDirtyState(row));
-    field.addEventListener('change', () => updateProfileDirtyState(row));
-  }
-}
-
-function setProfileBaseline(row) {
-  row.dataset.profileBaseline = row.dataset.id ? JSON.stringify(getProfilePayload(row)) : '';
-  updateProfileDirtyState(row);
-}
-
-function updateProfileDirtyState(row) {
-  const hasUnsavedChanges = !row.dataset.id
-    || row.dataset.profileBaseline !== JSON.stringify(getProfilePayload(row));
-  const saveButton = row.querySelector('[data-action="save"]');
-
-  row.classList.toggle('dirty', hasUnsavedChanges);
-  saveButton.classList.toggle('dirty', hasUnsavedChanges);
-  saveButton.title = hasUnsavedChanges
-    ? 'Save profile (unsaved changes)'
-    : 'Save profile';
-  saveButton.setAttribute(
-    'aria-label',
-    hasUnsavedChanges ? 'Save profile with unsaved changes' : 'Save profile',
-  );
+function profileSummary(profile) {
+  const payload = getClientSettingsFromProfile({
+    ...profile,
+    name: profileDisplayName(profile),
+  });
+  const rootHint = profileType(profile.type).root;
+  return rootHint
+    ? `${payload.appLabel} imports from ${payload.directory}/${payload.category} to its ${rootHint} library root.`
+    : `${payload.appLabel} sends downloads to category ${payload.category}.`;
 }
 
 function upsertProfileState(profile) {
@@ -274,56 +349,245 @@ function upsertProfileState(profile) {
   else state.profiles.push(profile);
 }
 
-async function saveProfile(row) {
-  const id = row.dataset.id;
-  const payload = getProfilePayload(row);
-  if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || !payload.rpc_path) {
-    setMessage('Profile name, put.io folder, download folder, and RPC endpoint are required.', 'error');
-    return;
-  }
+function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE)) {
+  const type = profile.type || DEFAULT_PROFILE_TYPE;
+  const detail = profileType(type);
+  const displayName = profileDisplayName(profile, detail);
+  const isExisting = Boolean(profile.id);
 
-  let savedProfile;
-  if (id) {
-    savedProfile = await api(`/api/profiles/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(payload),
-    });
+  el.profileWizard.dataset.previousType = type;
+  el.profileWizardTitle.textContent = isExisting
+    ? `Set up ${displayName}`
+    : `Set up ${detail.label}`;
+  el.profileWizardIntro.textContent = 'Answer a few setup questions, then copy the matching *arr download-client values.';
+  el.wizardProfileId.value = profile.id || '';
+  el.wizardProfileType.value = type;
+  el.wizardProfileName.value = displayName;
+  el.wizardPutioFolder.value = profile.putio_folder_name || DEFAULT_PUTIO_FOLDER;
+  el.wizardDownloadAt.value = profile.downloadAt ?? profile.download_at ?? DEFAULT_DOWNLOAD_FOLDER;
+  el.wizardRpcPath.value = profile.rpc_path || defaultRpcPathForType(type);
+  el.wizardClientHost.value = DEFAULT_CLIENT_HOST;
+  el.wizardClientPort.value = DEFAULT_CLIENT_PORT;
+  el.wizardUseSsl.checked = false;
+  el.wizardEnabled.checked = profile.enabled !== false;
+  el.deleteProfileButton.hidden = !isExisting;
+  el.saveProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
+  setWizardMessage('');
+  updateWizardPreview();
+
+  if (typeof el.profileWizard.showModal === 'function') {
+    el.profileWizard.showModal();
   } else {
-    savedProfile = await api('/api/profiles', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    el.profileWizard.setAttribute('open', '');
   }
-  populateProfileRow(row, savedProfile);
-  upsertProfileState(savedProfile);
-  setMessage('Profile saved.', 'ok');
+  el.wizardProfileType.focus();
 }
 
-async function deleteProfile(row) {
-  const id = row.dataset.id;
-  if (!id) {
-    row.remove();
+function closeProfileWizard() {
+  if (el.profileWizard.open && typeof el.profileWizard.close === 'function') {
+    el.profileWizard.close();
+  } else {
+    el.profileWizard.removeAttribute('open');
+  }
+}
+
+function createDefaultProfile(type) {
+  const detail = profileType(type);
+  return {
+    id: '',
+    name: detail.label,
+    type,
+    putio_folder_name: DEFAULT_PUTIO_FOLDER,
+    downloadAt: DEFAULT_DOWNLOAD_FOLDER,
+    rpc_path: defaultRpcPathForType(type),
+    enabled: true,
+  };
+}
+
+function syncWizardDefaultsForType() {
+  const nextType = el.wizardProfileType.value || DEFAULT_PROFILE_TYPE;
+  const nextDetail = profileType(nextType);
+
+  el.wizardProfileName.value = nextDetail.label;
+  el.wizardRpcPath.value = defaultRpcPathForType(nextType);
+  el.profileWizard.dataset.previousType = nextType;
+  updateWizardPreview();
+}
+
+function getWizardPayload() {
+  return {
+    name: el.wizardProfileName.value.trim(),
+    type: el.wizardProfileType.value,
+    slug: slugify(el.wizardProfileName.value),
+    putio_folder_name: el.wizardPutioFolder.value.trim(),
+    downloadAt: el.wizardDownloadAt.value.trim(),
+    rpc_path: normalizeRpcPath(el.wizardRpcPath.value),
+    enabled: el.wizardEnabled.checked,
+  };
+}
+
+async function saveProfileFromWizard() {
+  const id = el.wizardProfileId.value;
+  const payload = getWizardPayload();
+  if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || !payload.rpc_path) {
+    setWizardMessage('Profile name, put.io folder, download folder, and RPC endpoint are required.', 'error');
     return;
   }
+
+  el.saveProfileButton.disabled = true;
+  try {
+    const savedProfile = id
+      ? await api(`/api/profiles/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      })
+      : await api('/api/profiles', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    upsertProfileState(savedProfile);
+    renderProfiles();
+    closeProfileWizard();
+    setMessage('Profile saved.', 'ok');
+  } catch (error) {
+    setWizardMessage(error.message, 'error');
+  } finally {
+    el.saveProfileButton.disabled = false;
+  }
+}
+
+async function deleteProfileById(id = el.wizardProfileId.value) {
+  if (!id) {
+    closeProfileWizard();
+    return;
+  }
+
   await api(`/api/profiles/${id}`, { method: 'DELETE' });
   state.profiles = state.profiles.filter((profile) => String(profile.id) !== String(id));
-  row.remove();
+  renderProfiles();
+  closeProfileWizard();
   setMessage('Profile deleted.', 'ok');
 }
 
-function addProfileRow() {
-  const name = 'New profile';
-  const row = createProfileRow({
-    id: '',
-    name,
-    type: 'custom',
-    putio_folder_name: 'putiorr-new',
-    downloadAt: '/downloads/new',
-    rpc_path: `/${slugify(name)}/transmission/rpc`,
-    enabled: true,
-  });
-  el.profilesBody.appendChild(row);
-  row.querySelector('[data-field="name"]').focus();
+function updateWizardPreview() {
+  const profile = getWizardPayload();
+  const settings = getClientSettingsFromProfile(profile);
+  el.profileWizardTitle.textContent = `Set up ${profile.name || settings.appLabel}`;
+  el.wizardClientTitle.textContent = `${settings.appLabel} download client`;
+  setClientSetting('name', 'putiorr');
+  setClientSetting('host', settings.host);
+  setClientSetting('port', settings.port);
+  setClientSetting('ssl', settings.useSsl ? 'On' : 'Off');
+  setClientSetting('urlBase', settings.urlBase);
+  setClientSetting('category', settings.category);
+  setClientSetting('directory', settings.directory);
+  setText(el.wizardFullEndpoint, settings.fullEndpoint);
+  setText(el.wizardSetupNote, settings.note);
+}
+
+function getClientSettingsFromProfile(profile) {
+  const detail = profileType(profile.type);
+  const host = el.wizardClientHost?.value.trim() || DEFAULT_CLIENT_HOST;
+  const port = el.wizardClientPort?.value.trim() || DEFAULT_CLIENT_PORT;
+  const useSsl = Boolean(el.wizardUseSsl?.checked);
+  const rpcPath = normalizeRpcPath(profile.rpc_path || defaultRpcPathForType(profile.type));
+  const protocol = useSsl ? 'https' : 'http';
+  const portSuffix = port ? `:${port}` : '';
+  return {
+    appLabel: detail.label,
+    host,
+    port,
+    useSsl,
+    urlBase: rpcPath.replace(/\/rpc\/?$/, '') || rpcPath,
+    category: slugify(profile.name || detail.label),
+    directory: profile.downloadAt ?? profile.download_at ?? DEFAULT_DOWNLOAD_FOLDER,
+    fullEndpoint: `${protocol}://${host}${portSuffix}${rpcPath}`,
+    note: detail.note,
+  };
+}
+
+function setClientSetting(name, value) {
+  setText(el.profileWizard.querySelector(`[data-client-setting="${name}"]`), value);
+}
+
+function getClientSettingsText() {
+  const settings = getClientSettingsFromProfile(getWizardPayload());
+  return [
+    `${settings.appLabel} Transmission download client`,
+    'Name: putiorr',
+    `Host: ${settings.host}`,
+    `Port: ${settings.port}`,
+    `Use SSL: ${settings.useSsl ? 'on' : 'off'}`,
+    'Username: blank unless configured',
+    'Password: blank unless configured',
+    `Category: ${settings.category}`,
+    `Directory: ${settings.directory}`,
+    `URL Base: ${settings.urlBase}`,
+    `Full RPC endpoint: ${settings.fullEndpoint}`,
+  ].join('\n');
+}
+
+async function copyClientSettings() {
+  const text = getClientSettingsText();
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
+    await navigator.clipboard.writeText(text);
+    setWizardMessage('Download-client settings copied.', 'ok');
+  } catch {
+    if (copyTextWithSelection(text)) {
+      setWizardMessage('Download-client settings copied.', 'ok');
+      return;
+    }
+    setWizardMessage('Copy failed. Select the generated settings manually.', 'error');
+  }
+}
+
+function copyTextWithSelection(text) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-1000px';
+  document.body.appendChild(textarea);
+  textarea.select();
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } catch {
+    copied = false;
+  } finally {
+    textarea.remove();
+  }
+  return copied;
+}
+
+function setWizardMessage(message, tone = 'neutral') {
+  el.profileWizardMessage.textContent = message;
+  el.profileWizardMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+}
+
+function profileType(type) {
+  return PROFILE_TYPES[type] ?? PROFILE_TYPES.custom;
+}
+
+function profileDisplayName(profile, detail = profileType(profile?.type)) {
+  const name = String(profile?.name ?? '').trim();
+  const type = String(profile?.type ?? '').toLowerCase();
+  const slug = String(profile?.slug ?? '').toLowerCase();
+  if (type === 'custom' && slug === 'default' && name.toLowerCase() === 'default') {
+    return PROFILE_TYPES.custom.label;
+  }
+  return name || detail.label;
+}
+
+function defaultRpcPathForType(type) {
+  return `/${slugify(type || DEFAULT_PROFILE_TYPE)}/transmission/rpc`;
+}
+
+function normalizeRpcPath(value) {
+  const pathValue = String(value ?? '').trim();
+  if (!pathValue) return '';
+  return pathValue.startsWith('/') ? pathValue : `/${pathValue}`;
 }
 
 function renderDownloads() {
@@ -785,7 +1049,36 @@ async function pollOAuth(manual) {
   }
 }
 
-el.addProfileButton.addEventListener('click', addProfileRow);
+el.addProfileButton.addEventListener('click', () => openProfileWizard(createDefaultProfile(DEFAULT_PROFILE_TYPE)));
+el.profileWizardForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  saveProfileFromWizard().catch((error) => setWizardMessage(error.message, 'error'));
+});
+el.profileWizardClose.addEventListener('click', closeProfileWizard);
+el.profileWizard.querySelector('[data-action="cancel-profile-wizard"]').addEventListener('click', closeProfileWizard);
+el.profileWizard.addEventListener('click', (event) => {
+  if (event.target === el.profileWizard) closeProfileWizard();
+});
+el.wizardProfileType.addEventListener('change', syncWizardDefaultsForType);
+for (const input of [
+  el.wizardProfileName,
+  el.wizardPutioFolder,
+  el.wizardDownloadAt,
+  el.wizardRpcPath,
+  el.wizardClientHost,
+  el.wizardClientPort,
+  el.wizardUseSsl,
+  el.wizardEnabled,
+]) {
+  input.addEventListener('input', updateWizardPreview);
+  input.addEventListener('change', updateWizardPreview);
+}
+el.copyClientSettingsButton.addEventListener('click', () => {
+  copyClientSettings().catch((error) => setWizardMessage(error.message, 'error'));
+});
+el.deleteProfileButton.addEventListener('click', () => {
+  deleteProfileById().catch((error) => setWizardMessage(error.message, 'error'));
+});
 el.refreshButton.addEventListener('click', () => {
   if (!requestStateRefresh()) {
     loadAll().catch((error) => setMessage(error.message, 'error'));

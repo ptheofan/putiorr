@@ -113,30 +113,15 @@
           <div class="section-head">
             <div>
               <h2>RR profiles</h2>
-              <p>Give each app its own RPC endpoint, put.io folder, and download root.</p>
+              <p>Use the setup wizard to create one profile per app and copy the matching download-client settings.</p>
             </div>
             <button id="addProfileButton" class="button primary" type="button">
               <span aria-hidden="true">＋</span>
-              Add profile
+              Setup profile
             </button>
           </div>
 
-          <div class="table-wrap">
-            <table class="profiles-table">
-              <thead>
-                <tr>
-                  <th>App</th>
-                  <th>Type</th>
-                  <th>Put.io folder</th>
-                  <th>Download folder</th>
-                  <th>RPC endpoint</th>
-                  <th>On</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="profilesBody"></tbody>
-            </table>
-          </div>
+          <div id="profilesBody" class="profiles-list"></div>
         </section>
 
         <section id="downloads" class="panel">
@@ -152,29 +137,146 @@
       </main>
     </div>
 
-    <template id="profileRowTemplate">
-      <tr>
-        <td><input data-field="name" type="text"></td>
-        <td>
-          <select data-field="type">
-            <option value="sonarr">Sonarr</option>
-            <option value="radarr">Radarr</option>
-            <option value="lidarr">Lidarr</option>
-            <option value="prowlarr">Prowlarr</option>
-            <option value="readarr">Readarr</option>
-            <option value="custom">Custom</option>
-          </select>
-        </td>
-        <td><input data-field="putio_folder_name" type="text"></td>
-        <td><input data-field="downloadAt" type="text"></td>
-        <td><input data-field="rpc_path" type="text"></td>
-        <td class="center"><input data-field="enabled" type="checkbox"></td>
-        <td class="actions">
-          <button data-action="save" class="icon-button" type="button" title="Save profile">Save</button>
-          <button data-action="delete" class="icon-button danger" type="button" title="Delete profile">Delete</button>
-        </td>
-      </tr>
-    </template>
+    <dialog id="profileWizard" class="modal">
+      <form id="profileWizardForm" class="wizard-form">
+        <div class="modal-head">
+          <div>
+            <h2 id="profileWizardTitle">Set up profile</h2>
+            <p id="profileWizardIntro">Answer a few setup questions, then copy the matching *arr download-client values.</p>
+          </div>
+          <button id="profileWizardClose" class="icon-button" type="button" aria-label="Close setup">×</button>
+        </div>
+
+        <input id="wizardProfileId" type="hidden">
+
+        <div class="wizard-layout">
+          <div class="wizard-questions">
+            <section class="wizard-step">
+              <div class="step-label">1. App</div>
+              <div class="field-pair">
+                <label>
+                  App preset
+                  <select id="wizardProfileType">
+                    <option value="sonarr">Sonarr</option>
+                    <option value="radarr">Radarr</option>
+                    <option value="lidarr">Lidarr</option>
+                    <option value="readarr">Readarr</option>
+                    <option value="prowlarr">Prowlarr</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                </label>
+                <label>
+                  Display name
+                  <input id="wizardProfileName" type="text" autocomplete="off" placeholder="Sonarr">
+                </label>
+              </div>
+              <p class="field-help">The preset fills sensible defaults. The display name becomes the *arr category, so Sonarr uses category <strong>sonarr</strong> by default.</p>
+            </section>
+
+            <section class="wizard-step">
+              <div class="step-label">2. Storage</div>
+              <div class="field-pair">
+                <label>
+                  Put.io destination folder
+                  <input id="wizardPutioFolder" type="text" autocomplete="off" placeholder="putiorr">
+                </label>
+                <label>
+                  Shared download folder
+                  <input id="wizardDownloadAt" type="text" autocomplete="off" placeholder="/putiorr">
+                </label>
+              </div>
+              <p class="field-help">This path must also be mounted in Sonarr/Radarr/Lidarr. The category creates the final folder, such as <strong>/putiorr/sonarr</strong>.</p>
+            </section>
+
+            <section class="wizard-step">
+              <div class="step-label">3. RPC endpoint</div>
+              <label>
+                RPC endpoint path
+                <input id="wizardRpcPath" type="text" autocomplete="off" placeholder="/sonarr/transmission/rpc">
+              </label>
+              <div class="field-pair compact">
+                <label>
+                  Host from the *arr container
+                  <input id="wizardClientHost" type="text" autocomplete="off" placeholder="putiorr">
+                </label>
+                <label>
+                  Port
+                  <input id="wizardClientPort" type="text" inputmode="numeric" autocomplete="off" placeholder="9091">
+                </label>
+              </div>
+              <div class="check-grid">
+                <label class="check-row">
+                  <input id="wizardUseSsl" type="checkbox">
+                  Use SSL for the download client
+                </label>
+                <label class="check-row">
+                  <input id="wizardEnabled" type="checkbox">
+                  Enable this profile
+                </label>
+              </div>
+            </section>
+          </div>
+
+          <aside class="setup-preview" aria-live="polite">
+            <div class="preview-head">
+              <div>
+                <span class="step-label">Generated setup</span>
+                <h3 id="wizardClientTitle">Sonarr download client</h3>
+              </div>
+              <button id="copyClientSettingsButton" class="button secondary" type="button">
+                <span aria-hidden="true">⧉</span>
+                Copy
+              </button>
+            </div>
+            <dl class="settings-list">
+              <div>
+                <dt>Name</dt>
+                <dd data-client-setting="name">putiorr</dd>
+              </div>
+              <div>
+                <dt>Host</dt>
+                <dd data-client-setting="host">putiorr</dd>
+              </div>
+              <div>
+                <dt>Port</dt>
+                <dd data-client-setting="port">9091</dd>
+              </div>
+              <div>
+                <dt>Use SSL</dt>
+                <dd data-client-setting="ssl">Off</dd>
+              </div>
+              <div>
+                <dt>URL Base</dt>
+                <dd data-client-setting="urlBase">/sonarr/transmission</dd>
+              </div>
+              <div>
+                <dt>Category</dt>
+                <dd data-client-setting="category">sonarr</dd>
+              </div>
+              <div>
+                <dt>Directory</dt>
+                <dd data-client-setting="directory">/putiorr</dd>
+              </div>
+            </dl>
+            <div class="endpoint-box">
+              <span>Full RPC endpoint</span>
+              <strong id="wizardFullEndpoint">http://putiorr:9091/sonarr/transmission/rpc</strong>
+            </div>
+            <p id="wizardSetupNote" class="field-help">In Sonarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.</p>
+          </aside>
+        </div>
+
+        <p id="profileWizardMessage" class="message" role="status"></p>
+
+        <div class="modal-actions">
+          <button id="deleteProfileButton" class="button danger" type="button">Delete profile</button>
+          <div class="button-row">
+            <button class="button secondary" type="button" data-action="cancel-profile-wizard">Cancel</button>
+            <button id="saveProfileButton" class="button primary" type="submit">Save profile</button>
+          </div>
+        </div>
+      </form>
+    </dialog>
 
     <script type="module" src="/app.js"></script>
   </body>
