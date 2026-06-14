@@ -177,7 +177,7 @@ const WIZARD_HELP = {
       'Use a stricter threshold for large movie files and a lower threshold for smaller music files.',
       'Changing this affects active and future local downloads that belong to this RR profile.',
     ],
-    valueLabel: 'Downloader policy',
+    valueLabel: 'Downloader Profile',
     value: (profile) => downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId),
   },
   wizardRpcPath: {
@@ -424,7 +424,7 @@ function createProfileCard(profile) {
         <dd data-role="download"></dd>
       </div>
       <div>
-        <dt>Downloader</dt>
+        <dt>Downloader Profile</dt>
         <dd data-role="download-profile"></dd>
       </div>
       <div>
