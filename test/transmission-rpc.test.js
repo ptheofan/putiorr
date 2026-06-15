@@ -399,7 +399,7 @@ test('dashboard bucket delete can leave put.io data and tombstone the download',
   const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/delete`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ deleteRemote: false }),
+    body: JSON.stringify({ deleteRemote: false, deleteLocal: true }),
   });
   const body = await response.json();
 
@@ -475,7 +475,7 @@ test('dashboard file delete removes one file locally and optionally from put.io'
   const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/files/delete`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileIds: [firstFile.id], deleteRemote: true }),
+    body: JSON.stringify({ fileIds: [firstFile.id], deleteRemote: true, deleteLocal: true }),
   });
   const body = await response.json();
 
@@ -485,7 +485,8 @@ test('dashboard file delete removes one file locally and optionally from put.io'
   assert.deepEqual(harness.putio.deletedTransfers, []);
   await assert.rejects(() => stat(path.join(stagedPath, 'Episode.One.mkv')), { code: 'ENOENT' });
   await stat(path.join(stagedPath, 'Episode.Two.mkv'));
-  assert.equal(harness.store.findTransferFileById(firstFile.id).status, 'deleted');
+  // deleted from put.io -> the file row is physically removed, not tombstoned
+  assert.equal(harness.store.findTransferFileById(firstFile.id), undefined);
   assert.deepEqual(
     harness.store.listFilesForTransfer(transfer.id).map((file) => file.id),
     [secondFile.id],
@@ -538,7 +539,7 @@ test('dashboard deleting all selected files deletes the whole bucket', async (t)
   const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/files/delete`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fileIds: [firstFile.id, secondFile.id], deleteRemote: true }),
+    body: JSON.stringify({ fileIds: [firstFile.id, secondFile.id], deleteRemote: true, deleteLocal: true }),
   });
   const body = await response.json();
 
@@ -547,7 +548,255 @@ test('dashboard deleting all selected files deletes the whole bucket', async (t)
   assert.deepEqual(harness.putio.deletedFiles, [88]);
   assert.deepEqual(harness.putio.deletedTransfers, [77]);
   await assert.rejects(() => stat(stagedPath), { code: 'ENOENT' });
+  // deleted from put.io -> the transfer row is physically removed, not tombstoned
+  assert.equal(harness.store.findTransferById(transfer.id), undefined);
+});
+
+test('dashboard bucket delete keeps local files when deleteLocal is omitted', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  harness.store.updateProfile(profile.id, { putio_folder_id: 42 });
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'keeplocalhash',
+    name: 'Keep.Local',
+    category: 'radarr',
+    lifecycle: 'processed',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+  harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 200,
+    relative_path: 'Keep.Local.mkv',
+    size: 5,
+    downloaded_bytes: 5,
+    status: 'complete',
+  });
+
+  const stagedPath = path.join(profile.download_at, 'radarr', 'Keep.Local');
+  await mkdir(stagedPath, { recursive: true });
+  await writeFile(path.join(stagedPath, 'Keep.Local.mkv'), 'movie');
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/delete`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deleteRemote: true }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.bucketDeleted, true);
+  assert.deepEqual(harness.putio.deletedTransfers, [77]);
+  // deleteLocal omitted -> downloaded files stay on disk
+  await stat(path.join(stagedPath, 'Keep.Local.mkv'));
+  // deleted from put.io -> the transfer row is physically removed, not tombstoned
+  assert.equal(harness.store.findTransferById(transfer.id), undefined);
+});
+
+test('dashboard file delete keeps local files when deleteLocal is omitted', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'keepfilehash',
+    name: 'Keep.File',
+    category: 'sonarr',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 11,
+  });
+  const firstFile = harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 200,
+    relative_path: 'Episode.One.mkv',
+    size: 5,
+    downloaded_bytes: 5,
+    status: 'complete',
+  });
+  harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 201,
+    relative_path: 'Episode.Two.mkv',
+    size: 6,
+    downloaded_bytes: 6,
+    status: 'complete',
+  });
+
+  const stagedPath = path.join(profile.download_at, 'sonarr', 'Keep.File');
+  await mkdir(stagedPath, { recursive: true });
+  await writeFile(path.join(stagedPath, 'Episode.One.mkv'), 'one');
+  await writeFile(path.join(stagedPath, 'Episode.Two.mkv'), 'two');
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/files/delete`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileIds: [firstFile.id], deleteRemote: true }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.bucketDeleted, false);
+  assert.deepEqual(harness.putio.deletedFiles, [200]);
+  // deleteLocal omitted -> the downloaded file stays on disk even though its row is gone
+  await stat(path.join(stagedPath, 'Episode.One.mkv'));
+  await stat(path.join(stagedPath, 'Episode.Two.mkv'));
+  // deleted from put.io -> the file row is physically removed, not tombstoned
+  assert.equal(harness.store.findTransferFileById(firstFile.id), undefined);
+});
+
+test('tombstoned transfer kept on put.io is physically pruned once put.io drops it', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  harness.store.updateProfile(profile.id, { putio_folder_id: 42 });
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'prunehash',
+    name: 'Prune.Me',
+    category: 'radarr',
+    lifecycle: 'processed',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+  harness.store.upsertTransferFile({
+    transfer_id: transfer.id,
+    putio_file_id: 200,
+    relative_path: 'Prune.Me.mkv',
+    size: 5,
+    downloaded_bytes: 5,
+    status: 'complete',
+  });
+
+  // Delete from the dashboard but keep it on put.io -> tombstone, not hard-delete.
+  const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/delete`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ deleteRemote: false }),
+  });
+  assert.equal(response.status, 200);
   assert.ok(harness.store.findTransferById(transfer.id).removed_at);
+
+  // While put.io still lists it, the tombstone must survive (no resurrection, no prune).
+  harness.putio.transfers = [{
+    id: 77,
+    name: 'Prune.Me',
+    hash: 'prunehash',
+    status: 'COMPLETED',
+    percentDone: 100,
+    size: 5,
+    saveParentId: 42,
+    fileId: 88,
+  }];
+  await harness.service.refreshRemoteTransfers();
+  assert.ok(harness.store.findTransferById(transfer.id)?.removed_at, 'tombstone kept while still on put.io');
+  assert.deepEqual(harness.store.listActiveTransfers(), []);
+
+  // Once put.io no longer lists it, the next poll hard-deletes the tombstone (files cascade).
+  harness.putio.transfers = [];
+  await harness.service.refreshRemoteTransfers();
+  assert.equal(harness.store.findTransferById(transfer.id), undefined);
+  assert.deepEqual(harness.store.listFilesForTransfer(transfer.id), []);
+});
+
+test('tombstoned files under a processed transfer are physically purged; active ones are kept', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+
+  // Processed transfer: a deleted-but-kept file should be hard-deleted by the sweep.
+  const processed = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'processedhash',
+    name: 'Processed',
+    category: 'radarr',
+    lifecycle: 'processed',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 11,
+  });
+  const keptFile = harness.store.upsertTransferFile({
+    transfer_id: processed.id,
+    putio_file_id: 200,
+    relative_path: 'Kept.mkv',
+    size: 5,
+    downloaded_bytes: 5,
+    status: 'complete',
+  });
+  const deletedFile = harness.store.upsertTransferFile({
+    transfer_id: processed.id,
+    putio_file_id: 201,
+    relative_path: 'Deleted.mkv',
+    size: 6,
+    downloaded_bytes: 6,
+    status: 'complete',
+  });
+  harness.store.markTransferFileDeleted(deletedFile.id);
+
+  // Still-downloading transfer: its tombstone must survive (could still re-download).
+  const downloading = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 78,
+    putio_file_id: 89,
+    save_parent_id: 42,
+    hash: 'downloadinghash',
+    name: 'Downloading',
+    category: 'radarr',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 50,
+    total_size: 6,
+  });
+  const downloadingDeleted = harness.store.upsertTransferFile({
+    transfer_id: downloading.id,
+    putio_file_id: 202,
+    relative_path: 'StillThere.mkv',
+    size: 6,
+    downloaded_bytes: 3,
+    status: 'pending',
+  });
+  harness.store.markTransferFileDeleted(downloadingDeleted.id);
+
+  const purged = harness.store.purgeDeletedFilesForProcessedTransfers();
+
+  assert.equal(purged, 1);
+  assert.equal(harness.store.findTransferFileById(deletedFile.id), undefined);
+  assert.ok(harness.store.findTransferFileById(keptFile.id));
+  // Tombstone under a non-processed transfer is left intact.
+  assert.equal(harness.store.findTransferFileById(downloadingDeleted.id)?.status, 'deleted');
 });
 
 test('profile-specific RPC path uses that profile download directory', async (t) => {

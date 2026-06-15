@@ -87,12 +87,51 @@ export class DownloadManager {
 
   async pollOnce() {
     await this.pruneProcessedTransfersMissingLocalData();
+    const purgedFiles = this.store.purgeDeletedFilesForProcessedTransfers();
+    if (purgedFiles > 0) {
+      logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
+    }
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {
       if (READY_REMOTE_STATUSES.has(row.putio_status) && row.lifecycle !== 'processed') {
-        await this.prepareTransfer(row);
+        await this.prepareTransferSafely(row);
       }
+    }
+  }
+
+  // A single transfer failing must never abort the whole poll, or every other transfer
+  // behind it in the list stops making progress. A put.io 404 means the transfer's files
+  // no longer exist remotely, so it is handled like a dashboard bucket delete with default
+  // options: put.io is already gone (nothing to delete there) and downloaded files are kept
+  // on disk — only the local DB row (and its file rows, via cascade) is removed. Any other
+  // error is transient and left for the next poll to retry.
+  async prepareTransferSafely(row) {
+    try {
+      await this.prepareTransfer(row);
+    } catch (error) {
+      if (error.status === 404) {
+        // The transfer's files no longer exist on put.io. Apply the default bucket-delete:
+        // also remove it from put.io (best-effort) and keep the downloaded files on disk.
+        // Tombstone rather than hard-delete so a still-listed transfer can't be resurrected
+        // into an every-poll 404 loop; the poll prune physically removes the row once put.io
+        // has dropped the transfer.
+        if (this.service.getPutioToken()) {
+          await this.service.removeRemoteTransfer(row);
+        }
+        this.store.markTransferRemoved(row.id);
+        logger.warn('transfer files missing on put.io; removed bucket, kept downloaded files', {
+          transferId: row.id,
+          name: row.name,
+          error: error.message,
+        });
+        return;
+      }
+      logger.warn('failed to prepare transfer; will retry next poll', {
+        transferId: row.id,
+        name: row.name,
+        error: error.message,
+      });
     }
   }
 

@@ -104,6 +104,70 @@ test('prepareTransfer records existing partial file bytes for resume', async () 
   }
 });
 
+test('prepareTransferSafely removes a transfer whose files 404 on put.io and keeps local files', async () => {
+  const removed = [];
+  const putio = {
+    async listTransferFiles() {
+      const error = new Error('put.io 404: The requested URL was not found on the server.');
+      error.status = 404;
+      throw error;
+    },
+    async deleteFile(fileId) { removed.push(['file', fileId]); },
+    async deleteTransfer(transferId) { removed.push(['transfer', transferId]); },
+  };
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 10 });
+    const fileOnDisk = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
+    await mkdir(path.dirname(fileOnDisk), { recursive: true });
+    await writeFile(fileOnDisk, 'already downloaded');
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    // Must not throw -> the poll loop continues to the remaining transfers.
+    await manager.prepareTransferSafely(transfer);
+
+    // Default bucket delete: also removed from put.io, downloaded file kept on disk,
+    // and tombstoned locally (the poll prune physically removes the row afterwards).
+    assert.deepEqual(removed, [['file', 20], ['transfer', 10]]);
+    assert.ok(harness.store.findTransferById(transfer.id).removed_at);
+    assert.deepEqual(harness.store.listActiveTransfers(), []);
+    assert.equal(await readFile(fileOnDisk, 'utf8'), 'already downloaded');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('prepareTransferSafely keeps the transfer for non-404 errors so the next poll retries', async () => {
+  const putio = {
+    async listTransferFiles() {
+      const error = new Error('put.io 500: temporary failure');
+      error.status = 500;
+      throw error;
+    },
+  };
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 10 });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await manager.prepareTransferSafely(transfer);
+
+    // Transient error -> row is left intact for a later retry.
+    assert.ok(harness.store.findTransferById(transfer.id));
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('downloadToPath resumes an existing part file with a Range request', async () => {
   const harness = await createHarness();
   try {

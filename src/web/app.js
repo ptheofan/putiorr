@@ -125,6 +125,8 @@ const el = {
   deleteConfirmClose: document.querySelector('#deleteConfirmClose'),
   deleteFromPutio: document.querySelector('#deleteFromPutio'),
   deleteFromPutioLabel: document.querySelector('#deleteFromPutioLabel'),
+  deleteLocalFiles: document.querySelector('#deleteLocalFiles'),
+  deleteLocalFilesLabel: document.querySelector('#deleteLocalFilesLabel'),
   deleteConfirmMessage: document.querySelector('#deleteConfirmMessage'),
   deleteConfirmButton: document.querySelector('#deleteConfirmButton'),
 };
@@ -2046,6 +2048,7 @@ function openDeleteConfirm(pendingDelete) {
   const fileWord = count === 1 ? 'file' : 'files';
   state.pendingDelete = pendingDelete;
   el.deleteFromPutio.checked = true;
+  el.deleteLocalFiles.checked = false;
   setDeleteConfirmMessage('');
 
   if (pendingDelete.type === 'bucket') {
@@ -2055,6 +2058,7 @@ function openDeleteConfirm(pendingDelete) {
       `This will delete "${download.name}" and all ${count} ${fileWord} from putiorr.`,
     );
     setText(el.deleteFromPutioLabel, 'Also delete this bucket from put.io');
+    setText(el.deleteLocalFilesLabel, 'Also delete the downloaded files from disk');
   } else {
     setText(el.deleteConfirmTitle, `Delete ${count} ${fileWord}`);
     setText(
@@ -2064,9 +2068,12 @@ function openDeleteConfirm(pendingDelete) {
     setText(el.deleteFromPutioLabel, count === 1
       ? 'Also delete this file from put.io'
       : 'Also delete these files from put.io');
+    setText(el.deleteLocalFilesLabel, count === 1
+      ? 'Also delete the downloaded file from disk'
+      : 'Also delete the downloaded files from disk');
   }
 
-  el.deleteConfirmButton.disabled = false;
+  updateDeleteConfirmButtonState();
   if (!el.deleteConfirmDialog.open) el.deleteConfirmDialog.showModal();
 }
 
@@ -2074,6 +2081,11 @@ function closeDeleteConfirm() {
   state.pendingDelete = undefined;
   setDeleteConfirmMessage('');
   if (el.deleteConfirmDialog.open) el.deleteConfirmDialog.close();
+}
+
+function updateDeleteConfirmButtonState() {
+  const anyChecked = el.deleteFromPutio.checked || el.deleteLocalFiles.checked;
+  el.deleteConfirmButton.disabled = !anyChecked;
 }
 
 function setDeleteConfirmMessage(message, tone = 'neutral') {
@@ -2088,18 +2100,20 @@ async function confirmPendingDelete() {
   el.deleteConfirmButton.disabled = true;
   setDeleteConfirmMessage('Deleting...', 'neutral');
   const deleteRemote = Boolean(el.deleteFromPutio.checked);
+  const deleteLocal = Boolean(el.deleteLocalFiles.checked);
 
   try {
     const result = pendingDelete.type === 'bucket'
       ? await api(`/api/downloads/${pendingDelete.downloadId}/delete`, {
           method: 'POST',
-          body: JSON.stringify({ deleteRemote }),
+          body: JSON.stringify({ deleteRemote, deleteLocal }),
         })
       : await api(`/api/downloads/${pendingDelete.downloadId}/files/delete`, {
           method: 'POST',
           body: JSON.stringify({
             fileIds: pendingDelete.fileIds,
             deleteRemote,
+            deleteLocal,
           }),
         });
 
@@ -2119,7 +2133,7 @@ async function confirmPendingDelete() {
   } catch (error) {
     setDeleteConfirmMessage(error.message, 'error');
   } finally {
-    el.deleteConfirmButton.disabled = false;
+    updateDeleteConfirmButtonState();
   }
 }
 
@@ -2571,6 +2585,8 @@ el.deleteConfirmForm.addEventListener('submit', (event) => {
   event.preventDefault();
   confirmPendingDelete();
 });
+el.deleteFromPutio.addEventListener('change', updateDeleteConfirmButtonState);
+el.deleteLocalFiles.addEventListener('change', updateDeleteConfirmButtonState);
 el.deleteConfirmClose.addEventListener('click', closeDeleteConfirm);
 el.deleteConfirmDialog.querySelector('[data-action="cancel-delete"]').addEventListener('click', closeDeleteConfirm);
 el.deleteConfirmDialog.addEventListener('click', (event) => {

@@ -716,6 +716,34 @@ export class StateStore {
     this.db.prepare('DELETE FROM transfers WHERE id = ?').run(id);
   }
 
+  deleteTransferFile(id) {
+    this.db.prepare('DELETE FROM transfer_files WHERE id = ?').run(id);
+  }
+
+  // A file deleted from the dashboard but kept on put.io is tombstoned (status='deleted')
+  // so the downloader does not re-fetch it. Once its transfer is 'processed' the download
+  // path never revisits it (see pollOnce / prepareTransfer), so the tombstone is dead weight
+  // and is hard-deleted here to keep the table from accumulating rows over time.
+  purgeDeletedFilesForProcessedTransfers() {
+    const result = this.db.prepare(`
+      DELETE FROM transfer_files
+      WHERE status = 'deleted'
+        AND transfer_id IN (
+          SELECT id FROM transfers
+          WHERE lifecycle = 'processed' AND removed_at IS NULL
+        )
+    `).run();
+    return result.changes;
+  }
+
+  listRemovedTransfers() {
+    return this.db.prepare(`
+      SELECT id, putio_transfer_id, hash
+      FROM transfers
+      WHERE removed_at IS NOT NULL
+    `).all();
+  }
+
   upsertTransferFile(input) {
     const timestamp = nowIso();
     const existing = this.findTransferFileByPutioId(input.putio_file_id);
