@@ -31,6 +31,8 @@ breadth:
 - WebSocket dashboard updates
 - file-level local download progress and speed
 - safe handling of `delete-local-data`
+- automatic cleanup of completed `prowlarr`-profile transfers (removed from the
+  list and put.io, downloaded files kept on disk)
 
 Implemented Transmission RPC methods:
 
