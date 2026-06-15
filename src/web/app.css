@@ -409,6 +409,11 @@ select.input-control-addon {
   color: var(--danger);
 }
 
+.button.danger:hover,
+.icon-button.danger:hover {
+  background: #ffe7e4;
+}
+
 .button.secondary,
 .icon-button {
   background: #edf4f4;
@@ -419,6 +424,18 @@ select.input-control-addon {
 .icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.button:focus-visible,
+.icon-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: 2px;
+}
+
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 
 .text-button {
@@ -1182,7 +1199,19 @@ td.center input {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+}
+
+.download-speed-metric {
+  min-width: 0;
+}
+
+.bucket-delete-button {
+  width: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  padding: 7px;
+  flex: 0 0 auto;
 }
 
 .compact-button {
@@ -1379,7 +1408,6 @@ td.center input {
   min-width: 32px;
   min-height: 32px;
   padding: 6px;
-  font-size: 18px;
   line-height: 1;
 }
 
@@ -1531,6 +1559,10 @@ td.center input {
   .file-panel-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .download-actions {
+    align-items: flex-start;
   }
 
   .file-delete-button {
