@@ -230,7 +230,7 @@ export class TransmissionRpcServer {
     this.server = http.createServer((req, res) => {
       this.handle(req, res).catch((error) => {
         logger.error('unhandled rpc error', { error: error.message, stack: error.stack });
-        jsonResponse(res, 500, { result: 'error', message: error.message }, this.sessionId);
+        jsonResponse(res, 500, { result: error.message || 'error', message: error.message }, this.sessionId);
       });
     });
     this.server.on('upgrade', (req, socket, head) => {
@@ -390,7 +390,22 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const result = await this.dispatch(rpcRequest.method, rpcRequest.arguments ?? {}, currentProfile);
+    let result;
+    try {
+      result = await this.dispatch(rpcRequest.method, rpcRequest.arguments ?? {}, currentProfile);
+    } catch (error) {
+      // Transmission RPC reports failures in the `result` field as a
+      // human-readable string (with HTTP 200). Transmission clients such as
+      // Sonarr/Radarr/Prowlarr surface `result`, so carrying the real message
+      // here makes the actual reason visible instead of a generic "error".
+      logger.error('rpc request failed', { method: rpcRequest.method, error: error.message });
+      jsonResponse(res, 200, {
+        ...(rpcRequest.tag !== undefined ? { tag: rpcRequest.tag } : {}),
+        result: error.message || 'error',
+      }, this.sessionId);
+      return;
+    }
+
     const body = {
       ...(rpcRequest.tag !== undefined ? { tag: rpcRequest.tag } : {}),
       result: 'success',

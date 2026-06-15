@@ -228,6 +228,40 @@ test('torrent-add persists category and torrent-get returns Transmission shape',
   });
 });
 
+test('failed RPC surfaces the real error in the Transmission result field', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+
+  const addResponse = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: {
+        // A non-magnet URL is rejected by addTorrent; the reason must reach the client.
+        filename: 'https://example.com/example.torrent',
+        'download-dir': harness.config.targetDir,
+      },
+    }),
+  });
+
+  // Transmission convention: HTTP 200, with the human-readable reason in `result`.
+  assert.equal(addResponse.status, 200);
+  const addBody = await addResponse.json();
+  assert.notEqual(addBody.result, 'success');
+  assert.notEqual(addBody.result, 'error');
+  assert.match(addBody.result, /requires a magnet link or base64 metainfo/);
+});
+
 test('torrent-remove deletes remote resources and hides transfer', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

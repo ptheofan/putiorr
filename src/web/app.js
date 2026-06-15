@@ -1715,12 +1715,12 @@ function createDownloadRow(download) {
       </div>
       <div>
         <div class="download-actions">
-          <div>
+          <div class="download-speed-metric">
             <div class="metric-label">Speed / ETA</div>
             <strong data-role="download-speed"></strong>
             <div class="download-meta" data-role="download-eta"></div>
           </div>
-          <button class="button danger compact-button" type="button" data-action="delete-bucket">Delete bucket</button>
+          <button class="icon-button danger bucket-delete-button" type="button" data-action="delete-bucket" aria-label="Delete bucket" title="Delete bucket">${trashIcon()}</button>
         </div>
       </div>
     </div>
@@ -1899,7 +1899,7 @@ function createFileRow(file) {
       <span class="bar local" data-role="file-bar"><span></span></span>
       <span data-role="file-progress"></span>
     </div>
-    <button class="icon-button danger file-delete-button" type="button" data-action="delete-file" aria-label="Delete file" title="Delete file">×</button>
+    <button class="icon-button danger file-delete-button" type="button" data-action="delete-file" aria-label="Delete file" title="Delete file">${trashIcon()}</button>
   `;
   row.querySelector('[data-action="select-file"]').addEventListener('change', (event) => {
     const downloadId = row.closest('.download-row')?.dataset.id;
@@ -2119,6 +2119,14 @@ function progressLine(label, value, barRole, valueRole, className = '') {
       <span class="bar ${className}" data-role="${barRole}"><span></span></span>
       <span data-role="${valueRole}">${value}%</span>
     </div>
+  `;
+}
+
+function trashIcon() {
+  return `
+    <svg class="delete-icon" viewBox="0 0 20 20" aria-hidden="true" focusable="false">
+      <path d="M7.2 4.2V3.4c0-.8.6-1.4 1.4-1.4h2.8c.8 0 1.4.6 1.4 1.4v.8M3.8 5h12.4M6 7.5l.5 8.2c.1.8.7 1.3 1.4 1.3h4.2c.8 0 1.4-.6 1.4-1.3l.5-8.2M8.7 8.8v5.4M11.3 8.8v5.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg>
   `;
 }
 
