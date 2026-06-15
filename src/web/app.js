@@ -1027,7 +1027,7 @@ function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE))
   el.wizardProfileType.value = type;
   el.wizardProfileName.value = displayName;
   el.wizardPutioFolder.value = profile.putio_folder_name || DEFAULT_PUTIO_FOLDER;
-  el.wizardDownloadAt.value = profile.downloadAt ?? profile.download_at ?? DEFAULT_DOWNLOAD_FOLDER;
+  el.wizardDownloadAt.value = profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder();
   renderDownloadProfileOptions(profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId());
   el.wizardRpcPath.value = profile.rpc_path || defaultRpcPathForType(type);
   el.wizardClientHost.value = DEFAULT_CLIENT_HOST;
@@ -1056,6 +1056,17 @@ function closeProfileWizard() {
   }
 }
 
+// New profiles must share the download folder that the shared RPC endpoint
+// advertises (the default profile's folder, returned by session-get). Otherwise
+// a shared-endpoint grab routed here by category lands on a download-dir that is
+// outside this profile's folder and the add is rejected. Fall back to the
+// hardcoded default only before any profile exists.
+function defaultDownloadFolder() {
+  const profiles = state.profiles ?? [];
+  const base = profiles.find((profile) => profile.slug === 'default') ?? profiles[0];
+  return base?.download_at ?? base?.downloadAt ?? DEFAULT_DOWNLOAD_FOLDER;
+}
+
 function createDefaultProfile(type) {
   const detail = profileType(type);
   return {
@@ -1063,7 +1074,7 @@ function createDefaultProfile(type) {
     name: detail.label,
     type,
     putio_folder_name: DEFAULT_PUTIO_FOLDER,
-    downloadAt: DEFAULT_DOWNLOAD_FOLDER,
+    downloadAt: defaultDownloadFolder(),
     download_profile_id: defaultDownloadProfileId(),
     rpc_path: defaultRpcPathForType(type),
     enabled: true,
@@ -1531,7 +1542,7 @@ function getClientSettingsFromProfile(profile) {
     useSsl,
     urlBase: rpcPath.replace(/\/rpc\/?$/, '') || rpcPath,
     category: slugify(profile.name || detail.label),
-    directory: profile.downloadAt ?? profile.download_at ?? DEFAULT_DOWNLOAD_FOLDER,
+    directory: profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder(),
     fullEndpoint: `${protocol}://${host}${portSuffix}${rpcPath}`,
     note: detail.note,
   };
