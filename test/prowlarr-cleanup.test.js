@@ -104,6 +104,43 @@ test('finalize auto-removes a prowlarr transfer from put.io and the list, keepin
   }
 });
 
+test('finalize keeps a prowlarr transfer as processed (files intact) when the put.io delete fails', async () => {
+  class ThrowingPutio extends FakePutio {
+    async deleteFile() {
+      throw new Error('put.io is down');
+    }
+  }
+  const harness = await createHarness({}, new ThrowingPutio());
+  try {
+    const profile = harness.store.createProfile({
+      name: 'Prowlarr',
+      type: 'prowlarr',
+      slug: 'prowlarr',
+      putio_folder_name: 'prowlarr',
+      downloadAt: path.join(harness.config.targetDir, 'prowlarr'),
+      rpc_path: '/prowlarr/transmission/rpc',
+      enabled: true,
+    });
+    const { transfer, filePath } = await seedCompleteTransfer(harness, profile);
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    // Best-effort contract: a failed remote delete must NOT propagate.
+    await assert.doesNotReject(() => manager.finalizeTransferIfComplete(transfer.id));
+
+    // The remote delete throws before the local row is removed, so the row
+    // remains as `processed` and the on-disk file is untouched.
+    assert.equal(harness.store.findTransferById(transfer.id)?.lifecycle, 'processed');
+    assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('finalize leaves a non-prowlarr transfer in the list as processed', async () => {
   const harness = await createHarness({ PUTIORR_CLEANUP_REMOTE_FILES: 'false' });
   try {
