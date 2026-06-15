@@ -653,6 +653,31 @@ export class DownloadManager {
       eta: -1,
     });
 
+    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    if (profile?.type === 'prowlarr') {
+      // Prowlarr has no downstream *arr import, so a completed transfer would
+      // otherwise linger forever. Delete it from put.io and drop it from the
+      // list, but keep the downloaded files on disk. Best-effort: a failure is
+      // logged and the transfer stays as `processed` (same as cleanupRemoteFiles).
+      try {
+        await this.service.deleteDownloadBucket(transferId, {
+          deleteRemote: true,
+          deleteLocal: false,
+        });
+        logger.info('prowlarr transfer auto-removed after download; kept files on disk', {
+          transferId,
+          name: transfer.name,
+        });
+      } catch (error) {
+        logger.warn('failed to auto-remove prowlarr transfer', {
+          transferId,
+          name: transfer.name,
+          error: error.message,
+        });
+      }
+      return;
+    }
+
     if (this.config.cleanupRemoteFiles && transfer.putio_file_id) {
       try {
         await this.service.getPutio().deleteFile(transfer.putio_file_id);
