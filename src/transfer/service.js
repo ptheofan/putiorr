@@ -211,8 +211,12 @@ export class TransferService {
 
     const byFolderId = new Map(profiles.map((profile) => [profile.putio_folder_id, profile]));
     const remoteTransfers = await putio.listTransfers();
+    const remoteIds = new Set();
+    const remoteHashes = new Set();
     const rows = [];
     for (const remote of remoteTransfers) {
+      if (remote.id != null) remoteIds.add(remote.id);
+      if (remote.hash) remoteHashes.add(remote.hash);
       const profile = byFolderId.get(remote.saveParentId);
       if (!profile) continue;
       const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
@@ -229,7 +233,27 @@ export class TransferService {
         source_type: existing?.source_type ?? 'remote',
       })));
     }
+    this.pruneRemovedTransfers(remoteIds, remoteHashes);
     return rows;
+  }
+
+  // Tombstoned transfers (deleted from the dashboard but kept on put.io) only need to
+  // survive long enough to suppress resurrection. Once put.io no longer lists them,
+  // the tombstone is dead weight, so hard-delete it here (files cascade away). This
+  // reuses the transfer list already fetched by the poll — no extra API calls.
+  pruneRemovedTransfers(remoteIds, remoteHashes) {
+    for (const removed of this.store.listRemovedTransfers()) {
+      const stillRemote =
+        (removed.putio_transfer_id != null && remoteIds.has(removed.putio_transfer_id)) ||
+        (removed.hash && remoteHashes.has(removed.hash));
+      if (!stillRemote) {
+        this.store.deleteTransfer(removed.id);
+        logger.info('pruned tombstoned transfer no longer on put.io', {
+          id: removed.id,
+          hash: removed.hash,
+        });
+      }
+    }
   }
 
   async getTorrents(args = {}, profile) {
@@ -276,7 +300,7 @@ export class TransferService {
     return {};
   }
 
-  async deleteDownloadBucket(transferId, { deleteRemote = true } = {}) {
+  async deleteDownloadBucket(transferId, { deleteRemote = true, deleteLocal = true } = {}) {
     const transfer = this.store.findTransfer(transferId);
     if (!transfer || transfer.removed_at) {
       throw new Error('Download bucket not found');
@@ -289,13 +313,23 @@ export class TransferService {
     const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
     const targetDir = path.join(profile.download_at, transfer.category ?? '');
     const fileCount = this.store.listFilesForTransfer(transfer.id).length;
-    await deleteLocalData(targetDir, transfer.name);
-    this.store.markTransferRemoved(transfer.id);
+    if (deleteLocal) {
+      await deleteLocalData(targetDir, transfer.name);
+    }
+    // When the transfer is gone from put.io it can never be resurrected by a poll,
+    // so the row (and its files via cascade) is hard-deleted. When it is kept on
+    // put.io we must tombstone instead, or refreshRemoteTransfers would re-add it.
+    if (deleteRemote) {
+      this.store.deleteTransfer(transfer.id);
+    } else {
+      this.store.markTransferRemoved(transfer.id);
+    }
 
     logger.info('download bucket deleted from dashboard', {
       id: transfer.id,
       hash: transfer.hash,
       deleteRemote,
+      deleteLocal,
       fileCount,
     });
 
@@ -307,7 +341,7 @@ export class TransferService {
     };
   }
 
-  async deleteDownloadFiles(transferId, fileIds, { deleteRemote = true } = {}) {
+  async deleteDownloadFiles(transferId, fileIds, { deleteRemote = true, deleteLocal = true } = {}) {
     const transfer = this.store.findTransfer(transferId);
     if (!transfer || transfer.removed_at) {
       throw new Error('Download bucket not found');
@@ -325,23 +359,32 @@ export class TransferService {
     }
 
     if (files.length === visibleFiles.length) {
-      return this.deleteDownloadBucket(transfer.id, { deleteRemote });
+      return this.deleteDownloadBucket(transfer.id, { deleteRemote, deleteLocal });
     }
 
     if (deleteRemote) {
       await this.removeRemoteFiles(files, { throwOnError: true });
     }
 
+    // Mirror the bucket logic at file granularity: a file removed from put.io is
+    // hard-deleted (it cannot be re-listed during download prep), while a file kept
+    // on put.io is tombstoned so the downloader leaves it alone instead of re-fetching.
     this.store.transaction(() => {
       for (const file of files) {
-        this.store.markTransferFileDeleted(file.id);
+        if (deleteRemote) {
+          this.store.deleteTransferFile(file.id);
+        } else {
+          this.store.markTransferFileDeleted(file.id);
+        }
       }
     });
 
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
-    const targetDir = path.join(profile.download_at, transfer.category ?? '');
-    for (const file of files) {
-      await deleteLocalFileData(targetDir, transfer.name, file.relative_path);
+    if (deleteLocal) {
+      const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
+      const targetDir = path.join(profile.download_at, transfer.category ?? '');
+      for (const file of files) {
+        await deleteLocalFileData(targetDir, transfer.name, file.relative_path);
+      }
     }
 
     this.refreshTransferAfterFileDeletion(transfer.id);
@@ -350,6 +393,7 @@ export class TransferService {
       id: transfer.id,
       hash: transfer.hash,
       deleteRemote,
+      deleteLocal,
       fileCount: files.length,
     });
 
