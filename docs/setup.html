@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="Production setup guide for putiorr with Docker Compose, shared download target mounts, put.io OAuth, and environment variables.">
+    <title>putiorr setup guide</title>
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="doc-hero section">
+        <p class="doc-kicker">Setup guide</p>
+        <h1>Install putiorr beside your *arr apps.</h1>
+        <p>
+          The production shape is simple: keep SQLite state on persistent
+          storage, use one shared download target mount, and put putiorr on the same
+          Docker network as Radarr, Sonarr, and Lidarr.
+        </p>
+      </section>
+
+      <section class="doc-layout section">
+        <aside class="doc-toc" aria-label="Setup sections">
+          <strong>On this page</strong>
+          <a href="#storage">Storage layout</a>
+          <a href="#compose">Compose service</a>
+          <a href="#arr-mounts">*arr mounts</a>
+          <a href="#putio">Connect put.io</a>
+          <a href="#environment">Environment</a>
+        </aside>
+
+        <div class="doc-content">
+          <section id="storage" class="doc-section">
+            <h2>Storage layout</h2>
+            <p>
+              Use a persistent config directory for SQLite state and a shared
+              download target that putiorr and each importer can see at the
+              same container path. An SSD or other fast disk is recommended for
+              local copy speed, but path identity is the hard requirement.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Host path</th>
+                    <th>Purpose</th>
+                    <th>Container path</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>/volume1/docker/putiorr-config</code></td>
+                    <td>SQLite state and UI-stored put.io credentials</td>
+                    <td><code>/data/putiorr-config</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>/volume/downloads</code></td>
+                    <td>Download target imported by Radarr, Sonarr, and Lidarr</td>
+                    <td><code>/downloads</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>/volume/media/movies</code></td>
+                    <td>Final Radarr library</td>
+                    <td><code>/movies</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>/volume/media/series</code></td>
+                    <td>Final Sonarr library</td>
+                    <td><code>/series</code></td>
+                  </tr>
+                  <tr>
+                    <td><code>/volume/media/music</code></td>
+                    <td>Final Lidarr library</td>
+                    <td><code>/music</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="doc-note">
+              The important rule is path identity. If putiorr reports
+              <code>/downloads/sonarr</code>, the Sonarr container must also
+              see <code>/downloads/sonarr</code>. Mount the same host folder
+              into putiorr and every *arr container at the same target path to
+              avoid custom Remote Path Mapping.
+            </p>
+          </section>
+
+          <section id="compose" class="doc-section">
+            <h2>Compose service</h2>
+            <p>
+              Run the release image on the same Docker network as the *arr
+              stack. A host port mapping is optional for browser access; it is
+              not required for Radarr, Sonarr, or Lidarr when they share the
+              Docker network and use <code>putiorr:9091</code>.
+            </p>
+            <pre><code>services:
+  putiorr:
+    image: ghcr.io/ptheofan/putiorr:latest
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Athens
+      PUTIORR_LISTEN_HOST: 0.0.0.0
+      PUTIORR_LISTEN_PORT: 9091
+      PUTIORR_STATE_PATH: /data/putiorr-config/putiorr.sqlite
+      PUTIORR_TARGET_DIR: /downloads
+      PUTIORR_WORKERS: "4"
+      PUTIORR_CLEANUP_REMOTE_FILES: "true"
+    volumes:
+      - /volume1/docker/putiorr-config:/data/putiorr-config
+      - /volume/downloads:/downloads</code></pre>
+          </section>
+
+          <section id="arr-mounts" class="doc-section">
+            <h2>*arr mounts</h2>
+            <p>
+              Each importer needs the shared download target mount plus its own final
+              library mount. The examples below show only the relevant volumes.
+            </p>
+            <pre><code>services:
+  radarr:
+    volumes:
+      - /volume/downloads:/downloads
+      - /volume/media/movies:/movies
+
+  sonarr:
+    volumes:
+      - /volume/downloads:/downloads
+      - /volume/media/series:/series
+
+  lidarr:
+    volumes:
+      - /volume/downloads:/downloads
+      - /volume/media/music:/music</code></pre>
+          </section>
+
+          <section id="putio" class="doc-section">
+            <h2>Connect put.io</h2>
+            <div class="doc-panel">
+              <h3>Hosted OAuth relay</h3>
+              <p>
+                Hosted relay mode is the default. Open the putiorr web UI,
+                choose <strong>Connect with put.io</strong>, and complete the
+                browser authorization. The relay only returns the token to the
+                user's putiorr instance.
+              </p>
+              <p>
+                The hosted callback is <code>https://ptheofan.github.io/putiorr/putio-oauth-relay.html</code>.
+              </p>
+            </div>
+            <div class="doc-panel">
+              <h3>Direct token</h3>
+              <p>
+                Manual token paste is available in the same connection dialog.
+                Use it when OAuth is not appropriate or when rotating a token
+                explicitly.
+              </p>
+            </div>
+            <div class="doc-panel">
+              <h3>Self-hosted redirect</h3>
+              <p>
+                For a private OAuth app, set <code>PUTIORR_PUBLIC_URL</code> to
+                the externally reachable putiorr base URL and register
+                <code>https://your-putiorr-host/api/oauth/callback</code> with
+                put.io. Set <code>PUTIORR_PUTIO_OAUTH_RELAY_URL</code> empty
+                when using direct self-hosted callbacks.
+              </p>
+            </div>
+          </section>
+
+          <section id="environment" class="doc-section">
+            <h2>Key environment variables</h2>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Variable</th>
+                    <th>Default</th>
+                    <th>Use</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>PUTIORR_LISTEN_PORT</code></td>
+                    <td><code>9091</code></td>
+                    <td>HTTP and Transmission RPC port inside the container.</td>
+                  </tr>
+                  <tr>
+                    <td><code>PUTIORR_TARGET_DIR</code></td>
+                    <td><code>./downloads</code></td>
+                    <td>Default local download root; production examples use <code>/downloads</code>.</td>
+                  </tr>
+                  <tr>
+                    <td><code>PUTIORR_STATE_PATH</code></td>
+                    <td><code>./data/putiorr.sqlite</code></td>
+                    <td>SQLite state database path.</td>
+                  </tr>
+                  <tr>
+                    <td><code>PUTIORR_WORKERS</code></td>
+                    <td><code>4</code></td>
+                    <td>Concurrent local file downloads.</td>
+                  </tr>
+                  <tr>
+                    <td><code>PUTIORR_RPC_USERNAME</code></td>
+                    <td>unset</td>
+                    <td>Optional HTTP basic auth username for dashboard and RPC access.</td>
+                  </tr>
+                  <tr>
+                    <td><code>PUTIORR_RPC_PASSWORD</code></td>
+                    <td>unset</td>
+                    <td>Optional HTTP basic auth password.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="doc-actions">
+              <a class="button primary" href="configuration.html">Configure profiles</a>
+              <a class="button secondary" href="documentation.html">Back to docs</a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="documentation.html">Docs</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="agent-setup.html">Agent guide</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="putiorr configuration guide for RR profiles, download profiles, Radarr, Sonarr, Lidarr, Prowlarr, and progress behavior.">
+    <title>putiorr configuration guide</title>
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="doc-hero section">
+        <p class="doc-kicker">Configuration guide</p>
+        <h1>Map each *arr app to a stable putiorr profile.</h1>
+        <p>
+          Configure one RR profile per app, attach the right download profile,
+          then paste the generated Transmission values into Radarr, Sonarr, and
+          Lidarr.
+        </p>
+      </section>
+
+      <section class="doc-layout section">
+        <aside class="doc-toc" aria-label="Configuration sections">
+          <strong>On this page</strong>
+          <a href="#rr-profiles">RR profiles</a>
+          <a href="#download-profiles">Download profiles</a>
+          <a href="#download-client">Download clients</a>
+          <a href="#prowlarr">Prowlarr</a>
+          <a href="#progress">Progress model</a>
+        </aside>
+
+        <div class="doc-content">
+          <section id="rr-profiles" class="doc-section">
+            <h2>RR profiles</h2>
+            <p>
+              Each RR profile maps one app to a put.io destination folder, a
+              shared local download target, and a Transmission RPC endpoint path.
+              The app's download-client category creates the final import
+              subfolder under that target.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>App</th>
+                    <th>put.io folder</th>
+                    <th>Download folder</th>
+                    <th>RPC endpoint</th>
+                    <th>Category</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Radarr</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/radarr/transmission/rpc</code></td>
+                    <td><code>radarr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Sonarr</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/sonarr/transmission/rpc</code></td>
+                    <td><code>sonarr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Lidarr</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/lidarr/transmission/rpc</code></td>
+                    <td><code>lidarr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Readarr</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/readarr/transmission/rpc</code></td>
+                    <td><code>readarr</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="doc-note">
+              Example: Sonarr category <code>sonarr</code> plus download folder
+              <code>/downloads</code> means completed files appear under
+              <code>/downloads/sonarr</code> for Sonarr's importer. The same
+              host folder must be mounted into putiorr and Sonarr at
+              <code>/downloads</code>, for example
+              <code>/volume/downloads:/downloads</code> in both containers, so
+              Sonarr does not need custom Remote Path Mapping.
+            </p>
+          </section>
+
+          <section id="download-profiles" class="doc-section">
+            <h2>Download profiles</h2>
+            <p>
+              Download profiles tune local-copy behavior by use case. Use one
+              profile per download shape when movies, episodes, music, or books
+              need different reset rules.
+            </p>
+            <div class="doc-card-grid">
+              <article class="doc-card">
+                <h3>Startup grace</h3>
+                <p>Gives large transfers time to reach normal throughput before slow-speed checks begin.</p>
+              </article>
+              <article class="doc-card">
+                <h3>Ignore below</h3>
+                <p>Excludes tiny files from slow-speed reset rules so metadata does not distort behavior.</p>
+              </article>
+              <article class="doc-card">
+                <h3>Slow threshold</h3>
+                <p>Restarts a local file download after it stays below the configured speed for the configured duration.</p>
+              </article>
+            </div>
+          </section>
+
+          <section id="download-client" class="doc-section">
+            <h2>Radarr, Sonarr, and Lidarr</h2>
+            <p>
+              Add a Transmission download client in each app. When the app
+              container shares a Docker network with putiorr, the host is the
+              compose service name and the port is putiorr's internal RPC port.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Radarr</th>
+                    <th>Sonarr</th>
+                    <th>Lidarr</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Name</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Host</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Port</td>
+                    <td><code>9091</code></td>
+                    <td><code>9091</code></td>
+                    <td><code>9091</code></td>
+                  </tr>
+                  <tr>
+                    <td>Use SSL</td>
+                    <td>Off</td>
+                    <td>Off</td>
+                    <td>Off</td>
+                  </tr>
+                  <tr>
+                    <td>Category</td>
+                    <td><code>radarr</code></td>
+                    <td><code>sonarr</code></td>
+                    <td><code>lidarr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Directory</td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/downloads</code></td>
+                  </tr>
+                  <tr>
+                    <td>URL Base</td>
+                    <td><code>/radarr/transmission</code></td>
+                    <td><code>/sonarr/transmission</code></td>
+                    <td><code>/lidarr/transmission</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Leave username and password blank unless you configured
+              <code>PUTIORR_RPC_USERNAME</code> and <code>PUTIORR_RPC_PASSWORD</code>.
+              Keep completed-download handling enabled in the *arr app.
+            </p>
+          </section>
+
+          <section id="prowlarr" class="doc-section">
+            <h2>Prowlarr</h2>
+            <p>
+              Prowlarr usually does not need its own putiorr profile. It connects
+              to Radarr, Sonarr, and Lidarr, syncs indexers, and those apps send
+              accepted grabs to putiorr through their Transmission client settings.
+            </p>
+            <pre><code>Radarr URL: http://radarr:7878
+Sonarr URL: http://sonarr:8989
+Lidarr URL: http://lidarr:8686</code></pre>
+          </section>
+
+          <section id="progress" class="doc-section">
+            <h2>Progress model</h2>
+            <p>
+              putiorr reports progress in two phases. The dashboard is the best
+              view for file-level local progress and per-file speed.
+            </p>
+            <pre><code>0-50%:   put.io remote transfer
+50-100%: local download from put.io to the download target</code></pre>
+            <p>
+              Local downloads are written as <code>.part</code> files and resume
+              with HTTP range requests after restarts. Optional slow-speed reset
+              closes and resumes a local download if it stays below the selected
+              threshold after the startup grace window.
+            </p>
+            <div class="doc-actions">
+              <a class="button primary" href="setup.html">Open setup guide</a>
+              <a class="button secondary" href="documentation.html">Back to docs</a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="documentation.html">Docs</a>
+        <a href="setup.html">Setup</a>
+        <a href="agent-setup.html">Agent guide</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+  </body>
+</html>
