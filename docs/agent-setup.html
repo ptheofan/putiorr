@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="AI agent setup playbook for installing putiorr end to end with Docker Compose, matching download paths, put.io auth, and *arr download-client values.">
+    <title>putiorr AI agent setup guide</title>
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="doc-hero section agent-doc-hero">
+        <p class="doc-kicker">AI agent guide</p>
+        <h1>A setup URL a user can give to an AI agent.</h1>
+        <p>
+          If a user sent you this page, read it first, inspect their existing
+          Docker Compose stack, collect only the missing inputs, then install
+          and validate putiorr for their Radarr, Sonarr, Lidarr, and Prowlarr
+          setup.
+        </p>
+      </section>
+
+      <section class="doc-layout section">
+        <aside class="doc-toc" aria-label="Agent setup sections">
+          <strong>On this page</strong>
+          <a href="#agent-brief">Copyable brief</a>
+          <a href="#agent-rules">Agent rules</a>
+          <a href="#inputs">Inputs to collect</a>
+          <a href="#compose">Compose changes</a>
+          <a href="#seed-json">Initial JSON setup</a>
+          <a href="#profiles">putiorr profiles</a>
+          <a href="#arr-values">*arr values</a>
+          <a href="#validation">Validation</a>
+          <a href="#troubleshooting">Troubleshooting</a>
+        </aside>
+
+        <div class="doc-content">
+          <section id="agent-brief" class="doc-section agent-brief-section">
+            <div class="doc-section-head">
+              <div>
+                <h2>Copyable agent brief</h2>
+                <p>
+                  Give this compact brief to an assistant or sub-agent, then
+                  let it use the rest of this page for the full setup details.
+                </p>
+              </div>
+              <button class="button secondary copy-button" type="button" data-copy-target="agent-brief-code" data-copy-status="agent-brief-copy-status">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M8.75 8.75h9.5v11.5h-9.5V8.75Z"></path>
+                  <path d="M5.75 15.25h-1.5V3.75h9.5v1.5"></path>
+                </svg>
+                <span>Copy brief</span>
+              </button>
+            </div>
+            <pre><code id="agent-brief-code">Read https://ptheofan.github.io/putiorr/agent-setup.html first.
+Goal: install putiorr as a Transmission-compatible put.io bridge.
+Use Docker Compose with ghcr.io/ptheofan/putiorr:latest.
+Mount persistent config at /data/putiorr-config.
+Mount the host download target, for example /volume/downloads, as /downloads in putiorr and every *arr container.
+Do not configure Remote Path Mapping when paths match.
+Use PUTIORR_TARGET_DIR=/downloads and PUTIORR_LISTEN_PORT=9091.
+Add PUTIORR_PROFILES_JSON to seed Radarr, Sonarr, and Lidarr profiles on first startup.
+Keep putiorr on the same Docker network as Radarr, Sonarr, and Lidarr.
+In each *arr app add a Transmission client:
+  Host putiorr, Port 9091, SSL off, Directory /downloads.
+  Category radarr/sonarr/lidarr.
+  URL Base /radarr/transmission, /sonarr/transmission, or /lidarr/transmission.
+Connect put.io through the putiorr UI using OAuth or Direct Token.
+Validate with each *arr Test button and a small completed grab.</code></pre>
+            <p id="agent-brief-copy-status" class="copy-status" role="status" aria-live="polite"></p>
+            <div class="doc-actions">
+              <a class="button primary" href="setup.html">Open setup guide</a>
+              <a class="button secondary" href="configuration.html">Open configuration guide</a>
+            </div>
+          </section>
+
+          <section id="agent-rules" class="doc-section">
+            <h2>Agent rules</h2>
+            <div class="doc-panel">
+              <h3>Public handoff URL</h3>
+              <p>
+                A user can give this URL to Codex or another assistant:
+                <code>https://ptheofan.github.io/putiorr/agent-setup.html</code>.
+                Treat this page as the authoritative setup brief for putiorr.
+              </p>
+            </div>
+            <div class="doc-panel">
+              <h3>Operating rules</h3>
+              <p>
+                Do the setup with the user, not by guessing their storage or
+                secrets. The stable defaults are one putiorr service, one
+                persistent config mount, and one shared download target mounted
+                at <code>/downloads</code> inside putiorr and every *arr app.
+              </p>
+              <ul>
+                <li>Never ask the user to paste a put.io token into chat unless they explicitly choose that path. Prefer browser OAuth or let the user paste a direct token into the putiorr UI.</li>
+                <li>Do not add custom Remote Path Mapping when the same host download folder can be mounted at the same container path.</li>
+                <li>Do not use local development port remaps such as <code>17010:9091</code> unless the user explicitly wants that host port.</li>
+                <li>Keep the putiorr service on the same Docker network as Radarr, Sonarr, and Lidarr so the *arr apps can use host <code>putiorr</code> and port <code>9091</code>.</li>
+                <li>After editing Compose or app settings, run the validation checklist and report exactly what passed or what remains blocked.</li>
+              </ul>
+            </div>
+          </section>
+
+          <section id="inputs" class="doc-section">
+            <h2>Inputs to collect</h2>
+            <p>
+              Ask for these values or inspect them from the user's existing
+              Compose files before editing anything.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Input</th>
+                    <th>Default or example</th>
+                    <th>Why it matters</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Compose project path</td>
+                    <td><code>docker-compose.yml</code></td>
+                    <td>Where the putiorr service and shared network should be added.</td>
+                  </tr>
+                  <tr>
+                    <td>*arr service names</td>
+                    <td><code>radarr</code>, <code>sonarr</code>, <code>lidarr</code></td>
+                    <td>Confirms which apps need profiles and download-client values.</td>
+                  </tr>
+                  <tr>
+                    <td>putiorr config host path</td>
+                    <td><code>/volume1/docker/putiorr-config</code></td>
+                    <td>Stores SQLite state and UI-saved put.io credentials.</td>
+                  </tr>
+                  <tr>
+                    <td>Download target host path</td>
+                    <td><code>/volume/downloads</code></td>
+                    <td>Must be mounted into putiorr and each *arr app at <code>/downloads</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>Media library host paths</td>
+                    <td><code>/volume/media/movies</code>, <code>/volume/media/series</code>, <code>/volume/media/music</code></td>
+                    <td>Final import locations for Radarr, Sonarr, and Lidarr.</td>
+                  </tr>
+                  <tr>
+                    <td>put.io auth method</td>
+                    <td>Hosted OAuth relay or Direct Token</td>
+                    <td>Determines whether the user connects through the browser flow or pastes a token in the UI.</td>
+                  </tr>
+                  <tr>
+                    <td>RPC auth</td>
+                    <td>Unset by default</td>
+                    <td>If set, the same username and password must be entered in each *arr download client.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section id="compose" class="doc-section">
+            <h2>Compose changes</h2>
+            <p>
+              Add putiorr beside the existing *arr services, or attach it to the
+              same external Docker network. A published port is optional for
+              browser access and is not required for container-to-container RPC.
+            </p>
+            <pre><code>services:
+  putiorr:
+    image: ghcr.io/ptheofan/putiorr:latest
+    restart: unless-stopped
+    environment:
+      TZ: Europe/Athens
+      PUTIORR_LISTEN_HOST: 0.0.0.0
+      PUTIORR_LISTEN_PORT: 9091
+      PUTIORR_STATE_PATH: /data/putiorr-config/putiorr.sqlite
+      PUTIORR_TARGET_DIR: /downloads
+      PUTIORR_PROFILES_JSON: >-
+        [
+          {
+            "name": "Radarr",
+            "type": "radarr",
+            "slug": "radarr",
+            "putio_folder_name": "putiorr",
+            "downloadAt": "/downloads",
+            "rpc_path": "/radarr/transmission/rpc",
+            "enabled": true
+          },
+          {
+            "name": "Sonarr",
+            "type": "sonarr",
+            "slug": "sonarr",
+            "putio_folder_name": "putiorr",
+            "downloadAt": "/downloads",
+            "rpc_path": "/sonarr/transmission/rpc",
+            "enabled": true
+          },
+          {
+            "name": "Lidarr",
+            "type": "lidarr",
+            "slug": "lidarr",
+            "putio_folder_name": "putiorr",
+            "downloadAt": "/downloads",
+            "rpc_path": "/lidarr/transmission/rpc",
+            "enabled": true
+          }
+        ]
+      PUTIORR_WORKERS: "4"
+      PUTIORR_CLEANUP_REMOTE_FILES: "true"
+    volumes:
+      - /volume1/docker/putiorr-config:/data/putiorr-config
+      - /volume/downloads:/downloads</code></pre>
+            <p>
+              Make sure each importer also has the same download target mount.
+              The left side may change for the user's host, but the right side
+              should stay <code>/downloads</code> everywhere.
+            </p>
+            <pre><code>services:
+  radarr:
+    volumes:
+      - /volume/downloads:/downloads
+      - /volume/media/movies:/movies
+
+  sonarr:
+    volumes:
+      - /volume/downloads:/downloads
+      - /volume/media/series:/series
+
+  lidarr:
+    volumes:
+      - /volume/downloads:/downloads
+      - /volume/media/music:/music</code></pre>
+          </section>
+
+          <section id="seed-json" class="doc-section">
+            <h2>Initial JSON setup</h2>
+            <p>
+              Use <code>PUTIORR_PROFILES_JSON</code> to create the initial RR
+              profiles automatically on first startup, so the user does not have
+              to create Radarr, Sonarr, and Lidarr profiles in the UI.
+            </p>
+            <div class="doc-panel">
+              <h3>Important behavior</h3>
+              <ul>
+                <li>The value must be a valid JSON array, usually embedded in Compose as a YAML folded scalar with <code>&gt;-</code>.</li>
+                <li>putiorr reads it from the <code>putiorr</code> service environment when the container starts.</li>
+                <li>The seed runs only when there are no existing RR profiles in the SQLite state database.</li>
+                <li>A default download profile is created automatically, and seeded RR profiles attach to it unless <code>download_profile_id</code> is supplied.</li>
+                <li>Use absolute container paths such as <code>/downloads</code>. Do not seed host paths such as <code>/volume/downloads</code> into profile <code>downloadAt</code>.</li>
+              </ul>
+            </div>
+            <pre><code>PUTIORR_PROFILES_JSON: &gt;-
+  [
+    {
+      "name": "Radarr",
+      "type": "radarr",
+      "slug": "radarr",
+      "putio_folder_name": "putiorr",
+      "downloadAt": "/downloads",
+      "rpc_path": "/radarr/transmission/rpc",
+      "enabled": true
+    },
+    {
+      "name": "Sonarr",
+      "type": "sonarr",
+      "slug": "sonarr",
+      "putio_folder_name": "putiorr",
+      "downloadAt": "/downloads",
+      "rpc_path": "/sonarr/transmission/rpc",
+      "enabled": true
+    },
+    {
+      "name": "Lidarr",
+      "type": "lidarr",
+      "slug": "lidarr",
+      "putio_folder_name": "putiorr",
+      "downloadAt": "/downloads",
+      "rpc_path": "/lidarr/transmission/rpc",
+      "enabled": true
+    }
+  ]</code></pre>
+            <p>
+              The profile fields map directly to the startup seed:
+              <code>name</code> is the UI display name, <code>type</code> and
+              <code>slug</code> identify the app, <code>putio_folder_name</code>
+              is the put.io folder, <code>downloadAt</code> is the container
+              download target, and <code>rpc_path</code> is the endpoint used by
+              the matching *arr app.
+            </p>
+            <p class="doc-note">
+              If the user already has a populated SQLite state database, do not
+              assume changing <code>PUTIORR_PROFILES_JSON</code> will update
+              existing profiles. Use the UI or the profile API instead.
+            </p>
+          </section>
+
+          <section id="profiles" class="doc-section">
+            <h2>putiorr profiles</h2>
+            <p>
+              After the container starts, open the putiorr UI and confirm the
+              seeded RR profiles. If seed JSON was not used, create one profile
+              per importer. The UI's field guide should be used to confirm paths
+              before saving.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Profile field</th>
+                    <th>Radarr</th>
+                    <th>Sonarr</th>
+                    <th>Lidarr</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>App preset</td>
+                    <td>Radarr</td>
+                    <td>Sonarr</td>
+                    <td>Lidarr</td>
+                  </tr>
+                  <tr>
+                    <td>Display name</td>
+                    <td>Radarr</td>
+                    <td>Sonarr</td>
+                    <td>Lidarr</td>
+                  </tr>
+                  <tr>
+                    <td>Put.io destination folder</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Shared download folder</td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/downloads</code></td>
+                  </tr>
+                  <tr>
+                    <td>RPC endpoint path</td>
+                    <td><code>/radarr/transmission/rpc</code></td>
+                    <td><code>/sonarr/transmission/rpc</code></td>
+                    <td><code>/lidarr/transmission/rpc</code></td>
+                  </tr>
+                  <tr>
+                    <td>Host from *arr container</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Port</td>
+                    <td><code>9091</code></td>
+                    <td><code>9091</code></td>
+                    <td><code>9091</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="doc-note">
+              Link each RR profile to a download profile after creating custom
+              download profiles. The default download profile is acceptable for
+              a first setup.
+            </p>
+          </section>
+
+          <section id="arr-values" class="doc-section">
+            <h2>*arr download-client values</h2>
+            <p>
+              Add a Transmission download client in Radarr, Sonarr, and Lidarr.
+              The Name can be <code>putiorr</code>; the Host is the Docker
+              service name <code>putiorr</code> when containers share a network.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>Radarr</th>
+                    <th>Sonarr</th>
+                    <th>Lidarr</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Name</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Host</td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                    <td><code>putiorr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Port</td>
+                    <td><code>9091</code></td>
+                    <td><code>9091</code></td>
+                    <td><code>9091</code></td>
+                  </tr>
+                  <tr>
+                    <td>Use SSL</td>
+                    <td>Off</td>
+                    <td>Off</td>
+                    <td>Off</td>
+                  </tr>
+                  <tr>
+                    <td>Category</td>
+                    <td><code>radarr</code></td>
+                    <td><code>sonarr</code></td>
+                    <td><code>lidarr</code></td>
+                  </tr>
+                  <tr>
+                    <td>Directory</td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/downloads</code></td>
+                    <td><code>/downloads</code></td>
+                  </tr>
+                  <tr>
+                    <td>URL Base</td>
+                    <td><code>/radarr/transmission</code></td>
+                    <td><code>/sonarr/transmission</code></td>
+                    <td><code>/lidarr/transmission</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Keep Completed Download Handling enabled. Prowlarr usually does
+              not need its own putiorr profile because Radarr, Sonarr, and
+              Lidarr send accepted grabs to putiorr.
+            </p>
+          </section>
+
+          <section id="validation" class="doc-section">
+            <h2>Validation</h2>
+            <ul>
+              <li>Run <code>docker compose ps</code> and confirm putiorr and the *arr apps are healthy.</li>
+              <li>Open the putiorr UI and confirm put.io is connected.</li>
+              <li>Confirm the seeded profiles exist with <code>GET /api/profiles</code> or in the UI before configuring the *arr apps.</li>
+              <li>Use each *arr app's download-client Test button. A host lookup failure usually means the containers do not share a Docker network.</li>
+              <li>Confirm the *arr app sees Directory <code>/downloads</code> and Category <code>radarr</code>, <code>sonarr</code>, or <code>lidarr</code>.</li>
+              <li>Trigger a small grab and verify the putiorr dashboard shows remote transfer progress, then local download progress.</li>
+              <li>Confirm completed files appear under <code>/downloads/&lt;category&gt;</code> from inside the relevant *arr container.</li>
+            </ul>
+          </section>
+
+          <section id="troubleshooting" class="doc-section">
+            <h2>Troubleshooting</h2>
+            <div class="doc-card-grid">
+              <article class="doc-card">
+                <h3>*arr cannot connect</h3>
+                <p>Check that putiorr and the *arr container share a Docker network. Use Host <code>putiorr</code>, Port <code>9091</code>, and SSL off.</p>
+              </article>
+              <article class="doc-card">
+                <h3>Import cannot find files</h3>
+                <p>Check path identity first. The same host folder must be mounted as <code>/downloads</code> in putiorr and the importer.</p>
+              </article>
+              <article class="doc-card">
+                <h3>OAuth is blocked</h3>
+                <p>Use the Direct Token tab in the putiorr UI, or configure a self-hosted callback with <code>PUTIORR_PUBLIC_URL</code>.</p>
+              </article>
+            </div>
+          </section>
+
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="documentation.html">Docs</a>
+        <a href="setup.html">Setup</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+
+    <script>
+      document.querySelectorAll("[data-copy-target]").forEach((button) => {
+        button.addEventListener("click", async () => {
+          const target = document.getElementById(button.dataset.copyTarget);
+          const status = document.getElementById(button.dataset.copyStatus);
+          if (!target) return;
+
+          const text = target.textContent.trim();
+          const label = button.querySelector("span");
+          const originalLabel = label ? label.textContent : button.textContent.trim();
+          const copyWithFallback = () => {
+            const textarea = document.createElement("textarea");
+            textarea.value = text;
+            textarea.setAttribute("readonly", "");
+            textarea.style.position = "fixed";
+            textarea.style.top = "-1000px";
+            document.body.appendChild(textarea);
+            textarea.focus({ preventScroll: true });
+            textarea.select();
+            textarea.setSelectionRange(0, textarea.value.length);
+            const copied = document.execCommand("copy");
+            textarea.remove();
+            if (!copied) throw new Error("copy command failed");
+          };
+
+          try {
+            if (navigator.clipboard && window.isSecureContext) {
+              try {
+                await navigator.clipboard.writeText(text);
+              } catch (error) {
+                copyWithFallback();
+              }
+            } else {
+              copyWithFallback();
+            }
+
+            if (label) label.textContent = "Copied";
+            if (status) status.textContent = "Agent brief copied to clipboard.";
+          } catch (error) {
+            if (status) status.textContent = "Copy failed. Select the brief text manually.";
+          }
+
+          window.setTimeout(() => {
+            if (label) label.textContent = originalLabel;
+            if (status) status.textContent = "";
+          }, 2200);
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="putiorr is a stable put.io bridge that presents a Transmission RPC interface for Sonarr, Radarr, Lidarr, Prowlarr, and the rest of the *arr family.">
+    <title>putiorr - put.io bridge for the *arr family</title>
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero section">
+        <div class="hero-copy">
+          <h1>putiorr</h1>
+          <p class="hero-lede">A stable put.io bridge for the *arr family.</p>
+          <p>
+            putiorr presents a Transmission-compatible RPC endpoint to Sonarr, Radarr,
+            Lidarr, Readarr, Prowlarr, and similar apps, then copies completed put.io
+            files into the download target your importers already know.
+          </p>
+          <div class="hero-actions" aria-label="Primary actions">
+            <a class="button primary" href="https://github.com/ptheofan/putiorr">
+              <svg class="fill-icon" aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.77.6-3.35-1.18-3.35-1.18a2.64 2.64 0 0 0-1.1-1.45c-.9-.62.07-.61.07-.61a2.1 2.1 0 0 1 1.53 1.03 2.13 2.13 0 0 0 2.91.83 2.13 2.13 0 0 1 .63-1.34c-2.21-.25-4.54-1.1-4.54-4.92a3.85 3.85 0 0 1 1.03-2.67 3.58 3.58 0 0 1 .1-2.64s.84-.27 2.75 1.02A9.46 9.46 0 0 1 12 6.04c.85 0 1.7.11 2.5.34 1.9-1.29 2.74-1.02 2.74-1.02.37.84.4 1.78.1 2.64a3.84 3.84 0 0 1 1.02 2.67c0 3.83-2.33 4.67-4.55 4.91.36.31.68.92.68 1.86v2.76c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"></path>
+              </svg>
+              View on GitHub
+            </a>
+            <a class="button secondary" href="setup.html">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M4.75 5.75A2.75 2.75 0 0 1 7.5 3h11.75v15.25H7.5a2.75 2.75 0 1 0 0 5.5h11.75M7.5 18.25h11.75M7.5 14.25h8.75"></path>
+              </svg>
+              Read setup guide
+            </a>
+          </div>
+          <div class="capability-strip" aria-label="Core capabilities">
+            <div>
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M7 7.5a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm10-4a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm0 11a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM9.7 8.78l4.6-2.06M9.74 12.15l4.52 2.7"></path>
+              </svg>
+              <span>Transmission-compatible RPC</span>
+            </div>
+            <div>
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M7.75 11V8.25a4.25 4.25 0 0 1 8.5 0V11M5.75 11h12.5v9.25H5.75V11Z"></path>
+              </svg>
+              <span>put.io OAuth</span>
+            </div>
+            <div>
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M6 7.5h12M8 12h8M10 16.5h4M7.75 4v7M16.25 13v7"></path>
+              </svg>
+              <span>RR profiles and routing</span>
+            </div>
+            <div>
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M4.75 7.25h5.5l2 2h7v8.5h-14.5V7.25Z"></path>
+              </svg>
+              <span>Completed-download handling</span>
+            </div>
+          </div>
+        </div>
+
+        <figure class="hero-screen" aria-label="putiorr dashboard preview">
+          <div class="live-topbar">
+            <div class="live-brand">
+              <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="48" height="48">
+              <div>
+                <strong>putiorr</strong>
+                <span>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</span>
+              </div>
+            </div>
+            <span class="status-pill"><i></i>Put.io</span>
+          </div>
+
+          <div class="live-panel">
+            <div class="live-panel-head">
+              <div>
+                <strong>RR profiles</strong>
+                <span>Use the setup wizard to create one profile per app.</span>
+              </div>
+              <span class="mini-button">Setup profile</span>
+            </div>
+            <div class="live-card-row">
+              <article class="live-profile-card">
+                <div class="live-card-title"><span>Radarr</span><b>Enabled</b></div>
+                <strong>Radarr</strong>
+                <p>Imports to /movies.</p>
+                <dl class="live-facts">
+                  <div><dt>Put.io</dt><dd>putiorr</dd></div>
+                  <div><dt>Download</dt><dd>/downloads</dd></div>
+                  <div><dt>RPC</dt><dd>/radarr/transmission/rpc</dd></div>
+                </dl>
+              </article>
+              <article class="live-profile-card">
+                <div class="live-card-title"><span>Sonarr</span><b>Enabled</b></div>
+                <strong>Sonarr</strong>
+                <p>Imports to /series.</p>
+                <dl class="live-facts">
+                  <div><dt>Put.io</dt><dd>putiorr</dd></div>
+                  <div><dt>Download</dt><dd>/downloads</dd></div>
+                  <div><dt>RPC</dt><dd>/sonarr/transmission/rpc</dd></div>
+                </dl>
+              </article>
+            </div>
+          </div>
+
+          <div class="live-preview-grid">
+            <div class="live-panel compact-live-panel">
+              <div class="live-panel-head">
+                <div>
+                  <strong>Download profiles</strong>
+                  <span>Tune slow-speed reset by download shape.</span>
+                </div>
+                <span class="mini-button">Add profile</span>
+              </div>
+              <div class="policy-row"><span>Default</span><b>100 MB/s</b><em>120s</em></div>
+            </div>
+            <div class="live-panel compact-live-panel">
+              <div class="live-panel-head">
+                <div>
+                  <strong>Current downloads</strong>
+                  <span>Combined put.io and local transfer state.</span>
+                </div>
+              </div>
+              <div class="live-empty">No active downloads yet. Progress appears here.</div>
+            </div>
+          </div>
+        </figure>
+      </section>
+
+      <section class="flow section" aria-labelledby="flow-title">
+        <h2 id="flow-title">How the bridge works</h2>
+        <div class="flow-steps">
+          <article>
+            <img src="icons/putio-app-icon.png?v=showcase" alt="" width="56" height="56">
+            <h3>1. put.io</h3>
+            <p>Remote transfers are created and prepared in put.io.</p>
+          </article>
+          <article>
+            <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="56" height="56">
+            <h3>2. putiorr</h3>
+            <p>RPC requests look like Transmission to your *arr apps.</p>
+          </article>
+          <article>
+            <span class="flow-icon">Target</span>
+            <h3>3. Download target</h3>
+            <p>Completed files are copied to a shared local target.</p>
+          </article>
+          <article>
+            <span class="flow-icon">*arr</span>
+            <h3>4. Import</h3>
+            <p>Completed-download handling imports from the same mounted path.</p>
+          </article>
+          <article>
+            <span class="flow-icon media-icon" aria-hidden="true"></span>
+            <h3>5. Library</h3>
+            <p>Your media ends up organized in the normal library folders.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section screenshots" aria-labelledby="screenshots-title">
+        <div class="section-head">
+          <h2 id="screenshots-title">Dashboard screenshots</h2>
+          <p>Current putiorr uses a topbar, clear profile cards, panel actions, and focused empty states.</p>
+        </div>
+        <figure class="dashboard-capture">
+          <img src="screenshots/dashboard-overview.png" alt="putiorr dashboard showing RR profile cards, download profile controls, and current downloads panel.">
+        </figure>
+        <div class="connection-showcase">
+          <div class="connection-copy">
+            <h3>Connect with OAuth or token</h3>
+            <p>
+              The Put.io connection dialog keeps the default OAuth relay path simple,
+              while still allowing a direct token paste or rotation when that fits the install.
+            </p>
+            <ul>
+              <li>OAuth starts from the browser with hosted relay defaults.</li>
+              <li>Direct Token supports paste-and-save for manual or rotated credentials.</li>
+              <li>Connection testing stays disabled until credentials are present.</li>
+            </ul>
+          </div>
+          <div class="connection-captures">
+            <figure class="connection-capture">
+              <img src="screenshots/putio-oauth-connection.png" alt="putiorr Put.io connection dialog showing the OAuth tab and Connect with put.io action.">
+              <figcaption>Put.io OAuth</figcaption>
+            </figure>
+            <figure class="connection-capture">
+              <img src="screenshots/putio-token-connection.png" alt="putiorr Put.io connection dialog showing the Direct Token tab and token input.">
+              <figcaption>Direct Token</figcaption>
+            </figure>
+          </div>
+        </div>
+        <div class="guided-setup">
+          <div class="guided-copy">
+            <h3>Profile setup is guided</h3>
+            <p>
+              The setup wizard explains the field you are editing, keeps app-specific
+              defaults aligned, and shows the final category folder before you save.
+            </p>
+            <ul>
+              <li>Semantic Field Guide changes with the selected input.</li>
+              <li>Computed values make shared download paths easy to verify.</li>
+              <li>Copy settings gives each *arr app the matching client values.</li>
+            </ul>
+          </div>
+          <figure class="wizard-capture">
+            <img src="screenshots/profile-wizard-guidance.png" alt="putiorr profile setup wizard showing semantic field help for the shared download folder and the computed final category folder.">
+          </figure>
+        </div>
+        <div class="download-profile-showcase">
+          <div class="download-profile-copy">
+            <h3>Download profiles tune each use case</h3>
+            <p>
+              Download profiles let each media shape use the right slow-speed reset
+              policy, keeping large copies patient and small imports responsive.
+            </p>
+            <ul>
+              <li>Startup grace gives large transfers time to reach normal throughput.</li>
+              <li>Ignore-below rules keep tiny files from distorting reset behavior.</li>
+              <li>Slow threshold and duration can match movies, episodes, music, or books.</li>
+            </ul>
+          </div>
+          <figure class="download-profile-capture">
+            <img src="screenshots/download-profile-performance.png" alt="putiorr download profile modal showing startup grace, ignore-below, duration, slow threshold, and semantic field guidance.">
+          </figure>
+        </div>
+        <div class="link-profile-showcase">
+          <div class="link-profile-copy">
+            <h3>Easy to link RR profiles to download profiles</h3>
+            <p>
+              The link dialog keeps every app-to-policy mapping in one place, so
+              each RR profile can use the local-copy behavior that matches its workload.
+            </p>
+            <ul>
+              <li>Each RR profile shows its app name and RPC path beside the selector.</li>
+              <li>Download profile choices stay explicit per Radarr, Sonarr, Lidarr, and beyond.</li>
+              <li>Bulk save keeps profile assignments consistent across the stack.</li>
+            </ul>
+          </div>
+          <figure class="link-profile-capture">
+            <img src="screenshots/link-rr-download-profiles.png" alt="putiorr Link RR profiles modal showing Radarr, Sonarr, and Lidarr assigned to the Default download profile.">
+          </figure>
+        </div>
+        <div class="sonarr-config-showcase">
+          <div class="sonarr-config-copy">
+            <h3>Paste the generated client values into Sonarr</h3>
+            <p>
+              Sonarr sees putiorr as a Transmission download client. When both
+              containers share a Docker Compose network, the Host can be the
+              putiorr service name.
+            </p>
+            <ul>
+              <li>Name and Host can both be <code>putiorr</code> inside the compose network.</li>
+              <li>Port <code>9091</code> and Category <code>sonarr</code> match the Sonarr RR profile defaults.</li>
+              <li>Completed Download Handling can remove imported items from the client history.</li>
+            </ul>
+          </div>
+          <figure class="sonarr-config-capture">
+            <img src="screenshots/sonarr-download-client-config.png" alt="Sonarr Transmission download client configuration showing putiorr as the host, port 9091, category sonarr, and completed download handling enabled.">
+          </figure>
+        </div>
+      </section>
+
+      <section class="section reliability" aria-labelledby="reliability-title">
+        <h2 id="reliability-title">Built for reliable imports</h2>
+        <div class="feature-grid">
+          <article>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3.5 5.75 6v5.5c0 4.1 2.55 7.54 6.25 8.95 3.7-1.41 6.25-4.85 6.25-8.95V6L12 3.5Z"></path></svg>
+            <h3>Durable queue state</h3>
+            <p>SQLite state keeps the bridge steady across restarts.</p>
+          </article>
+          <article>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7.75 11V8.25a4.25 4.25 0 0 1 8.5 0V11M5.75 11h12.5v9.25H5.75V11Z"></path></svg>
+            <h3>Secure OAuth flow</h3>
+            <p>The static relay only returns the token to the user's putiorr instance.</p>
+          </article>
+          <article>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 7.5h12M8 12h8M10 16.5h4M7.75 4v7M16.25 13v7"></path></svg>
+            <h3>Flexible routing</h3>
+            <p>Profiles map each app to its own RPC path and category.</p>
+          </article>
+          <article>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5.75 16.25h12.5M8 19.25h8M6.75 5.75h10.5v10.5H6.75V5.75Z"></path></svg>
+            <h3>Shared download target</h3>
+            <p>Mount the same host folder at the same container path everywhere.</p>
+          </article>
+          <article>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5.5 12.5 9.5 16.5 18.5 7.5"></path></svg>
+            <h3>Safe cleanup</h3>
+            <p>Delete-local-data and remote cleanup are handled intentionally.</p>
+          </article>
+          <article>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4.75 12a7.25 7.25 0 0 1 12.38-5.13L19.25 9M19.25 4.75V9h-4.25M19.25 12a7.25 7.25 0 0 1-12.38 5.13L4.75 15M4.75 19.25V15H9"></path></svg>
+            <h3>Resumable local copies</h3>
+            <p>Partial files resume with range requests after restarts.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section setup" aria-labelledby="setup-title">
+        <div>
+          <h2 id="setup-title">Setup in minutes</h2>
+          <p>Run putiorr near your *arr stack, share one download target mount, and point each app at its matching Transmission URL base.</p>
+        </div>
+        <div class="setup-layout">
+          <pre><code>services:
+  putiorr:
+    image: ghcr.io/ptheofan/putiorr:latest
+    restart: unless-stopped
+    volumes:
+      - /volume1/docker/putiorr-config:/data/putiorr-config
+      - /volume/downloads:/downloads</code></pre>
+          <ol>
+            <li>Create persistent config and download target folders.</li>
+            <li>Start the container on the same Docker network as your *arr stack.</li>
+            <li>Mount the download target into putiorr and each *arr app at the same path, such as <code>/downloads</code>.</li>
+            <li>Connect put.io with OAuth or a direct token.</li>
+            <li>Create one RR profile per app.</li>
+            <li>Paste the Transmission host, port, category, and URL base into each app.</li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="relay-callout section" aria-label="OAuth relay">
+        <div>
+          <h2>OAuth relay remains available</h2>
+          <p>The hosted relay page is still the dedicated browser handoff for put.io OAuth flows.</p>
+        </div>
+        <a class="button secondary" href="putio-oauth-relay.html">Open OAuth relay</a>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="agent-setup.html">Agent guide</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+  </body>
+</html>

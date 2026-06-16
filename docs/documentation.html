@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="putiorr documentation for setup, profile routing, put.io connection, and *arr download-client configuration.">
+    <title>putiorr documentation</title>
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="doc-hero section">
+        <p class="doc-kicker">Documentation</p>
+        <h1>Run putiorr as the Transmission bridge for your *arr stack.</h1>
+        <p>
+          These pages cover the production container shape, the shared download
+          target, put.io connection options, RR profiles, download profiles, and
+          the exact download-client values to paste into Radarr, Sonarr, and Lidarr.
+        </p>
+      </section>
+
+      <section class="section doc-section" aria-labelledby="docs-guides">
+        <h2 id="docs-guides">Guides</h2>
+        <div class="doc-card-grid">
+          <a class="doc-card" href="setup.html">
+            <h2>Setup Guide</h2>
+            <p>Prepare persistent storage, run the GHCR image, connect put.io, and mount the shared download target into every importer.</p>
+            <span>Open setup guide</span>
+          </a>
+          <a class="doc-card" href="configuration.html">
+            <h2>Configuration Guide</h2>
+            <p>Create RR profiles, tune download profiles, and configure Radarr, Sonarr, Lidarr, and Prowlarr with the matching RPC paths.</p>
+            <span>Open configuration guide</span>
+          </a>
+          <a class="doc-card" href="agent-setup.html">
+            <h2>AI Agent Guide</h2>
+            <p>Share one URL with Codex or another assistant so it can inspect the user's stack, collect missing inputs, install putiorr, and validate the setup.</p>
+            <span>Open agent guide</span>
+          </a>
+          <a class="doc-card" href="putio-oauth-relay.html">
+            <h2>OAuth Relay</h2>
+            <p>Use the static relay page as the browser handoff for hosted put.io OAuth authorization.</p>
+            <span>Open OAuth relay</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="section doc-section" aria-labelledby="docs-basics">
+        <h2 id="docs-basics">Core model</h2>
+        <div class="doc-panel">
+          <p>
+            putiorr pretends to be Transmission for the *arr side, sends
+            magnet and torrent grabs to put.io, then downloads completed put.io
+            files into a local download target. Completed-download handling in
+            Radarr, Sonarr, Lidarr, and similar apps then imports from that
+            same mounted path into the normal media libraries.
+          </p>
+          <pre><code>put.io -> putiorr -> shared download target -> *arr import -> media library</code></pre>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="setup.html">Setup</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="agent-setup.html">Agent guide</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+  </body>
+</html>
