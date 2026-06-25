@@ -1180,6 +1180,9 @@ test('web API exposes settings and profile CRUD', async (t) => {
       putio_folder_name: 'radarr',
       downloadAt: path.join(harness.config.targetDir, 'movies'),
       rpc_path: '/radarr/transmission/rpc',
+      clientHost: '127.0.0.1',
+      clientPort: new URL(harness.url).port,
+      clientUseSsl: false,
       enabled: true,
     }),
   });
@@ -1188,15 +1191,37 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(profile.name, 'Radarr');
   assert.equal(profile.downloadAt, path.join(harness.config.targetDir, 'movies'));
   assert.equal(profile.download_profile_id, movieDownloadProfile.id);
+  assert.equal(profile.client_host, '127.0.0.1');
+  assert.equal(profile.client_port, new URL(harness.url).port);
+  assert.equal(profile.client_use_ssl, false);
   assert.equal(Object.hasOwn(profile, 'local_path'), false);
+
+  const testClientSettings = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles/test-client-settings'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+  assert.equal(testClientSettings.status, 200);
+  const testClientSettingsBody = await testClientSettings.json();
+  assert.equal(testClientSettingsBody.ok, true);
+  assert.equal(testClientSettingsBody.testedRpcPath, true);
 
   const update = await fetch(harness.url.replace('/transmission/rpc', `/api/profiles/${profile.id}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enabled: false }),
+    body: JSON.stringify({
+      client_host: 'putiorr',
+      client_port: '9091',
+      client_use_ssl: false,
+      enabled: false,
+    }),
   });
   assert.equal(update.status, 200);
-  assert.equal((await update.json()).enabled, false);
+  const updated = await update.json();
+  assert.equal(updated.client_host, 'putiorr');
+  assert.equal(updated.client_port, '9091');
+  assert.equal(updated.client_use_ssl, false);
+  assert.equal(updated.enabled, false);
 });
 
 test('web API stores and resets put.io OAuth setting overrides', async (t) => {

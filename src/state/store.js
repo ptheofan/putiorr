@@ -56,12 +56,21 @@ function normalizeFileRow(row) {
 function normalizeProfileRow(row) {
   if (!row) return undefined;
   const downloadAt = row.download_at ?? row.local_path;
-  const { local_path: _localPath, download_at: _downloadAt, ...rest } = row;
+  const {
+    local_path: _localPath,
+    download_at: _downloadAt,
+    client_use_ssl: clientUseSsl,
+    ...rest
+  } = row;
   return {
     ...rest,
     download_at: downloadAt,
     downloadAt,
     downloadProfileId: row.download_profile_id,
+    client_use_ssl: toBool(clientUseSsl),
+    clientHost: row.client_host,
+    clientPort: row.client_port,
+    clientUseSsl: toBool(clientUseSsl),
     enabled: toBool(row.enabled),
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -96,6 +105,18 @@ function profileDownloadProfileId(input) {
   if (input.download_profile_id !== undefined) return input.download_profile_id;
   if (input.downloadProfileId !== undefined) return input.downloadProfileId;
   return undefined;
+}
+
+function profileClientHost(input) {
+  return input.client_host ?? input.clientHost;
+}
+
+function profileClientPort(input) {
+  return input.client_port ?? input.clientPort;
+}
+
+function profileClientUseSsl(input) {
+  return input.client_use_ssl ?? input.clientUseSsl;
 }
 
 function normalizeOptionalId(value) {
@@ -226,6 +247,9 @@ export class StateStore {
     `);
     this.migrateProfileDownloadAt();
     this.ensureColumn('profiles', 'download_profile_id', 'INTEGER REFERENCES download_profiles(id) ON DELETE SET NULL');
+    this.ensureColumn('profiles', 'client_host', "TEXT NOT NULL DEFAULT 'putiorr'");
+    this.ensureColumn('profiles', 'client_port', "TEXT NOT NULL DEFAULT '9091'");
+    this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
     this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     this.migrateMagnetTransferHashes();
@@ -440,9 +464,9 @@ export class StateStore {
     const result = this.db.prepare(`
       INSERT INTO profiles (
         name, type, slug, download_profile_id, putio_folder_name, putio_folder_id,
-        download_at, rpc_path, enabled, created_at, updated_at
+        download_at, rpc_path, client_host, client_port, client_use_ssl, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.name,
       input.type ?? 'custom',
@@ -452,6 +476,9 @@ export class StateStore {
       input.putio_folder_id ?? null,
       profileDownloadAt(input),
       input.rpc_path,
+      profileClientHost(input) ?? 'putiorr',
+      profileClientPort(input) ?? '9091',
+      profileClientUseSsl(input) ? 1 : 0,
       input.enabled === false ? 0 : 1,
       timestamp,
       timestamp,
@@ -469,6 +496,12 @@ export class StateStore {
     if (nextDownloadProfileId !== undefined) {
       normalizedPatch.download_profile_id = nextDownloadProfileId == null ? null : normalizeOptionalId(nextDownloadProfileId);
     }
+    const nextClientHost = profileClientHost(patch);
+    if (nextClientHost !== undefined) normalizedPatch.client_host = nextClientHost;
+    const nextClientPort = profileClientPort(patch);
+    if (nextClientPort !== undefined) normalizedPatch.client_port = nextClientPort;
+    const nextClientUseSsl = profileClientUseSsl(patch);
+    if (nextClientUseSsl !== undefined) normalizedPatch.client_use_ssl = nextClientUseSsl;
     const allowed = [
       'name',
       'type',
@@ -478,12 +511,17 @@ export class StateStore {
       'putio_folder_id',
       'download_at',
       'rpc_path',
+      'client_host',
+      'client_port',
+      'client_use_ssl',
       'enabled',
     ];
     const keys = allowed.filter((key) => Object.hasOwn(normalizedPatch, key));
     if (keys.length === 0) return existing;
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
-    const values = keys.map((key) => (key === 'enabled' ? (normalizedPatch[key] ? 1 : 0) : normalizedPatch[key]));
+    const values = keys.map((key) => (
+      key === 'enabled' || key === 'client_use_ssl' ? (normalizedPatch[key] ? 1 : 0) : normalizedPatch[key]
+    ));
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE profiles SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
     return this.findProfileById(id);
