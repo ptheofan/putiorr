@@ -81,6 +81,7 @@ const el = {
   profileWizardMessage: document.querySelector('#profileWizardMessage'),
   saveProfileButton: document.querySelector('#saveProfileButton'),
   deleteProfileButton: document.querySelector('#deleteProfileButton'),
+  testClientSettingsButton: document.querySelector('#testClientSettingsButton'),
   copyClientSettingsButton: document.querySelector('#copyClientSettingsButton'),
   downloadProfileDialog: document.querySelector('#downloadProfileDialog'),
   downloadProfileForm: document.querySelector('#downloadProfileForm'),
@@ -1032,9 +1033,9 @@ function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE))
   el.wizardDownloadAt.value = profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder();
   renderDownloadProfileOptions(profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId());
   el.wizardRpcPath.value = profile.rpc_path || defaultRpcPathForType(type);
-  el.wizardClientHost.value = DEFAULT_CLIENT_HOST;
-  el.wizardClientPort.value = DEFAULT_CLIENT_PORT;
-  el.wizardUseSsl.checked = false;
+  el.wizardClientHost.value = profile.client_host ?? profile.clientHost ?? DEFAULT_CLIENT_HOST;
+  el.wizardClientPort.value = profile.client_port ?? profile.clientPort ?? DEFAULT_CLIENT_PORT;
+  el.wizardUseSsl.checked = Boolean(profile.client_use_ssl ?? profile.clientUseSsl);
   el.wizardEnabled.checked = profile.enabled !== false;
   el.deleteProfileButton.hidden = !isExisting;
   el.saveProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
@@ -1132,16 +1133,19 @@ function getWizardPayload() {
     downloadAt: el.wizardDownloadAt.value.trim(),
     download_profile_id: numericSelectValue(el.wizardDownloadProfile.value),
     rpc_path: normalizeRpcPath(el.wizardRpcPath.value),
+    client_host: el.wizardClientHost.value.trim() || DEFAULT_CLIENT_HOST,
+    client_port: el.wizardClientPort.value.trim(),
+    client_use_ssl: el.wizardUseSsl.checked,
     enabled: el.wizardEnabled.checked,
   };
 }
 
-async function saveProfileFromWizard() {
+async function saveProfileFromWizard({ close = true, showMessage = true } = {}) {
   const id = el.wizardProfileId.value;
   const payload = getWizardPayload();
   if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || !payload.rpc_path) {
     setWizardMessage('Profile name, put.io folder, download folder, and RPC endpoint are required.', 'error');
-    return;
+    return undefined;
   }
 
   el.saveProfileButton.disabled = true;
@@ -1158,12 +1162,36 @@ async function saveProfileFromWizard() {
     upsertProfileState(savedProfile);
     renderProfiles();
     renderDownloadProfiles();
-    closeProfileWizard();
-    setMessage('Profile saved.', 'ok');
+    el.wizardProfileId.value = savedProfile.id || '';
+    el.deleteProfileButton.hidden = !savedProfile.id;
+    el.saveProfileButton.textContent = 'Save profile';
+    if (close) closeProfileWizard();
+    if (showMessage) setMessage('Profile saved.', 'ok');
+    return savedProfile;
   } catch (error) {
     setWizardMessage(error.message, 'error');
+    return undefined;
   } finally {
     el.saveProfileButton.disabled = false;
+  }
+}
+
+async function saveAndTestClientSettings() {
+  el.testClientSettingsButton.disabled = true;
+  setWizardMessage('Saving profile and testing connection...', 'neutral');
+  let savedProfile;
+  try {
+    savedProfile = await saveProfileFromWizard({ close: false, showMessage: false });
+    if (!savedProfile) return;
+    const result = await api('/api/profiles/test-client-settings', {
+      method: 'POST',
+      body: JSON.stringify(savedProfile),
+    });
+    setWizardMessage(`Profile saved. ${result.message}`, result.testedRpcPath ? 'ok' : 'neutral');
+  } catch (error) {
+    setWizardMessage(savedProfile ? `Profile saved, but test failed: ${error.message}` : error.message, 'error');
+  } finally {
+    el.testClientSettingsButton.disabled = false;
   }
 }
 
@@ -1531,9 +1559,9 @@ function renderWizardHelpList(items = []) {
 
 function getClientSettingsFromProfile(profile) {
   const detail = profileType(profile.type);
-  const host = el.wizardClientHost?.value.trim() || DEFAULT_CLIENT_HOST;
-  const port = el.wizardClientPort?.value.trim() || DEFAULT_CLIENT_PORT;
-  const useSsl = Boolean(el.wizardUseSsl?.checked);
+  const host = (profile.client_host ?? profile.clientHost ?? el.wizardClientHost?.value.trim()) || DEFAULT_CLIENT_HOST;
+  const port = (profile.client_port ?? profile.clientPort ?? el.wizardClientPort?.value.trim()) || DEFAULT_CLIENT_PORT;
+  const useSsl = Boolean(profile.client_use_ssl ?? profile.clientUseSsl ?? el.wizardUseSsl?.checked);
   const rpcPath = normalizeRpcPath(profile.rpc_path || defaultRpcPathForType(profile.type));
   const protocol = useSsl ? 'https' : 'http';
   const portSuffix = port ? `:${port}` : '';
@@ -2518,6 +2546,9 @@ for (const input of [
 }
 el.copyClientSettingsButton.addEventListener('click', () => {
   copyClientSettings().catch((error) => setWizardMessage(error.message, 'error'));
+});
+el.testClientSettingsButton.addEventListener('click', () => {
+  saveAndTestClientSettings().catch((error) => setWizardMessage(error.message, 'error'));
 });
 el.deleteProfileButton.addEventListener('click', () => {
   deleteProfileById().catch((error) => setWizardMessage(error.message, 'error'));

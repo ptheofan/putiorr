@@ -1060,6 +1060,13 @@ select.input-control-addon {
   align-items: flex-start;
 }
 
+.preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .endpoint-box {
   display: grid;
   gap: 5px;

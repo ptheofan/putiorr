@@ -74,6 +74,9 @@ test('profile rows migrate local_path to downloadAt', async () => {
     const profile = store.findProfileBySlug('radarr');
     assert.equal(profile.downloadAt, '/staged');
     assert.equal(profile.download_at, '/staged');
+    assert.equal(profile.client_host, 'putiorr');
+    assert.equal(profile.client_port, '9091');
+    assert.equal(profile.client_use_ssl, false);
     assert.equal(Object.hasOwn(profile, 'local_path'), false);
   } finally {
     store.close();

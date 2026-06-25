@@ -17,6 +17,7 @@ const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const PUTIO_SWAGGER_APP_ID = '3270';
 const OAUTH_APP_ID_SETTING = 'putio_oauth_app_id';
 const OAUTH_RELAY_URL_SETTING = 'putio_oauth_relay_url';
+const CLIENT_SETTINGS_TEST_TIMEOUT_MS = 5_000;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -534,6 +535,11 @@ export class TransmissionRpcServer {
         return;
       }
 
+      if (method === 'POST' && requestPath === '/api/profiles/test-client-settings') {
+        jsonResponse(res, 200, await this.testClientSettings(await readJsonBody(req)), this.sessionId);
+        return;
+      }
+
       if (method === 'GET' && requestPath === '/api/download-profiles') {
         jsonResponse(res, 200, this.service.store.listDownloadProfiles(), this.sessionId);
         return;
@@ -982,6 +988,76 @@ export class TransmissionRpcServer {
         return {};
     }
   }
+
+  async testClientSettings(input) {
+    const profile = normalizeProfileInput(input, { partial: true });
+    const rpcPath = profile.rpc_path || normalizeRpcPath(input.rpc_path ?? input.rpcPath ?? '/transmission/rpc');
+    const rpcPathIsActive = rpcPath === '/transmission/rpc' || Boolean(this.service.store.findProfileByRpcPath(rpcPath));
+    const testedPath = rpcPathIsActive ? rpcPath : '/transmission/rpc';
+    const url = clientSettingsUrl({
+      host: profile.client_host || 'putiorr',
+      port: profile.client_port || '9091',
+      useSsl: profile.client_use_ssl,
+      rpcPath: testedPath,
+    });
+    await this.probeTransmissionEndpoint(url);
+    return {
+      ok: true,
+      testedRpcPath: rpcPathIsActive,
+      message: rpcPathIsActive
+        ? 'Connection test passed from putiorr. Confirm the *arr container can see the same host and download folder.'
+        : 'Host, port, and SSL passed from putiorr. Save and enable this profile before testing its custom RPC path.',
+    };
+  }
+
+  async probeTransmissionEndpoint(url) {
+    const authHeaders = this.rpcAuthHeaders();
+    const first = await fetch(url, {
+      method: 'POST',
+      headers: authHeaders,
+      body: '{}',
+      signal: AbortSignal.timeout(CLIENT_SETTINGS_TEST_TIMEOUT_MS),
+    });
+    if (first.status === 401) {
+      throw new Error('Endpoint requires RPC username and password.');
+    }
+    const sessionId = first.headers.get(SESSION_HEADER);
+    if (first.status !== 409 || !sessionId) {
+      throw new Error(`Endpoint did not answer like Transmission RPC (HTTP ${first.status}).`);
+    }
+
+    const second = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...authHeaders,
+        'Content-Type': 'application/json',
+        [SESSION_HEADER]: sessionId,
+      },
+      body: JSON.stringify({ method: 'session-get', arguments: {} }),
+      signal: AbortSignal.timeout(CLIENT_SETTINGS_TEST_TIMEOUT_MS),
+    });
+    const body = await second.json().catch(() => ({}));
+    if (!second.ok) throw new Error(`Transmission RPC test failed with HTTP ${second.status}.`);
+    if (body.result !== 'success') {
+      throw new Error(body.result || 'Transmission RPC test did not return success.');
+    }
+  }
+
+  rpcAuthHeaders() {
+    if (!this.config.rpcUsername && !this.config.rpcPassword) return {};
+    const token = Buffer.from(`${this.config.rpcUsername}:${this.config.rpcPassword}`).toString('base64');
+    return { Authorization: `Basic ${token}` };
+  }
+}
+
+function clientSettingsUrl({ host, port, useSsl, rpcPath }) {
+  const scheme = useSsl ? 'https' : 'http';
+  const portPart = port ? `:${port}` : '';
+  try {
+    return new URL(`${scheme}://${host}${portPart}${rpcPath}`).toString();
+  } catch {
+    throw new Error('Host, port, SSL, or RPC path is not a valid URL.');
+  }
 }
 
 function normalizeProfileInput(input, { partial = false } = {}) {
@@ -993,6 +1069,9 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const putioFolderName = input.putio_folder_name ?? input.putioFolderName;
   const downloadAt = input.downloadAt ?? input.download_at ?? input.local_path ?? input.localPath;
   const rpcPath = input.rpc_path ?? input.rpcPath;
+  const clientHost = input.client_host ?? input.clientHost;
+  const clientPort = input.client_port ?? input.clientPort;
+  const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
 
   if (name !== undefined) output.name = name;
   if (type !== undefined) output.type = type || 'custom';
@@ -1001,6 +1080,9 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (putioFolderName !== undefined) output.putio_folder_name = String(putioFolderName).trim();
   if (downloadAt !== undefined) output.download_at = path.resolve(String(downloadAt).trim());
   if (rpcPath !== undefined) output.rpc_path = normalizeRpcPath(rpcPath);
+  if (clientHost !== undefined) output.client_host = String(clientHost).trim() || 'putiorr';
+  if (clientPort !== undefined) output.client_port = String(clientPort).trim();
+  if (clientUseSsl !== undefined) output.client_use_ssl = Boolean(clientUseSsl);
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;
   }
