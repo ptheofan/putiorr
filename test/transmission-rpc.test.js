@@ -1205,6 +1205,7 @@ test('web API exposes settings and profile CRUD', async (t) => {
   const testClientSettingsBody = await testClientSettings.json();
   assert.equal(testClientSettingsBody.ok, true);
   assert.equal(testClientSettingsBody.testedRpcPath, true);
+  assert.match(testClientSettingsBody.message, /shared folder write tests passed/);
 
   const update = await fetch(harness.url.replace('/transmission/rpc', `/api/profiles/${profile.id}`), {
     method: 'PUT',
@@ -1222,6 +1223,38 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(updated.client_port, '9091');
   assert.equal(updated.client_use_ssl, false);
   assert.equal(updated.enabled, false);
+});
+
+test('web API profile client settings test rejects an unusable download folder', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  await mkdir(harness.config.targetDir, { recursive: true });
+  const blockedPath = path.join(harness.config.targetDir, 'blocked-file');
+  await writeFile(blockedPath, 'not a directory');
+  const profile = harness.store.createProfile({
+    name: 'Blocked',
+    type: 'custom',
+    slug: 'blocked',
+    putio_folder_name: 'blocked',
+    downloadAt: blockedPath,
+    rpc_path: '/blocked/transmission/rpc',
+    clientHost: '127.0.0.1',
+    clientPort: new URL(harness.url).port,
+    enabled: true,
+  });
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles/test-client-settings'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Shared download folder is not writable/);
 });
 
 test('web API stores and resets put.io OAuth setting overrides', async (t) => {

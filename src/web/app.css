@@ -107,6 +107,36 @@ select {
   outline-offset: 4px;
 }
 
+.topbar-icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  min-height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #193235;
+  box-shadow: 0 8px 24px rgba(23, 35, 38, 0.06);
+}
+
+.topbar-icon-link:hover {
+  background: #f8fbfb;
+  color: var(--accent-strong);
+}
+
+.topbar-icon-link:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: 2px;
+}
+
+.topbar-icon-link svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
 .putio-status-button {
   display: inline-flex;
   align-items: center;
@@ -475,6 +505,29 @@ select.input-control-addon {
 .message {
   min-height: 20px;
   font-size: 13px;
+}
+
+#profileWizardMessage {
+  margin: 12px 18px 0;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbfb;
+  color: #2c3a3d;
+  line-height: 1.45;
+  white-space: pre-line;
+}
+
+#profileWizardMessage[data-tone="info"] {
+  border-color: rgba(15, 118, 110, 0.24);
+  background: rgba(15, 118, 110, 0.07);
+  color: #135e57;
+}
+
+#profileWizardMessage[data-tone="warn"] {
+  border-color: rgba(183, 121, 31, 0.28);
+  background: #fff8eb;
+  color: #6f4600;
 }
 
 .oauth-panel {
@@ -1058,13 +1111,6 @@ select.input-control-addon {
   justify-content: space-between;
   gap: 12px;
   align-items: flex-start;
-}
-
-.preview-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
 }
 
 .endpoint-box {
