@@ -81,7 +81,6 @@ const el = {
   profileWizardMessage: document.querySelector('#profileWizardMessage'),
   saveProfileButton: document.querySelector('#saveProfileButton'),
   deleteProfileButton: document.querySelector('#deleteProfileButton'),
-  testClientSettingsButton: document.querySelector('#testClientSettingsButton'),
   copyClientSettingsButton: document.querySelector('#copyClientSettingsButton'),
   downloadProfileDialog: document.querySelector('#downloadProfileDialog'),
   downloadProfileForm: document.querySelector('#downloadProfileForm'),
@@ -1038,7 +1037,7 @@ function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE))
   el.wizardUseSsl.checked = Boolean(profile.client_use_ssl ?? profile.clientUseSsl);
   el.wizardEnabled.checked = profile.enabled !== false;
   el.deleteProfileButton.hidden = !isExisting;
-  el.saveProfileButton.textContent = isExisting ? 'Save profile' : 'Create profile';
+  el.saveProfileButton.textContent = 'Save & test';
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
   setWizardMessage('');
   updateWizardPreview();
@@ -1140,7 +1139,12 @@ function getWizardPayload() {
   };
 }
 
-async function saveProfileFromWizard({ close = true, showMessage = true } = {}) {
+async function saveProfileFromWizard({
+  close = true,
+  showMessage = true,
+  manageButton = true,
+  throwOnError = false,
+} = {}) {
   const id = el.wizardProfileId.value;
   const payload = getWizardPayload();
   if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || !payload.rpc_path) {
@@ -1148,7 +1152,7 @@ async function saveProfileFromWizard({ close = true, showMessage = true } = {}) 
     return undefined;
   }
 
-  el.saveProfileButton.disabled = true;
+  if (manageButton) el.saveProfileButton.disabled = true;
   try {
     const savedProfile = id
       ? await api(`/api/profiles/${id}`, {
@@ -1164,34 +1168,45 @@ async function saveProfileFromWizard({ close = true, showMessage = true } = {}) 
     renderDownloadProfiles();
     el.wizardProfileId.value = savedProfile.id || '';
     el.deleteProfileButton.hidden = !savedProfile.id;
-    el.saveProfileButton.textContent = 'Save profile';
+    el.saveProfileButton.textContent = 'Save & test';
     if (close) closeProfileWizard();
     if (showMessage) setMessage('Profile saved.', 'ok');
     return savedProfile;
   } catch (error) {
+    if (throwOnError) throw error;
     setWizardMessage(error.message, 'error');
     return undefined;
   } finally {
-    el.saveProfileButton.disabled = false;
+    if (manageButton) el.saveProfileButton.disabled = false;
   }
 }
 
 async function saveAndTestClientSettings() {
-  el.testClientSettingsButton.disabled = true;
-  setWizardMessage('Saving profile and testing connection...', 'neutral');
+  el.saveProfileButton.disabled = true;
+  setWizardMessage('Saving profile and testing connection...', 'info');
   let savedProfile;
   try {
-    savedProfile = await saveProfileFromWizard({ close: false, showMessage: false });
+    savedProfile = await saveProfileFromWizard({
+      close: false,
+      showMessage: false,
+      manageButton: false,
+      throwOnError: true,
+    });
     if (!savedProfile) return;
-    const result = await api('/api/profiles/test-client-settings', {
+    await api('/api/profiles/test-client-settings', {
       method: 'POST',
       body: JSON.stringify(savedProfile),
     });
-    setWizardMessage(`Profile saved. ${result.message}`, result.testedRpcPath ? 'ok' : 'neutral');
+    setWizardMessage('Profile tested and saved successfully!', 'info');
   } catch (error) {
-    setWizardMessage(savedProfile ? `Profile saved, but test failed: ${error.message}` : error.message, 'error');
+    setWizardMessage(
+      savedProfile
+        ? formatClientTestFailureMessage(error, savedProfile)
+        : `Profile was not saved.\nReason: ${error.message}`,
+      'warn',
+    );
   } finally {
-    el.testClientSettingsButton.disabled = false;
+    el.saveProfileButton.disabled = false;
   }
 }
 
@@ -1595,18 +1610,79 @@ function getClientSettingsText() {
   ].join('\n');
 }
 
+function formatClientTestFailureMessage(error, profile) {
+  const settings = getClientSettingsFromProfile(profile);
+  return [
+    'Profile saved, but tests failed.',
+    `Reason: ${error.message}`,
+    '',
+    'Values tested:',
+    `Host: ${settings.host}`,
+    `Port: ${settings.port}`,
+    `Use SSL: ${settings.useSsl ? 'on' : 'off'}`,
+    `URL Base: ${settings.urlBase}`,
+    `Full RPC endpoint: ${settings.fullEndpoint}`,
+    'Username/Password: blank unless putiorr RPC auth is configured',
+    `Category: ${settings.category}`,
+    `Shared folder: ${settings.directory}`,
+    '',
+    'What to check:',
+    ...clientTestFailureChecks(error.message).map((check) => `- ${check}`),
+  ].join('\n');
+}
+
+function clientTestFailureChecks(message = '') {
+  const lowerMessage = message.toLowerCase();
+  const checks = [];
+  if (
+    lowerMessage.includes('shared download folder')
+    || lowerMessage.includes('eacces')
+    || lowerMessage.includes('eperm')
+    || lowerMessage.includes('enotdir')
+    || lowerMessage.includes('enoent')
+  ) {
+    checks.push(
+      'The shared folder must be a directory, not a file.',
+      'The putiorr process must be able to create a folder, write a file, delete that file, and delete the folder there.',
+      'If putiorr runs in Docker, mount that host folder into the putiorr container at the same path.',
+    );
+  }
+  if (lowerMessage.includes('username') || lowerMessage.includes('password') || lowerMessage.includes('401')) {
+    checks.push('If RPC auth is enabled, enter the same RPC username and password in the *arr download client.');
+  }
+  if (
+    lowerMessage.includes('fetch failed')
+    || lowerMessage.includes('timeout')
+    || lowerMessage.includes('timed out')
+    || lowerMessage.includes('endpoint did not answer')
+    || lowerMessage.includes('transmission rpc')
+    || lowerMessage.includes('http ')
+  ) {
+    checks.push(
+      'Host and port must be reachable from putiorr for this test, and from the *arr container after you copy the settings.',
+      'SSL must match the endpoint: enable it only when the download client reaches putiorr through HTTPS.',
+      'URL Base must be the path before /rpc, such as /sonarr/transmission for a /sonarr/transmission/rpc endpoint.',
+    );
+  }
+  checks.push(
+    'Mount the same shared folder path into the *arr container so it can see completed downloads at that exact Directory value.',
+    'After fixing the value, click Save & test again.',
+  );
+  return [...new Set(checks)];
+}
+
 async function copyClientSettings() {
   const text = getClientSettingsText();
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');
     await navigator.clipboard.writeText(text);
-    setWizardMessage('Download-client settings copied.', 'ok');
+    setWizardMessage('Download-client settings copied.', 'info');
   } catch {
     if (copyTextWithSelection(text)) {
-      setWizardMessage('Download-client settings copied.', 'ok');
+      setWizardMessage('Download-client settings copied.', 'info');
       return;
     }
-    setWizardMessage('Copy failed. Select the generated settings manually.', 'error');
+    setWizardMessage('Copy failed. Select the generated settings manually.', 'warn');
   }
 }
 
@@ -1631,7 +1707,11 @@ function copyTextWithSelection(text) {
 
 function setWizardMessage(message, tone = 'neutral') {
   el.profileWizardMessage.textContent = message;
-  el.profileWizardMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+  if (message) {
+    el.profileWizardMessage.dataset.tone = tone === 'warn' || tone === 'error' ? 'warn' : 'info';
+  } else {
+    delete el.profileWizardMessage.dataset.tone;
+  }
 }
 
 function setDownloadProfileMessage(message, tone = 'neutral') {
@@ -2518,7 +2598,7 @@ el.linkDownloadProfilesButton.addEventListener('click', openProfileLinksDialog);
 el.addDownloadProfileButton.addEventListener('click', () => openDownloadProfileDialog(createDefaultDownloadProfile()));
 el.profileWizardForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  saveProfileFromWizard().catch((error) => setWizardMessage(error.message, 'error'));
+  saveAndTestClientSettings().catch((error) => setWizardMessage(error.message, 'error'));
 });
 el.profileWizardClose.addEventListener('click', closeProfileWizard);
 el.profileWizard.querySelector('[data-action="cancel-profile-wizard"]').addEventListener('click', closeProfileWizard);
@@ -2546,9 +2626,6 @@ for (const input of [
 }
 el.copyClientSettingsButton.addEventListener('click', () => {
   copyClientSettings().catch((error) => setWizardMessage(error.message, 'error'));
-});
-el.testClientSettingsButton.addEventListener('click', () => {
-  saveAndTestClientSettings().catch((error) => setWizardMessage(error.message, 'error'));
 });
 el.deleteProfileButton.addEventListener('click', () => {
   deleteProfileById().catch((error) => setWizardMessage(error.message, 'error'));

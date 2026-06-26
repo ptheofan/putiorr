@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { watch } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1000,13 +1000,14 @@ export class TransmissionRpcServer {
       useSsl: profile.client_use_ssl,
       rpcPath: testedPath,
     });
+    await probeWritableDownloadFolder(profile.download_at);
     await this.probeTransmissionEndpoint(url);
     return {
       ok: true,
       testedRpcPath: rpcPathIsActive,
       message: rpcPathIsActive
-        ? 'Connection test passed from putiorr. Confirm the *arr container can see the same host and download folder.'
-        : 'Host, port, and SSL passed from putiorr. Save and enable this profile before testing its custom RPC path.',
+        ? 'Connection and shared folder write tests passed from putiorr. Confirm the *arr container can see the same host and download folder.'
+        : 'Host, port, SSL, and shared folder write tests passed from putiorr. Save and enable this profile before testing its custom RPC path.',
     };
   }
 
@@ -1057,6 +1058,22 @@ function clientSettingsUrl({ host, port, useSsl, rpcPath }) {
     return new URL(`${scheme}://${host}${portPart}${rpcPath}`).toString();
   } catch {
     throw new Error('Host, port, SSL, or RPC path is not a valid URL.');
+  }
+}
+
+async function probeWritableDownloadFolder(downloadAt) {
+  const folder = String(downloadAt ?? '').trim();
+  if (!folder) throw new Error('Shared download folder is required.');
+  const testDir = path.join(folder, `.putiorr-write-test-${crypto.randomUUID()}`);
+  const testFile = path.join(testDir, 'probe.tmp');
+  try {
+    await mkdir(testDir, { recursive: true });
+    await writeFile(testFile, 'putiorr write test');
+    await rm(testFile);
+    await rm(testDir, { recursive: true });
+  } catch (error) {
+    await rm(testDir, { recursive: true, force: true }).catch(() => {});
+    throw new Error(`Shared download folder is not writable: ${error.message}`);
   }
 }
 

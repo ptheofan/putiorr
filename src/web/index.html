@@ -28,6 +28,11 @@
           </div>
           <div class="topbar-actions">
             <a id="versionUpdateLink" class="version-update-link" href="https://github.com/ptheofan/putiorr/releases/latest" target="_blank" rel="noreferrer" hidden>Update available</a>
+            <a class="topbar-icon-link" href="https://ptheofan.github.io/putiorr/" target="_blank" rel="noreferrer" aria-label="Open project portal" title="Project portal">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+                <path d="M12 0.5C5.65 0.5 0.5 5.65 0.5 12c0 5.08 3.29 9.39 7.86 10.91 0.58 0.1 0.79-0.25 0.79-0.56v-2.16c-3.2 0.69-3.87-1.36-3.87-1.36-0.52-1.33-1.28-1.68-1.28-1.68-1.04-0.71 0.08-0.7 0.08-0.7 1.15 0.08 1.76 1.18 1.76 1.18 1.03 1.75 2.69 1.25 3.34 0.95 0.1-0.74 0.4-1.25 0.73-1.54-2.56-0.29-5.25-1.28-5.25-5.7 0-1.26 0.45-2.29 1.18-3.1-0.12-0.29-0.51-1.47 0.11-3.06 0 0 0.96-0.31 3.16 1.18 0.92-0.26 1.9-0.38 2.88-0.39 0.98 0 1.96 0.13 2.88 0.39 2.2-1.49 3.16-1.18 3.16-1.18 0.62 1.59 0.23 2.77 0.11 3.06 0.74 0.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.7 0.41 0.36 0.78 1.06 0.78 2.14v3.17c0 0.31 0.21 0.67 0.79 0.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35 0.5 12 0.5Z"></path>
+              </svg>
+            </a>
             <button id="putioStatusButton" class="putio-status-button" type="button" data-state="unknown" aria-label="Put.io connection status">
               <span class="status-dot" aria-hidden="true"></span>
               <span>Put.io</span>
@@ -276,16 +281,10 @@
                 <span id="wizardHelpKicker" class="step-label">Field guide</span>
                 <h3 id="wizardHelpTitle">App preset</h3>
               </div>
-              <div class="preview-actions">
-                <button id="testClientSettingsButton" class="button secondary" type="button">
-                  <span aria-hidden="true">✓</span>
-                  Save & test
-                </button>
-                <button id="copyClientSettingsButton" class="button secondary" type="button">
-                  <span aria-hidden="true">⧉</span>
-                  Copy settings
-                </button>
-              </div>
+              <button id="copyClientSettingsButton" class="button secondary" type="button">
+                <span aria-hidden="true">⧉</span>
+                Copy settings
+              </button>
             </div>
             <div id="wizardHelpBody" class="help-body"></div>
             <ul id="wizardHelpList" class="help-list"></ul>
@@ -302,7 +301,7 @@
           <button id="deleteProfileButton" class="button danger" type="button">Delete profile</button>
           <div class="button-row">
             <button class="button secondary" type="button" data-action="cancel-profile-wizard">Cancel</button>
-            <button id="saveProfileButton" class="button primary" type="submit">Save profile</button>
+            <button id="saveProfileButton" class="button primary" type="submit">Save & test</button>
           </div>
         </div>
       </form>
