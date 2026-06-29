@@ -2824,15 +2824,24 @@ function downloadTopologyEyebrow(download) {
 }
 
 function topologyNode(x, y, w, h, eyebrow, title, sub, variant) {
-  const cap = Math.max(6, Math.floor((w - 26) / 7));
+  // Character estimates tuned per font size (title is 14px bold, eyebrow/sub are
+  // ~10-11px) so labels truncate before the edge; the clipPath then hard-guarantees
+  // nothing can ever paint outside the node box.
+  const inner = w - 28;
+  const titleCap = Math.max(6, Math.floor(inner / 8.4));
+  const smallCap = Math.max(6, Math.floor(inner / 6));
+  const clipId = `tc${Math.round(x)}-${Math.round(y)}`;
   const subText = sub
-    ? `<text x="${x + 14}" y="${y + 48}" class="topo-sub">${escapeSvgText(truncateLabel(sub, cap + 6))}</text>`
+    ? `<text x="${x + 14}" y="${y + 48}" class="topo-sub">${escapeSvgText(truncateLabel(sub, smallCap))}</text>`
     : '';
   return `<g>
+    <clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"></rect></clipPath>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11" class="topo-node topo-node--${variant}"></rect>
-    <text x="${x + 14}" y="${y + 19}" class="topo-eyebrow">${escapeSvgText(truncateLabel(eyebrow, cap + 4))}</text>
-    <text x="${x + 14}" y="${y + 35}" class="topo-node-title">${escapeSvgText(truncateLabel(title, cap))}</text>
-    ${subText}
+    <g clip-path="url(#${clipId})">
+      <text x="${x + 14}" y="${y + 19}" class="topo-eyebrow">${escapeSvgText(truncateLabel(eyebrow, smallCap))}</text>
+      <text x="${x + 14}" y="${y + 35}" class="topo-node-title">${escapeSvgText(truncateLabel(title, titleCap))}</text>
+      ${subText}
+    </g>
   </g>`;
 }
 
