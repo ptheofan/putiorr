@@ -2247,3 +2247,92 @@ wa-checkbox::part(label) { color: var(--text); font-weight: 700; font-size: 13px
     align-items: stretch;
   }
 }
+
+/* ==========================================================================
+   Topology map
+   ========================================================================== */
+.topo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: center;
+}
+
+.topo-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.topo-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+}
+
+.topo-swatch--putio { background: var(--accent-quiet); border-color: var(--accent); }
+.topo-swatch--rr { border-color: var(--accent); }
+.topo-swatch--dprofile { border-color: var(--line); }
+.topo-swatch--download { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+
+.topo-canvas {
+  overflow-x: auto;
+  padding: 4px 2px 2px;
+}
+
+.topo-svg {
+  display: block;
+  width: 100%;
+  min-width: 760px;
+  height: auto;
+}
+
+.topo-node {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.topo-node--putio { fill: var(--accent-quiet); stroke: var(--accent); }
+.topo-node--putio-off { stroke: var(--amber); }
+.topo-node--rr { stroke: var(--accent); }
+.topo-node--rr-off { stroke: var(--amber); }
+.topo-node--dprofile { stroke: var(--line); }
+.topo-node--download { stroke: color-mix(in srgb, var(--accent) 60%, var(--line)); }
+.topo-node--download-active { stroke: var(--ok); }
+.topo-node--download-error { stroke: var(--danger); }
+
+.topo-eyebrow {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.topo-node-title {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 750;
+}
+
+.topo-sub {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.topo-edge {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0.5;
+}
+
+.topo-edge--muted { stroke: var(--line); opacity: 1; }
+.topo-edge--dprofile { stroke: var(--line); opacity: 1; }
+.topo-edge--download { stroke: color-mix(in srgb, var(--accent) 55%, var(--line)); opacity: 0.8; }

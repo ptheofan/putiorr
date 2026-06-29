@@ -119,6 +119,7 @@ const el = {
   profileLinksMessage: document.querySelector('#profileLinksMessage'),
   saveProfileLinksButton: document.querySelector('#saveProfileLinksButton'),
   downloadsList: document.querySelector('#downloadsList'),
+  topologyCanvas: document.querySelector('#topologyCanvas'),
   deleteConfirmDialog: document.querySelector('#deleteConfirmDialog'),
   deleteConfirmForm: document.querySelector('#deleteConfirmForm'),
   deleteConfirmTitle: document.querySelector('#deleteConfirmTitle'),
@@ -580,6 +581,7 @@ async function loadAll() {
 async function refreshDownloads() {
   state.downloads = await api('/api/downloads');
   renderDownloads();
+  renderTopology();
 }
 
 async function loadVersion() {
@@ -590,6 +592,7 @@ async function loadVersion() {
 function applyDownloadsUpdate(message) {
   if (Array.isArray(message.downloads)) state.downloads = message.downloads;
   renderDownloads();
+  renderTopology();
 }
 
 function render() {
@@ -670,6 +673,7 @@ function renderConnection() {
   if (connected && state.putioAccount.status === 'idle') {
     refreshPutioAccount().catch(() => {});
   }
+  renderTopology();
 }
 
 function activePutioTab() {
@@ -836,12 +840,12 @@ function renderProfiles() {
     empty.className = 'empty-state profile-empty';
     empty.textContent = 'No RR profiles yet. Use the setup wizard to create the Sonarr, Radarr, or Lidarr endpoint.';
     el.profilesBody.appendChild(empty);
-    return;
+  } else {
+    for (const profile of state.profiles) {
+      el.profilesBody.appendChild(createProfileCard(profile));
+    }
   }
-
-  for (const profile of state.profiles) {
-    el.profilesBody.appendChild(createProfileCard(profile));
-  }
+  renderTopology();
 }
 
 function createProfileCard(profile) {
@@ -2784,9 +2788,143 @@ el.deleteConfirmDialog.addEventListener('click', (event) => {
   if (event.target === el.deleteConfirmDialog) closeDeleteConfirm();
 });
 
+// --- Topology map: put.io -> RR profiles -> download profiles + downloads ---
+function escapeSvgText(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function truncateLabel(value, max) {
+  const text = String(value ?? '');
+  return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
+}
+
+function topologyDownloadsForProfile(profile) {
+  const name = profileDisplayName(profile);
+  return state.downloads.filter(
+    (download) => download.profileName === name || download.profileName === profile.name,
+  );
+}
+
+function downloadTopologyVariant(download) {
+  if (download.error) return 'download-error';
+  if (download.lifecycle === 'local' || download.lifecycle === 'completed') return 'download-active';
+  return 'download';
+}
+
+function downloadTopologyEyebrow(download) {
+  if (download.error) return 'Download · error';
+  if (download.lifecycle === 'remote') {
+    const phase = PUTIO_PHASE_LABELS[download.putioStatus];
+    return phase ? `Download · ${phase.replace(' on Put.io', '')}` : 'Download · on put.io';
+  }
+  return `Download · ${download.lifecycle}`;
+}
+
+function topologyNode(x, y, w, h, eyebrow, title, sub, variant) {
+  const cap = Math.max(6, Math.floor((w - 26) / 7));
+  const subText = sub
+    ? `<text x="${x + 14}" y="${y + 48}" class="topo-sub">${escapeSvgText(truncateLabel(sub, cap + 6))}</text>`
+    : '';
+  return `<g>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11" class="topo-node topo-node--${variant}"></rect>
+    <text x="${x + 14}" y="${y + 19}" class="topo-eyebrow">${escapeSvgText(truncateLabel(eyebrow, cap + 4))}</text>
+    <text x="${x + 14}" y="${y + 35}" class="topo-node-title">${escapeSvgText(truncateLabel(title, cap))}</text>
+    ${subText}
+  </g>`;
+}
+
+function topologyEdge(x1, y1, x2, y2, cls = '') {
+  const dx = Math.max(28, (x2 - x1) * 0.5);
+  return `<path d="M${x1} ${y1} C${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}" class="topo-edge ${cls}"></path>`;
+}
+
+function renderTopology() {
+  const canvas = el.topologyCanvas;
+  if (!canvas) return;
+  const profiles = state.profiles ?? [];
+
+  if (profiles.length === 0) {
+    canvas.innerHTML = '<div class="empty-state">No RR profiles yet. Create one and the map will draw itself.</div>';
+    return;
+  }
+
+  const NODE_H = 58;
+  const LEAF_H = 54;
+  const LEAF_GAP = 12;
+  const BAND_GAP = 26;
+  const PUTIO = { x: 24, w: 184 };
+  const RR = { x: 280, w: 224 };
+  const LEAF = { x: 576, w: 300 };
+  const WIDTH = 904;
+
+  let cursor = 24;
+  const bands = profiles.map((profile) => {
+    const dpId = profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId();
+    const downloads = topologyDownloadsForProfile(profile);
+    const leaves = [
+      { eyebrow: 'Download profile', title: downloadProfileDisplayName(dpId), sub: '', variant: 'dprofile' },
+      ...downloads.map((download) => ({
+        eyebrow: downloadTopologyEyebrow(download),
+        title: download.name,
+        sub: `${clampPercent(download.combinedProgress)}% complete`,
+        variant: downloadTopologyVariant(download),
+        download: true,
+      })),
+    ];
+    const bandHeight = Math.max(NODE_H, leaves.length * (LEAF_H + LEAF_GAP) - LEAF_GAP);
+    const band = { profile, leaves, top: cursor, height: bandHeight };
+    cursor += bandHeight + BAND_GAP;
+    return band;
+  });
+
+  const totalHeight = Math.max(cursor - BAND_GAP + 24, NODE_H + 48);
+  const putioY = totalHeight / 2 - NODE_H / 2;
+  const putioRight = PUTIO.x + PUTIO.w;
+  const putioCy = putioY + NODE_H / 2;
+
+  const edges = [];
+  const nodes = [];
+
+  const connected = Boolean(state.settings?.tokenConfigured);
+  const account = state.putioAccount?.username || (connected ? 'Put.io account' : 'Not connected');
+  nodes.push(topologyNode(
+    PUTIO.x, putioY, PUTIO.w, NODE_H,
+    'Put.io', account, connected ? 'Connected' : 'No token configured',
+    connected ? 'putio' : 'putio-off',
+  ));
+
+  for (const band of bands) {
+    const rrCy = band.top + band.height / 2;
+    edges.push(topologyEdge(putioRight, putioCy, RR.x, rrCy, connected ? '' : 'topo-edge--muted'));
+
+    const profile = band.profile;
+    const rrY = rrCy - NODE_H / 2;
+    nodes.push(topologyNode(
+      RR.x, rrY, RR.w, NODE_H,
+      profileType(profile.type).label, profileDisplayName(profile),
+      profile.enabled === false ? 'Disabled' : 'Enabled',
+      profile.enabled === false ? 'rr-off' : 'rr',
+    ));
+
+    let leafY = band.top;
+    for (const leaf of band.leaves) {
+      const leafCy = leafY + LEAF_H / 2;
+      edges.push(topologyEdge(RR.x + RR.w, rrCy, LEAF.x, leafCy, leaf.download ? 'topo-edge--download' : 'topo-edge--dprofile'));
+      nodes.push(topologyNode(LEAF.x, leafY, LEAF.w, LEAF_H, leaf.eyebrow, leaf.title, leaf.sub, leaf.variant));
+      leafY += LEAF_H + LEAF_GAP;
+    }
+  }
+
+  canvas.innerHTML = `<svg viewBox="0 0 ${WIDTH} ${totalHeight}" class="topo-svg" role="img" aria-label="Topology of put.io connection, RR profiles, download profiles and downloads">${edges.join('')}${nodes.join('')}</svg>`;
+}
+
 // --- Sidebar routing (hash-based, no server rewrites needed) ---
-const ROUTES = ['downloads', 'download-profiles', 'profiles', 'help'];
+const ROUTES = ['topology', 'downloads', 'download-profiles', 'profiles', 'help'];
 const ROUTE_TITLES = {
+  topology: 'Topology',
   profiles: 'RR profiles',
   'download-profiles': 'Download profiles',
   downloads: 'Current downloads',

@@ -36,6 +36,10 @@
 
         <nav class="sidebar-nav" aria-label="Primary">
           <div class="nav-group">
+            <a class="nav-item" href="#/topology" data-route="topology">
+              <wa-icon name="diagram-project"></wa-icon>
+              <span>Topology</span>
+            </a>
             <a class="nav-item" href="#/downloads" data-route="downloads">
               <wa-icon name="cloud-arrow-down"></wa-icon>
               <span>Current downloads</span>
@@ -129,6 +133,21 @@
           </div>
 
           <div id="downloadsList" class="downloads-list"></div>
+        </section>
+
+        <section id="topology" class="panel topo-panel" data-route-view="topology" hidden>
+          <div class="section-head">
+            <div>
+              <p>A live map of how your put.io connection, RR profiles, download profiles and active downloads connect.</p>
+            </div>
+            <div class="topo-legend">
+              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--putio"></i>Put.io</span>
+              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--rr"></i>RR profile</span>
+              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--dprofile"></i>Download profile</span>
+              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--download"></i>Download</span>
+            </div>
+          </div>
+          <div id="topologyCanvas" class="topo-canvas"></div>
         </section>
 
         <section id="help" class="panel help-panel" data-route-view="help" hidden>
