@@ -21,7 +21,7 @@ const state = {
 const el = {
   connectionState: document.querySelector('#connectionState'),
   versionUpdateLink: document.querySelector('#versionUpdateLink'),
-  putioStatusButton: document.querySelector('#putioStatusButton'),
+  putioStatusButtons: [...document.querySelectorAll('.putio-status-button')],
   putioDialog: document.querySelector('#putioDialog'),
   putioDialogClose: document.querySelector('#putioDialogClose'),
   putioTabButtons: [...document.querySelectorAll('[data-putio-tab]')],
@@ -131,6 +131,13 @@ const el = {
   deleteConfirmMessage: document.querySelector('#deleteConfirmMessage'),
   deleteConfirmButton: document.querySelector('#deleteConfirmButton'),
 };
+
+// Web Awesome inputs (wa-input/wa-select) return `null` for an empty value
+// rather than ''. Normalize to a string so the many `.value.trim()` reads below
+// never throw on untouched fields.
+function fieldValue(input) {
+  return String(input?.value ?? '');
+}
 
 const PROFILE_TYPES = {
   sonarr: {
@@ -617,9 +624,11 @@ function renderConnection() {
   if (!connected && state.putioAccount.status !== 'idle') resetPutioAccount();
   el.connectionState.textContent = putioConnectionSummary();
   const stateName = connected ? 'connected' : 'needs-token';
-  el.putioStatusButton.dataset.state = stateName;
-  el.putioStatusButton.title = connected ? 'Put.io connected' : 'Put.io needs a token';
-  el.putioStatusButton.setAttribute('aria-label', connected ? 'Put.io connected. Open connection settings.' : 'Put.io needs a token. Open connection settings.');
+  for (const button of el.putioStatusButtons) {
+    button.dataset.state = stateName;
+    button.title = connected ? 'Put.io connected' : 'Put.io needs a token';
+    button.setAttribute('aria-label', connected ? 'Put.io connected. Open connection settings.' : 'Put.io needs a token. Open connection settings.');
+  }
   if (connected) {
     stopOAuthPolling();
     el.oauthPanel.hidden = true;
@@ -699,13 +708,7 @@ function setPutioTab(tab, { focus = true } = {}) {
 function openPutioDialog(tab = activePutioTab()) {
   renderConnection();
   setPutioTab(tab, { focus: false });
-  if (!el.putioDialog.open) {
-    if (typeof el.putioDialog.showModal === 'function') {
-      el.putioDialog.showModal();
-    } else {
-      el.putioDialog.setAttribute('open', '');
-    }
-  }
+  if (!el.putioDialog.open) el.putioDialog.open = true;
   focusPutioTab(activePutioTab());
 }
 
@@ -748,11 +751,7 @@ function consumeOAuthLanding() {
 }
 
 function closePutioDialog() {
-  if (el.putioDialog.open && typeof el.putioDialog.close === 'function') {
-    el.putioDialog.close();
-  } else {
-    el.putioDialog.removeAttribute('open');
-  }
+  if (el.putioDialog.open) el.putioDialog.open = false;
 }
 
 function setNumberInput(input, value) {
@@ -1043,20 +1042,12 @@ function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE))
   setWizardMessage('');
   updateWizardPreview();
 
-  if (typeof el.profileWizard.showModal === 'function') {
-    el.profileWizard.showModal();
-  } else {
-    el.profileWizard.setAttribute('open', '');
-  }
+  el.profileWizard.open = true;
   el.wizardProfileType.focus();
 }
 
 function closeProfileWizard() {
-  if (el.profileWizard.open && typeof el.profileWizard.close === 'function') {
-    el.profileWizard.close();
-  } else {
-    el.profileWizard.removeAttribute('open');
-  }
+  if (el.profileWizard.open) el.profileWizard.open = false;
 }
 
 // New profiles must share the download folder that the shared RPC endpoint
@@ -1098,13 +1089,13 @@ function populateDownloadProfileSelect(select, selectedId = defaultDownloadProfi
         name: 'Default',
       }];
   for (const downloadProfile of profiles) {
-    const option = document.createElement('option');
+    const option = document.createElement('wa-option');
     option.value = downloadProfile.id == null ? '' : String(downloadProfile.id);
     option.textContent = downloadProfile.name || 'Default';
     select.appendChild(option);
   }
   const nextValue = selectedId == null ? '' : String(selectedId);
-  if (Array.from(select.options).some((option) => option.value === nextValue)) {
+  if (Array.from(select.querySelectorAll('wa-option')).some((option) => option.value === nextValue)) {
     select.value = nextValue;
   }
 }
@@ -1126,15 +1117,15 @@ function syncWizardDefaultsForType() {
 
 function getWizardPayload() {
   return {
-    name: el.wizardProfileName.value.trim(),
+    name: fieldValue(el.wizardProfileName).trim(),
     type: el.wizardProfileType.value,
-    slug: slugify(el.wizardProfileName.value),
-    putio_folder_name: el.wizardPutioFolder.value.trim(),
-    downloadAt: el.wizardDownloadAt.value.trim(),
+    slug: slugify(fieldValue(el.wizardProfileName)),
+    putio_folder_name: fieldValue(el.wizardPutioFolder).trim(),
+    downloadAt: fieldValue(el.wizardDownloadAt).trim(),
     download_profile_id: numericSelectValue(el.wizardDownloadProfile.value),
-    rpc_path: normalizeRpcPath(el.wizardRpcPath.value),
-    client_host: el.wizardClientHost.value.trim() || DEFAULT_CLIENT_HOST,
-    client_port: el.wizardClientPort.value.trim(),
+    rpc_path: normalizeRpcPath(fieldValue(el.wizardRpcPath)),
+    client_host: fieldValue(el.wizardClientHost).trim() || DEFAULT_CLIENT_HOST,
+    client_port: fieldValue(el.wizardClientPort).trim(),
     client_use_ssl: el.wizardUseSsl.checked,
     enabled: el.wizardEnabled.checked,
   };
@@ -1263,20 +1254,12 @@ function openDownloadProfileDialog(downloadProfile = createDefaultDownloadProfil
   setDownloadProfileMessage('');
   setDownloadProfileHelpForField(DEFAULT_DOWNLOAD_PROFILE_HELP_FIELD);
 
-  if (typeof el.downloadProfileDialog.showModal === 'function') {
-    el.downloadProfileDialog.showModal();
-  } else {
-    el.downloadProfileDialog.setAttribute('open', '');
-  }
+  el.downloadProfileDialog.open = true;
   el.downloadProfileName.focus();
 }
 
 function closeDownloadProfileDialog() {
-  if (el.downloadProfileDialog.open && typeof el.downloadProfileDialog.close === 'function') {
-    el.downloadProfileDialog.close();
-  } else {
-    el.downloadProfileDialog.removeAttribute('open');
-  }
+  if (el.downloadProfileDialog.open) el.downloadProfileDialog.open = false;
 }
 
 function createDefaultDownloadProfile() {
@@ -1293,8 +1276,8 @@ function createDefaultDownloadProfile() {
 
 function getDownloadProfilePayload() {
   return {
-    name: el.downloadProfileName.value.trim(),
-    slug: slugify(el.downloadProfileName.value),
+    name: fieldValue(el.downloadProfileName).trim(),
+    slug: slugify(fieldValue(el.downloadProfileName)),
     slowSpeedThresholdBytesPerSecond: byteInputValue(
       el.downloadSlowSpeedThresholdDisabled,
       el.downloadSlowSpeedThresholdAmount,
@@ -1434,20 +1417,12 @@ function openProfileLinksDialog() {
   renderProfileLinksList();
   setProfileLinksMessage('');
 
-  if (typeof el.profileLinksDialog.showModal === 'function') {
-    el.profileLinksDialog.showModal();
-  } else {
-    el.profileLinksDialog.setAttribute('open', '');
-  }
-  el.profileLinksList.querySelector('select')?.focus();
+  el.profileLinksDialog.open = true;
+  el.profileLinksList.querySelector('wa-select')?.focus();
 }
 
 function closeProfileLinksDialog() {
-  if (el.profileLinksDialog.open && typeof el.profileLinksDialog.close === 'function') {
-    el.profileLinksDialog.close();
-  } else {
-    el.profileLinksDialog.removeAttribute('open');
-  }
+  if (el.profileLinksDialog.open) el.profileLinksDialog.open = false;
 }
 
 function renderProfileLinksList() {
@@ -1476,10 +1451,7 @@ function createProfileLinkRow(profile) {
       <strong data-role="name"></strong>
       <span data-role="meta"></span>
     </div>
-    <label>
-      Download profile
-      <select data-role="download-profile"></select>
-    </label>
+    <wa-select label="Download profile" data-role="download-profile"></wa-select>
   `;
 
   setText(row.querySelector('[data-role="name"]'), profileDisplayName(profile));
@@ -1575,8 +1547,8 @@ function renderWizardHelpList(items = []) {
 
 function getClientSettingsFromProfile(profile) {
   const detail = profileType(profile.type);
-  const host = (profile.client_host ?? profile.clientHost ?? el.wizardClientHost?.value.trim()) || DEFAULT_CLIENT_HOST;
-  const port = (profile.client_port ?? profile.clientPort ?? el.wizardClientPort?.value.trim()) || DEFAULT_CLIENT_PORT;
+  const host = (profile.client_host ?? profile.clientHost ?? fieldValue(el.wizardClientHost).trim()) || DEFAULT_CLIENT_HOST;
+  const port = (profile.client_port ?? profile.clientPort ?? fieldValue(el.wizardClientPort).trim()) || DEFAULT_CLIENT_PORT;
   const useSsl = Boolean(profile.client_use_ssl ?? profile.clientUseSsl ?? el.wizardUseSsl?.checked);
   const rpcPath = normalizeRpcPath(profile.rpc_path || defaultRpcPathForType(profile.type));
   const protocol = useSsl ? 'https' : 'http';
@@ -2218,13 +2190,13 @@ function openDeleteConfirm(pendingDelete) {
   }
 
   updateDeleteConfirmButtonState();
-  if (!el.deleteConfirmDialog.open) el.deleteConfirmDialog.showModal();
+  if (!el.deleteConfirmDialog.open) el.deleteConfirmDialog.open = true;
 }
 
 function closeDeleteConfirm() {
   state.pendingDelete = undefined;
   setDeleteConfirmMessage('');
-  if (el.deleteConfirmDialog.open) el.deleteConfirmDialog.close();
+  if (el.deleteConfirmDialog.open) el.deleteConfirmDialog.open = false;
 }
 
 function updateDeleteConfirmButtonState() {
@@ -2493,8 +2465,8 @@ function slugify(value) {
 }
 
 async function savePutioOAuthSettings() {
-  const appId = el.putioOAuthAppId.value.trim();
-  const relayUrl = el.putioOAuthRelayUrl.value.trim();
+  const appId = fieldValue(el.putioOAuthAppId).trim();
+  const relayUrl = fieldValue(el.putioOAuthRelayUrl).trim();
   if (!appId) {
     setMessage('Put.io OAuth App Id is required.', 'error');
     el.putioOAuthAppId.focus();
@@ -2534,7 +2506,7 @@ el.settingsForm.addEventListener('submit', async (event) => {
     await savePutioOAuthSettings().catch((error) => setMessage(error.message, 'error'));
     return;
   }
-  const token = el.putioToken.value.trim();
+  const token = fieldValue(el.putioToken).trim();
   if (!token && !state.settings?.tokenConfigured) {
     setMessage('Paste a put.io token before saving settings.', 'error');
     return;
@@ -2571,7 +2543,7 @@ el.resetPutioOAuthSettingsButton.addEventListener('click', () => {
 
 el.testConnectionButton.addEventListener('click', async () => {
   try {
-    const token = el.putioToken.value.trim();
+    const token = fieldValue(el.putioToken).trim();
     const result = await api('/api/putio/test', {
       method: 'POST',
       body: JSON.stringify(token ? { putioToken: token } : {}),
@@ -2755,7 +2727,46 @@ for (const button of el.putioTabButtons) {
     setPutioTab(PUTIO_CONNECTION_TABS[nextIndex]);
   });
 }
-el.putioStatusButton.addEventListener('click', () => openPutioDialog('oauth'));
+for (const button of el.putioStatusButtons) {
+  button.addEventListener('click', () => openPutioDialog('oauth'));
+}
+document.querySelector('#helpConnectButton')?.addEventListener('click', () => openPutioDialog('oauth'));
+
+// --- Light / dark theme toggle (persisted in localStorage; defaults to dark) ---
+const THEME_KEY = 'putiorr:theme';
+
+function applyTheme(theme) {
+  const dark = theme !== 'light';
+  document.documentElement.classList.toggle('wa-dark', dark);
+  const toggle = document.querySelector('#themeToggle');
+  if (!toggle) return;
+  const icon = toggle.querySelector('wa-icon');
+  if (icon) icon.name = dark ? 'moon' : 'sun';
+  const label = dark ? 'Switch to light theme' : 'Switch to dark theme';
+  toggle.setAttribute('aria-label', label);
+  toggle.title = label;
+}
+
+function storedTheme() {
+  try {
+    return localStorage.getItem(THEME_KEY) === 'light' ? 'light' : 'dark';
+  } catch {
+    return 'dark';
+  }
+}
+
+applyTheme(storedTheme());
+
+document.querySelector('#themeToggle')?.addEventListener('click', () => {
+  const next = document.documentElement.classList.contains('wa-dark') ? 'light' : 'dark';
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* ignore storage failures (private mode) */
+  }
+  applyTheme(next);
+});
+
 el.putioDialogClose.addEventListener('click', closePutioDialog);
 el.putioDialog.querySelector('[data-action="cancel-putio"]').addEventListener('click', closePutioDialog);
 el.putioDialog.addEventListener('click', (event) => {
@@ -2772,6 +2783,38 @@ el.deleteConfirmDialog.querySelector('[data-action="cancel-delete"]').addEventLi
 el.deleteConfirmDialog.addEventListener('click', (event) => {
   if (event.target === el.deleteConfirmDialog) closeDeleteConfirm();
 });
+
+// --- Sidebar routing (hash-based, no server rewrites needed) ---
+const ROUTES = ['downloads', 'download-profiles', 'profiles', 'help'];
+const ROUTE_TITLES = {
+  profiles: 'RR profiles',
+  'download-profiles': 'Download profiles',
+  downloads: 'Current downloads',
+  help: 'How it works',
+};
+
+function currentRoute() {
+  const hash = window.location.hash.replace(/^#\/?/, '');
+  return ROUTES.includes(hash) ? hash : 'downloads';
+}
+
+function applyRoute() {
+  const route = currentRoute();
+  for (const view of document.querySelectorAll('[data-route-view]')) {
+    setHidden(view, view.dataset.routeView !== route);
+  }
+  for (const link of document.querySelectorAll('.nav-item')) {
+    const active = link.dataset.route === route;
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  const title = document.querySelector('#routeTitle');
+  if (title) setText(title, ROUTE_TITLES[route]);
+}
+
+window.addEventListener('hashchange', applyRoute);
+applyRoute();
 
 loadAll().catch((error) => setMessage(error.message, 'error'));
 loadVersion().catch(() => {});

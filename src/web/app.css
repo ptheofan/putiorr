@@ -1,18 +1,66 @@
 :root {
+  /* Light theme (default surfaces); the violet brand accent is shared by both. */
   color-scheme: light;
-  --bg: #f5f7f8;
+  --bg: #f6f6fb;
   --panel: #ffffff;
-  --panel-2: #eef4f4;
-  --text: #172326;
-  --muted: #647275;
-  --line: #d9e2e4;
-  --accent: #0f766e;
-  --accent-strong: #0b5e57;
+  --panel-2: #f1f0fa;
+  --surface: #f6f5fc;
+  --surface-2: #eceaf6;
+  --text: #1a1a2e;
+  --muted: #6b6b85;
+  --line: #e4e2f0;
+  --line-soft: #eeedf7;
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-hover: #6d28d9;
+  --accent-quiet: #f1ebfe;
   --amber: #b7791f;
   --danger: #b42318;
+  --danger-quiet: #fdecec;
   --ok: #16803f;
+  --warn-ink: #7a4b00;
   --shadow: 0 18px 50px rgba(23, 35, 38, 0.08);
+
+  /* Web Awesome "brand" palette -> violet */
+  --wa-color-brand-fill-loud: #7c3aed;
+  --wa-color-brand-fill-normal: #8b5cf6;
+  --wa-color-brand-fill-quiet: #f1ebfe;
+  --wa-color-brand-on-loud: #ffffff;
+  --wa-color-brand-on-normal: #ffffff;
+  --wa-color-brand-on-quiet: #6d28d9;
+  --wa-color-brand-border-loud: #6d28d9;
+  --wa-color-brand-border-normal: #7c3aed;
+  --wa-font-family-body: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --wa-font-family-heading: Inter, ui-sans-serif, system-ui, sans-serif;
+
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html.wa-dark {
+  /* Dark theme — overrides only the surface/ink tokens; accent stays violet. */
+  color-scheme: dark;
+  --bg: #0a0a12;
+  --panel: #14141f;
+  --panel-2: #1e1e2e;
+  --surface: #1a1a28;
+  --surface-2: #24243a;
+  --text: #f3f3f8;
+  --muted: #9a9ab2;
+  --line: #2b2b3d;
+  --line-soft: #232333;
+  --accent-strong: #a78bfa;
+  --accent-hover: #8b5cf6;
+  --accent-quiet: #241a40;
+  --amber: #fbbf24;
+  --danger: #f47373;
+  --danger-quiet: #2a1620;
+  --ok: #34d399;
+  --warn-ink: #f0c674;
+  --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+
+  --wa-color-brand-fill-quiet: #241a40;
+  --wa-color-brand-on-normal: #c4b5fd;
+  --wa-color-brand-on-quiet: #c4b5fd;
 }
 
 * {
@@ -1634,5 +1682,532 @@ td.center input {
 
   .file-delete-button {
     justify-self: start;
+  }
+}
+
+/* ==========================================================================
+   Dark + violet theme — surface overrides for rules that hardcode light hexes,
+   plus Web Awesome component integration. Appended last so it wins on source
+   order. The token flip above handles colours that reference var(--*); the
+   blocks below repaint the literal #ffffff/#f8fbfb/#edf4f4 surfaces.
+   ========================================================================== */
+
+body { background: var(--bg); color: var(--text); }
+
+.content { width: min(1280px, 100%); }
+
+.brand-accent { color: var(--accent-strong); }
+
+h1 { letter-spacing: -0.01em; }
+
+/* Brand mark */
+.hero-icon {
+  border-color: rgba(124, 58, 237, 0.45);
+  background: #0a0a12;
+  box-shadow: 0 18px 42px rgba(124, 58, 237, 0.28);
+}
+
+/* Topbar pills */
+.topbar-icon-link {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.topbar-icon-link:hover { background: var(--surface-2); color: var(--accent-strong); }
+.topbar-icon-link wa-icon { font-size: 17px; }
+
+.putio-status-button {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.putio-status-button:hover { background: var(--surface-2); }
+
+.version-update-link { color: var(--accent-strong); }
+.version-update-link:hover { color: #c4b5fd; }
+
+/* Panels & headings */
+.panel { background: var(--panel); border-color: var(--line); }
+
+.profile-eyebrow,
+.step-label,
+.profile-action.primary,
+.text-button { color: var(--accent-strong); }
+
+.endpoint-box strong,
+.help-body p,
+.link-profile strong,
+.field-help strong,
+label,
+.field-control,
+.check-row,
+.file-select-all,
+.checkbox-row,
+.input-control-addon,
+.byte-disable { color: var(--text); }
+
+/* Native form controls */
+input,
+select {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+input::placeholder { color: #6b6b85; }
+input:focus,
+select:focus {
+  outline-color: rgba(124, 58, 237, 0.4);
+  border-color: var(--accent);
+}
+
+/* Compound byte/time inputs (kept native, repainted dark) */
+.input-control { background: var(--surface); border-color: var(--line); }
+.input-control:focus-within { outline-color: rgba(124, 58, 237, 0.4); border-color: var(--accent); }
+.input-control-field { background: transparent; color: var(--text); }
+.input-control-addon { background-color: var(--surface-2); color: var(--text); }
+.input-control-prefix { border-right-color: var(--line); }
+.input-control-suffix { border-left-color: var(--line); }
+select.input-control-addon {
+  background-color: var(--surface-2);
+}
+html.wa-dark select.input-control-addon {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 7l5 5 5-5' fill='none' stroke='%23c4b5fd' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.byte-disable { background: var(--surface-2); color: var(--muted); }
+.byte-disable input { accent-color: var(--accent); }
+.input-control.is-disabled .input-control-field,
+.input-control.is-disabled .input-control-suffix {
+  color: var(--muted);
+  background-color: var(--panel);
+}
+
+/* Native buttons that remain (card actions, file chrome) */
+.button.primary { background: var(--accent); color: #fff; }
+.button.primary:hover { background: var(--accent-hover); }
+.button.secondary,
+.icon-button { background: var(--surface-2); color: var(--text); }
+.button.secondary:hover,
+.icon-button:hover { background: color-mix(in srgb, var(--surface-2) 86%, var(--text)); }
+.button.danger { background: var(--danger-quiet); color: var(--danger); }
+.button.danger:hover,
+.icon-button.danger:hover { background: color-mix(in srgb, var(--danger-quiet) 84%, var(--danger)); }
+.icon-button.danger { background: var(--danger-quiet); color: var(--danger); }
+
+/* Status chips */
+.status { border-color: var(--line); color: var(--muted); }
+.status.ok { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.1); color: var(--ok); }
+.status.warn { border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.1); color: var(--amber); }
+
+/* Cards */
+.profile-card {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.profile-facts { border-top-color: var(--line-soft); }
+.profile-actions { border-top-color: var(--line-soft); }
+.profile-facts dd { color: var(--text); }
+.profile-action { color: var(--text); }
+.profile-action:hover { background: var(--surface-2); }
+.profile-action.danger { color: var(--danger); }
+.profile-action.danger:hover { background: var(--danger-quiet); }
+
+/* Dialogs (wa-dialog) — we supply our own header inside, so hide WA chrome */
+wa-dialog::part(header) { display: none; }
+wa-dialog::part(body) { padding: 0; }
+wa-dialog::part(dialog) {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6);
+  max-height: calc(100vh - 32px);
+}
+
+.modal-head { border-bottom-color: var(--line); }
+.modal-actions { border-top-color: var(--line); }
+.icon-button { color: var(--text); }
+
+/* Put.io connection dialog internals */
+.putio-tabs { border-bottom-color: var(--line-soft); }
+.putio-tab:hover { color: var(--text); background: var(--surface); }
+.putio-tab[aria-selected="true"] { color: var(--accent-strong); border-bottom-color: var(--accent); }
+.message-box { background: var(--surface); border-color: var(--line); }
+.message-box[data-tone="ok"] { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.1); }
+.message-box[data-tone="warn"] { border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.1); }
+.message-box[data-tone="error"] { border-color: rgba(244, 115, 115, 0.3); background: rgba(244, 115, 115, 0.1); }
+.message-box .message { color: var(--text); }
+.message-box .icon-button { background: rgba(255, 255, 255, 0.06); }
+
+.oauth-panel { background: var(--surface); border-color: var(--line); }
+.oauth-panel a { color: var(--accent-strong); }
+.oauth-setup-hint { background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.3); color: var(--warn-ink); }
+.oauth-callback-row code { color: var(--text); }
+
+.putio-connected-panel { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.08); }
+.putio-connected-panel strong { color: var(--text); }
+.putio-advanced { background: var(--surface); border-color: var(--line); }
+
+/* Setup wizard help rail */
+.wizard-step { border-bottom-color: var(--line-soft); }
+.setup-preview { background: var(--surface); border-left-color: var(--line); }
+.endpoint-box { background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.32); }
+
+#profileWizardMessage { background: var(--surface); border-color: var(--line); color: var(--text); }
+#profileWizardMessage[data-tone="info"] { background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.32); color: var(--accent-strong); }
+#profileWizardMessage[data-tone="warn"] { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.3); color: var(--warn-ink); }
+
+/* Link rows */
+.link-row { background: var(--surface); border-color: var(--line); }
+
+/* Downloads */
+.download-row { background: var(--panel); border-color: var(--line); }
+.download-row[data-error="true"] { border-color: rgba(244, 115, 115, 0.4); background: rgba(244, 115, 115, 0.05); }
+.file-toggle { background: var(--surface); border-color: var(--line); color: var(--text); }
+.file-toggle span { background: var(--surface-2); color: var(--muted); }
+.file-toggle.open { background: rgba(124, 58, 237, 0.12); border-color: rgba(124, 58, 237, 0.4); color: var(--accent-strong); }
+.bar { background: var(--surface-2); }
+.file-panel { border-top-color: var(--line); }
+.file-list { border-color: var(--line); }
+.file-row { border-bottom-color: var(--line-soft); }
+.file-status { background: var(--surface-2); color: var(--muted); }
+.file-status[data-status="complete"] { background: rgba(52, 211, 153, 0.1); color: var(--ok); }
+.file-status[data-status="downloading"] { background: rgba(251, 191, 36, 0.12); color: var(--amber); }
+.file-status[data-status="failed"] { background: var(--danger-quiet); color: var(--danger); }
+
+.warning-copy { color: var(--warn-ink); background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.3); }
+.empty-state { border-color: var(--line); color: var(--muted); }
+
+/* Web Awesome component theming */
+wa-callout::part(base) { border-radius: 10px; }
+.warning-copy.wa-callout,
+wa-callout.warning-copy { background: rgba(251, 191, 36, 0.08); }
+wa-input::part(form-control-label),
+wa-select::part(form-control-label),
+wa-checkbox::part(label) { color: var(--text); font-weight: 700; font-size: 13px; }
+
+/* ==========================================================================
+   Sidebar + routed views layout
+   ========================================================================== */
+.shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 252px;
+  flex: 0 0 252px;
+  height: 100vh;
+  padding: 20px 16px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px 8px;
+}
+
+.sidebar-brand .hero-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+}
+
+.sidebar-brand h1 {
+  font-size: 21px;
+  line-height: 1.1;
+}
+
+.sidebar-tagline {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-item wa-icon {
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+
+.nav-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid rgba(124, 58, 237, 0.4);
+  outline-offset: 2px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 8px 6px 2px;
+}
+
+.sidebar-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-putio {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 40px;
+}
+
+.content {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 1200px;
+  margin: 0 auto;
+  align-content: start;
+}
+
+/* Grid panels must not stretch their rows to fill the full-height content
+   column — that balloons the panel and its single card vertically. */
+.panel {
+  align-content: start;
+}
+
+.profiles-list {
+  align-items: start;
+}
+
+.topbar {
+  align-items: center;
+}
+
+.topbar-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+@media (max-width: 860px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: static;
+    width: auto;
+    flex: none;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .sidebar-brand {
+    padding: 0;
+  }
+
+  .sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+  }
+
+  .sidebar-footer {
+    margin-top: 0;
+  }
+}
+
+/* ==========================================================================
+   Help / "How it works" page
+   ========================================================================== */
+.help-panel {
+  gap: 26px;
+}
+
+.help-lead {
+  max-width: 820px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-lead strong {
+  color: var(--accent-strong);
+}
+
+.help-diagram {
+  overflow-x: auto;
+  padding: 6px 0 2px;
+}
+
+.help-diagram svg {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  height: auto;
+}
+
+.hd-node {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.hd-node--accent {
+  fill: var(--accent-quiet);
+  stroke: var(--accent);
+}
+
+.hd-title {
+  fill: var(--text);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.hd-title--accent {
+  fill: var(--accent-strong);
+}
+
+.hd-sub {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.hd-label {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.hd-sublabel {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.hd-arrow {
+  fill: none;
+  stroke: var(--accent-strong);
+  stroke-width: 2;
+}
+
+.hd-arrow--return {
+  stroke: var(--line);
+  stroke-dasharray: 5 5;
+}
+
+.hd-arrowhead {
+  fill: var(--accent-strong);
+}
+
+.help-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  gap: 14px;
+}
+
+.help-step {
+  display: flex;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.help-step-num {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.help-step h3 {
+  margin: 2px 0 5px;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.help-step p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.help-step strong {
+  color: var(--text);
+}
+
+.help-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(124, 58, 237, 0.32);
+  border-radius: 12px;
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.help-cta h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+@media (max-width: 860px) {
+  .help-cta {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

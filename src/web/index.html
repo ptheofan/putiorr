@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="wa-dark">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0f766e">
+    <meta name="theme-color" content="#7c3aed">
     <title>putiorr</title>
     <link rel="icon" href="/favicon.ico?v=portal" sizes="any">
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16x16.png?v=portal">
@@ -11,85 +11,222 @@
     <link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48x48.png?v=portal">
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png?v=portal">
     <link rel="manifest" href="/manifest.webmanifest?v=portal">
+
+    <!-- Web Awesome (framework-agnostic Web Components) via CDN, no build step -->
+    <link rel="stylesheet" href="https://ka-f.webawesome.com/webawesome@3.9.0/styles/webawesome.css">
+    <script type="module" src="https://ka-f.webawesome.com/webawesome@3.9.0/webawesome.loader.js"></script>
+
+    <!-- Apply the saved theme before first paint to avoid a flash. Default is dark. -->
+    <script>try{if(localStorage.getItem('putiorr:theme')==='light')document.documentElement.classList.remove('wa-dark');}catch(e){}</script>
+
     <link rel="stylesheet" href="/app.css">
   </head>
   <body>
     <div class="shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="hero-icon" aria-hidden="true">
+            <img src="/icons/putiorr-icon-128.png?v=portal" alt="">
+          </span>
+          <div>
+            <h1>putio<span class="brand-accent">rr</span></h1>
+            <p class="sidebar-tagline">put.io bridge for *arr</p>
+          </div>
+        </div>
+
+        <nav class="sidebar-nav" aria-label="Primary">
+          <a class="nav-item" href="#/downloads" data-route="downloads">
+            <wa-icon name="cloud-arrow-down"></wa-icon>
+            <span>Current downloads</span>
+          </a>
+          <a class="nav-item" href="#/profiles" data-route="profiles">
+            <wa-icon name="server"></wa-icon>
+            <span>RR profiles</span>
+          </a>
+          <a class="nav-item" href="#/download-profiles" data-route="download-profiles">
+            <wa-icon name="sliders"></wa-icon>
+            <span>Download profiles</span>
+          </a>
+          <a class="nav-item" href="#/help" data-route="help">
+            <wa-icon name="circle-question"></wa-icon>
+            <span>How it works</span>
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="putio-status-button sidebar-putio" type="button" data-state="unknown" aria-label="Put.io connection status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span>Put.io</span>
+          </button>
+          <div class="sidebar-footer-links">
+          <a id="versionUpdateLink" class="version-update-link" href="https://github.com/ptheofan/putiorr/releases/latest" target="_blank" rel="noreferrer" hidden>Update available</a>
+          <button id="themeToggle" class="topbar-icon-link" type="button" aria-label="Switch theme" title="Switch theme">
+            <wa-icon name="moon"></wa-icon>
+          </button>
+          <a class="topbar-icon-link" href="https://ptheofan.github.io/putiorr/" target="_blank" rel="noreferrer" aria-label="Open project portal" title="Project portal">
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+              <path d="M12 0.5C5.65 0.5 0.5 5.65 0.5 12c0 5.08 3.29 9.39 7.86 10.91 0.58 0.1 0.79-0.25 0.79-0.56v-2.16c-3.2 0.69-3.87-1.36-3.87-1.36-0.52-1.33-1.28-1.68-1.28-1.68-1.04-0.71 0.08-0.7 0.08-0.7 1.15 0.08 1.76 1.18 1.76 1.18 1.03 1.75 2.69 1.25 3.34 0.95 0.1-0.74 0.4-1.25 0.73-1.54-2.56-0.29-5.25-1.28-5.25-5.7 0-1.26 0.45-2.29 1.18-3.1-0.12-0.29-0.51-1.47 0.11-3.06 0 0 0.96-0.31 3.16 1.18 0.92-0.26 1.9-0.38 2.88-0.39 0.98 0 1.96 0.13 2.88 0.39 2.2-1.49 3.16-1.18 3.16-1.18 0.62 1.59 0.23 2.77 0.11 3.06 0.74 0.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.7 0.41 0.36 0.78 1.06 0.78 2.14v3.17c0 0.31 0.21 0.67 0.79 0.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35 0.5 12 0.5Z"></path>
+            </svg>
+          </a>
+          </div>
+        </div>
+      </aside>
+
       <main class="content">
         <header class="topbar">
-          <div class="hero-brand">
-            <span class="hero-icon" aria-hidden="true">
-              <img src="/icons/putiorr-icon-128.png?v=portal" alt="">
-            </span>
-            <div>
-              <h1>putiorr</h1>
-              <p>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</p>
-            </div>
-          </div>
-          <div class="topbar-actions">
-            <a id="versionUpdateLink" class="version-update-link" href="https://github.com/ptheofan/putiorr/releases/latest" target="_blank" rel="noreferrer" hidden>Update available</a>
-            <a class="topbar-icon-link" href="https://ptheofan.github.io/putiorr/" target="_blank" rel="noreferrer" aria-label="Open project portal" title="Project portal">
-              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
-                <path d="M12 0.5C5.65 0.5 0.5 5.65 0.5 12c0 5.08 3.29 9.39 7.86 10.91 0.58 0.1 0.79-0.25 0.79-0.56v-2.16c-3.2 0.69-3.87-1.36-3.87-1.36-0.52-1.33-1.28-1.68-1.28-1.68-1.04-0.71 0.08-0.7 0.08-0.7 1.15 0.08 1.76 1.18 1.76 1.18 1.03 1.75 2.69 1.25 3.34 0.95 0.1-0.74 0.4-1.25 0.73-1.54-2.56-0.29-5.25-1.28-5.25-5.7 0-1.26 0.45-2.29 1.18-3.1-0.12-0.29-0.51-1.47 0.11-3.06 0 0 0.96-0.31 3.16 1.18 0.92-0.26 1.9-0.38 2.88-0.39 0.98 0 1.96 0.13 2.88 0.39 2.2-1.49 3.16-1.18 3.16-1.18 0.62 1.59 0.23 2.77 0.11 3.06 0.74 0.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.7 0.41 0.36 0.78 1.06 0.78 2.14v3.17c0 0.31 0.21 0.67 0.79 0.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35 0.5 12 0.5Z"></path>
-              </svg>
-            </a>
-            <button id="putioStatusButton" class="putio-status-button" type="button" data-state="unknown" aria-label="Put.io connection status">
-              <span class="status-dot" aria-hidden="true"></span>
-              <span>Put.io</span>
-            </button>
-          </div>
+          <div class="topbar-title" id="routeTitle">RR profiles</div>
         </header>
 
-        <section id="profiles" class="panel">
+        <section id="profiles" class="panel" data-route-view="profiles">
           <div class="section-head">
             <div>
-              <h2>RR profiles</h2>
               <p>Use the setup wizard to create one profile per app and copy the matching download-client settings.</p>
             </div>
-            <button id="addProfileButton" class="button primary" type="button">
-              <span aria-hidden="true">＋</span>
+            <wa-button id="addProfileButton" variant="brand" appearance="accent">
+              <wa-icon slot="start" name="plus"></wa-icon>
               Setup profile
-            </button>
+            </wa-button>
           </div>
 
           <div id="profilesBody" class="profiles-list"></div>
         </section>
 
-        <section id="download-profiles" class="panel">
+        <section id="download-profiles" class="panel" data-route-view="download-profiles" hidden>
           <div class="section-head">
             <div>
-              <h2>Download profiles</h2>
               <p>Tune slow-speed reset separately for music, episodes, movies, and other download shapes.</p>
             </div>
             <div class="button-row section-actions">
-              <button id="linkDownloadProfilesButton" class="button secondary" type="button">
-                <span aria-hidden="true">↔</span>
+              <wa-button id="linkDownloadProfilesButton" variant="neutral" appearance="outlined">
+                <wa-icon slot="start" name="right-left"></wa-icon>
                 Link RR profiles
-              </button>
-              <button id="addDownloadProfileButton" class="button primary" type="button">
-                <span aria-hidden="true">＋</span>
+              </wa-button>
+              <wa-button id="addDownloadProfileButton" variant="brand" appearance="accent">
+                <wa-icon slot="start" name="plus"></wa-icon>
                 Add profile
-              </button>
+              </wa-button>
             </div>
           </div>
 
           <div id="downloadProfilesBody" class="profiles-list"></div>
         </section>
 
-        <section id="downloads" class="panel">
+        <section id="downloads" class="panel" data-route-view="downloads" hidden>
           <div class="section-head">
             <div>
-              <h2>Current downloads</h2>
               <p>Combined put.io and local transfer state from the durable SQLite queue.</p>
             </div>
           </div>
 
           <div id="downloadsList" class="downloads-list"></div>
         </section>
+
+        <section id="help" class="panel help-panel" data-route-view="help" hidden>
+          <p class="help-lead">putiorr makes <strong>put.io</strong> look like a local <strong>Transmission</strong> download client. Your *arr apps send releases to putiorr, put.io downloads them in the cloud, then putiorr copies the finished files into a folder your *arr app imports from — no local seeding, no torrent client to babysit.</p>
+
+          <div class="help-diagram">
+            <svg viewBox="0 0 1000 330" role="img" aria-label="Diagram: *arr apps send releases to putiorr, which queues them on put.io; put.io downloads in the cloud and putiorr copies finished files to a shared folder that the *arr app imports from.">
+              <defs>
+                <marker id="hdArrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0 L10 5 L0 10 z" class="hd-arrowhead"></path>
+                </marker>
+              </defs>
+
+              <!-- arrow labels -->
+              <text x="246" y="52" text-anchor="middle" class="hd-label">① magnet · torrent</text>
+              <text x="246" y="68" text-anchor="middle" class="hd-sublabel">Transmission RPC</text>
+              <text x="499" y="52" text-anchor="middle" class="hd-label">② queue transfer</text>
+              <text x="499" y="68" text-anchor="middle" class="hd-sublabel">put.io API</text>
+              <text x="752" y="52" text-anchor="middle" class="hd-label">③ copy finished files</text>
+              <text x="752" y="68" text-anchor="middle" class="hd-sublabel">put.io → disk</text>
+
+              <!-- nodes -->
+              <g>
+                <rect x="30" y="78" width="180" height="96" rx="14" class="hd-node"></rect>
+                <text x="120" y="120" text-anchor="middle" class="hd-title">*arr apps</text>
+                <text x="120" y="142" text-anchor="middle" class="hd-sub">Sonarr · Radarr</text>
+                <text x="120" y="158" text-anchor="middle" class="hd-sub">Lidarr · Prowlarr</text>
+              </g>
+              <g>
+                <rect x="283" y="78" width="180" height="96" rx="14" class="hd-node hd-node--accent"></rect>
+                <text x="373" y="124" text-anchor="middle" class="hd-title hd-title--accent">putiorr</text>
+                <text x="373" y="146" text-anchor="middle" class="hd-sub">The bridge</text>
+              </g>
+              <g>
+                <rect x="536" y="78" width="180" height="96" rx="14" class="hd-node hd-node--accent"></rect>
+                <text x="626" y="124" text-anchor="middle" class="hd-title hd-title--accent">put.io</text>
+                <text x="626" y="146" text-anchor="middle" class="hd-sub">Cloud downloader</text>
+              </g>
+              <g>
+                <rect x="789" y="78" width="180" height="96" rx="14" class="hd-node"></rect>
+                <text x="879" y="120" text-anchor="middle" class="hd-title">Shared folder</text>
+                <text x="879" y="142" text-anchor="middle" class="hd-sub">Mounted in both</text>
+                <text x="879" y="158" text-anchor="middle" class="hd-sub">containers</text>
+              </g>
+
+              <!-- forward arrows -->
+              <line x1="210" y1="126" x2="277" y2="126" class="hd-arrow" marker-end="url(#hdArrow)"></line>
+              <line x1="463" y1="126" x2="530" y2="126" class="hd-arrow" marker-end="url(#hdArrow)"></line>
+              <line x1="716" y1="126" x2="783" y2="126" class="hd-arrow" marker-end="url(#hdArrow)"></line>
+
+              <!-- return loop: completed media imported back to the *arr app -->
+              <path d="M879 174 V250 Q879 268 861 268 H139 Q120 268 120 250 V174" class="hd-arrow hd-arrow--return" marker-end="url(#hdArrow)"></path>
+              <text x="499" y="292" text-anchor="middle" class="hd-label">④ *arr imports the completed media from the shared folder</text>
+            </svg>
+          </div>
+
+          <div class="help-steps">
+            <article class="help-step">
+              <div class="help-step-num">1</div>
+              <div>
+                <h3>Your app grabs a release</h3>
+                <p>Sonarr, Radarr or Lidarr sends the magnet or .torrent to putiorr over the Transmission RPC protocol — putiorr looks like an ordinary download client. Each app uses its own <strong>RR profile</strong> and category.</p>
+              </div>
+            </article>
+            <article class="help-step">
+              <div class="help-step-num">2</div>
+              <div>
+                <h3>putiorr queues it on put.io</h3>
+                <p>The bridge forwards the transfer to your connected put.io account using the put.io API, into the destination folder set on the profile.</p>
+              </div>
+            </article>
+            <article class="help-step">
+              <div class="help-step-num">3</div>
+              <div>
+                <h3>put.io downloads in the cloud</h3>
+                <p>put.io fetches and seeds the torrent remotely. The dashboard shows live put.io progress, including the <strong>Completing</strong> phase while it finalises.</p>
+              </div>
+            </article>
+            <article class="help-step">
+              <div class="help-step-num">4</div>
+              <div>
+                <h3>Files land where the app looks</h3>
+                <p>Once ready, putiorr copies the files into the shared download folder. Your app sees the completed download at that exact path and imports it. A <strong>Download profile</strong> controls slow-speed reset during the copy.</p>
+              </div>
+            </article>
+          </div>
+
+          <div class="help-cta">
+            <div>
+              <h3>Get started</h3>
+              <p>Connect put.io, then create one RR profile per app.</p>
+            </div>
+            <div class="button-row">
+              <wa-button id="helpConnectButton" variant="brand" appearance="accent">
+                <wa-icon slot="start" name="plug"></wa-icon>
+                Connect put.io
+              </wa-button>
+              <wa-button href="#/profiles" variant="neutral" appearance="outlined">
+                <wa-icon slot="start" name="server"></wa-icon>
+                Create an RR profile
+              </wa-button>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
 
-    <dialog id="putioDialog" class="modal putio-modal">
+    <wa-dialog id="putioDialog" class="modal putio-modal" style="--width: 620px">
       <form id="settingsForm" class="putio-form">
         <div class="modal-head">
           <div>
@@ -112,10 +249,10 @@
         <section id="putioOauthPanel" class="putio-tab-panel wizard-step" role="tabpanel" aria-labelledby="putioOauthTab" data-putio-panel="oauth">
           <div id="putioOauthStepLabel" class="step-label">Connect</div>
           <div id="putioConnectPanel" class="button-row putio-connect-actions">
-            <button id="oauthStartButton" class="button primary" type="button">
-              <span aria-hidden="true">↗</span>
+            <wa-button id="oauthStartButton" variant="brand" appearance="accent">
+              <wa-icon slot="start" name="arrow-up-right-from-square"></wa-icon>
               Connect with put.io
-            </button>
+            </wa-button>
           </div>
           <div id="putioConnectedPanel" class="putio-connected-panel" hidden>
             <span class="status-dot" aria-hidden="true"></span>
@@ -136,21 +273,15 @@
                 <h3 id="putioAdvancedTitle">Advanced</h3>
                 <p>Override the baked OAuth defaults for this instance.</p>
               </div>
-              <button id="resetPutioOAuthSettingsButton" class="button secondary" type="button">Reset</button>
+              <wa-button id="resetPutioOAuthSettingsButton" variant="neutral" appearance="outlined" size="s">Reset</wa-button>
             </div>
             <p id="oauthSetupHint" class="oauth-setup-hint"></p>
             <div class="field-pair">
-              <label>
-                OAuth relay url
-                <input id="putioOAuthRelayUrl" type="url" autocomplete="off" spellcheck="false" placeholder="https://ptheofan.github.io/putiorr/putio-oauth-relay.html">
-              </label>
-              <label>
-                App Id
-                <input id="putioOAuthAppId" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="9354">
-              </label>
+              <wa-input id="putioOAuthRelayUrl" label="OAuth relay url" type="url" autocomplete="off" spellcheck="false" placeholder="https://ptheofan.github.io/putiorr/putio-oauth-relay.html"></wa-input>
+              <wa-input id="putioOAuthAppId" label="App Id" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="9354"></wa-input>
             </div>
             <div class="button-row">
-              <button id="savePutioOAuthSettingsButton" class="button secondary" type="button">Save OAuth settings</button>
+              <wa-button id="savePutioOAuthSettingsButton" variant="neutral" appearance="outlined" size="s">Save OAuth settings</wa-button>
             </div>
           </section>
 
@@ -160,38 +291,35 @@
               <p>Redirecting to put.io authorization. If your browser does not redirect, use <a id="oauthLink" href="https://app.put.io/settings/account/oauth/apps" target="_blank" rel="noreferrer">this authorization link</a>.</p>
               <p class="oauth-callback-row">Put.io redirect URI: <code id="oauthCallbackUrl"></code></p>
             </div>
-            <button id="oauthPollButton" class="button secondary" type="button">
-              <span aria-hidden="true">⟳</span>
+            <wa-button id="oauthPollButton" variant="neutral" appearance="outlined">
+              <wa-icon slot="start" name="rotate"></wa-icon>
               Check connection
-            </button>
+            </wa-button>
           </div>
         </section>
 
         <section id="putioTokenPanel" class="putio-tab-panel wizard-step" role="tabpanel" aria-labelledby="putioTokenTab" data-putio-panel="token" hidden>
           <div class="step-label">Direct Token</div>
-          <label>
-            OAuth token
-            <input id="putioToken" name="putioToken" type="password" autocomplete="off" placeholder="Paste a token to connect or rotate">
-          </label>
+          <wa-input id="putioToken" name="putioToken" label="OAuth token" type="password" password-toggle autocomplete="off" placeholder="Paste a token to connect or rotate"></wa-input>
         </section>
 
         <div class="modal-actions">
-          <button class="button secondary" type="button" data-action="cancel-putio">Cancel</button>
-          <button id="testConnectionButton" class="button secondary" type="button">
-            <span aria-hidden="true">✓</span>
+          <wa-button variant="neutral" appearance="outlined" data-action="cancel-putio">Cancel</wa-button>
+          <wa-button id="testConnectionButton" variant="neutral" appearance="outlined">
+            <wa-icon slot="start" name="bolt"></wa-icon>
             Test connection
-          </button>
-          <button id="putioDisconnectButton" class="button danger" type="button">
+          </wa-button>
+          <wa-button id="putioDisconnectButton" variant="danger" appearance="outlined">
             Disconnect
-          </button>
-          <button id="savePutioTokenButton" class="button primary" type="submit">
+          </wa-button>
+          <wa-button id="savePutioTokenButton" variant="brand" appearance="accent" type="submit">
             Save
-          </button>
+          </wa-button>
         </div>
       </form>
-    </dialog>
+    </wa-dialog>
 
-    <dialog id="profileWizard" class="modal">
+    <wa-dialog id="profileWizard" class="modal" style="--width: 900px">
       <form id="profileWizardForm" class="wizard-form">
         <div class="modal-head">
           <div>
@@ -208,21 +336,15 @@
             <section class="wizard-step">
               <div class="step-label">1. App</div>
               <div class="field-pair">
-                <label>
-                  App preset
-                  <select id="wizardProfileType">
-                    <option value="sonarr">Sonarr</option>
-                    <option value="radarr">Radarr</option>
-                    <option value="lidarr">Lidarr</option>
-                    <option value="readarr">Readarr</option>
-                    <option value="prowlarr">Prowlarr</option>
-                    <option value="custom">Custom</option>
-                  </select>
-                </label>
-                <label>
-                  Display name
-                  <input id="wizardProfileName" type="text" autocomplete="off" placeholder="Sonarr">
-                </label>
+                <wa-select id="wizardProfileType" label="App preset" value="sonarr">
+                  <wa-option value="sonarr">Sonarr</wa-option>
+                  <wa-option value="radarr">Radarr</wa-option>
+                  <wa-option value="lidarr">Lidarr</wa-option>
+                  <wa-option value="readarr">Readarr</wa-option>
+                  <wa-option value="prowlarr">Prowlarr</wa-option>
+                  <wa-option value="custom">Custom</wa-option>
+                </wa-select>
+                <wa-input id="wizardProfileName" label="Display name" type="text" autocomplete="off" placeholder="Sonarr"></wa-input>
               </div>
               <p class="field-help">The preset fills sensible defaults. The display name becomes the *arr download-client category.</p>
             </section>
@@ -230,47 +352,23 @@
             <section class="wizard-step">
               <div class="step-label">2. Storage</div>
               <div class="field-pair">
-                <label>
-                  Put.io destination folder
-                  <input id="wizardPutioFolder" type="text" autocomplete="off" placeholder="putiorr">
-                </label>
-                <label>
-                  Shared download folder
-                  <input id="wizardDownloadAt" type="text" autocomplete="off" placeholder="/putiorr">
-                </label>
+                <wa-input id="wizardPutioFolder" label="Put.io destination folder" type="text" autocomplete="off" placeholder="putiorr"></wa-input>
+                <wa-input id="wizardDownloadAt" label="Shared download folder" type="text" autocomplete="off" placeholder="/putiorr"></wa-input>
               </div>
               <p class="field-help">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
-              <label>
-                Download profile
-                <select id="wizardDownloadProfile"></select>
-              </label>
+              <wa-select id="wizardDownloadProfile" label="Download profile"></wa-select>
             </section>
 
             <section class="wizard-step">
               <div class="step-label">3. RPC endpoint</div>
-              <label>
-                RPC endpoint path
-                <input id="wizardRpcPath" type="text" autocomplete="off" placeholder="/sonarr/transmission/rpc">
-              </label>
+              <wa-input id="wizardRpcPath" label="RPC endpoint path" type="text" autocomplete="off" placeholder="/sonarr/transmission/rpc"></wa-input>
               <div class="field-pair compact">
-                <label>
-                  Host from the *arr container
-                  <input id="wizardClientHost" type="text" autocomplete="off" placeholder="putiorr">
-                </label>
-                <label>
-                  Port
-                  <input id="wizardClientPort" type="text" inputmode="numeric" autocomplete="off" placeholder="9091">
-                </label>
+                <wa-input id="wizardClientHost" label="Host from the *arr container" type="text" autocomplete="off" placeholder="putiorr"></wa-input>
+                <wa-input id="wizardClientPort" label="Port" type="text" inputmode="numeric" autocomplete="off" placeholder="9091"></wa-input>
               </div>
               <div class="check-grid">
-                <label class="check-row">
-                  <input id="wizardUseSsl" type="checkbox">
-                  Use SSL for the download client
-                </label>
-                <label class="check-row">
-                  <input id="wizardEnabled" type="checkbox">
-                  Enable this profile
-                </label>
+                <wa-checkbox id="wizardUseSsl">Use SSL for the download client</wa-checkbox>
+                <wa-checkbox id="wizardEnabled">Enable this profile</wa-checkbox>
               </div>
             </section>
           </div>
@@ -281,10 +379,10 @@
                 <span id="wizardHelpKicker" class="step-label">Field guide</span>
                 <h3 id="wizardHelpTitle">App preset</h3>
               </div>
-              <button id="copyClientSettingsButton" class="button secondary" type="button">
-                <span aria-hidden="true">⧉</span>
+              <wa-button id="copyClientSettingsButton" variant="neutral" appearance="outlined" size="s">
+                <wa-icon slot="start" name="clipboard"></wa-icon>
                 Copy settings
-              </button>
+              </wa-button>
             </div>
             <div id="wizardHelpBody" class="help-body"></div>
             <ul id="wizardHelpList" class="help-list"></ul>
@@ -298,16 +396,16 @@
         <p id="profileWizardMessage" class="message" role="status"></p>
 
         <div class="modal-actions">
-          <button id="deleteProfileButton" class="button danger" type="button">Delete profile</button>
+          <wa-button id="deleteProfileButton" variant="danger" appearance="outlined">Delete profile</wa-button>
           <div class="button-row">
-            <button class="button secondary" type="button" data-action="cancel-profile-wizard">Cancel</button>
-            <button id="saveProfileButton" class="button primary" type="submit">Save & test</button>
+            <wa-button variant="neutral" appearance="outlined" data-action="cancel-profile-wizard">Cancel</wa-button>
+            <wa-button id="saveProfileButton" variant="brand" appearance="accent" type="submit">Save &amp; test</wa-button>
           </div>
         </div>
       </form>
-    </dialog>
+    </wa-dialog>
 
-    <dialog id="downloadProfileDialog" class="modal download-profile-modal">
+    <wa-dialog id="downloadProfileDialog" class="modal download-profile-modal" style="--width: 760px">
       <form id="downloadProfileForm" class="download-profile-form">
         <div class="modal-head">
           <div>
@@ -322,10 +420,7 @@
             <section class="wizard-step">
               <div class="step-label">Profile</div>
               <input id="downloadProfileId" type="hidden">
-              <label>
-                Name
-                <input id="downloadProfileName" type="text" autocomplete="off" placeholder="Movies">
-              </label>
+              <wa-input id="downloadProfileName" label="Name" type="text" autocomplete="off" placeholder="Movies"></wa-input>
               <p class="field-help">Use one profile per download shape, such as movies, TV episodes, music, or books.</p>
             </section>
 
@@ -411,16 +506,16 @@
         <p id="downloadProfileMessage" class="message modal-message" role="status"></p>
 
         <div class="modal-actions">
-          <button id="deleteDownloadProfileButton" class="button danger" type="button">Delete profile</button>
+          <wa-button id="deleteDownloadProfileButton" variant="danger" appearance="outlined">Delete profile</wa-button>
           <div class="button-row">
-            <button class="button secondary" type="button" data-action="cancel-download-profile">Cancel</button>
-            <button id="saveDownloadProfileButton" class="button primary" type="submit">Save profile</button>
+            <wa-button variant="neutral" appearance="outlined" data-action="cancel-download-profile">Cancel</wa-button>
+            <wa-button id="saveDownloadProfileButton" variant="brand" appearance="accent" type="submit">Save profile</wa-button>
           </div>
         </div>
       </form>
-    </dialog>
+    </wa-dialog>
 
-    <dialog id="profileLinksDialog" class="modal compact-modal">
+    <wa-dialog id="profileLinksDialog" class="modal compact-modal" style="--width: 620px">
       <form id="profileLinksForm" class="download-profile-form">
         <div class="modal-head">
           <div>
@@ -437,14 +532,14 @@
         <div class="modal-actions">
           <span></span>
           <div class="button-row">
-            <button class="button secondary" type="button" data-action="cancel-profile-links">Cancel</button>
-            <button id="saveProfileLinksButton" class="button primary" type="submit">Save links</button>
+            <wa-button variant="neutral" appearance="outlined" data-action="cancel-profile-links">Cancel</wa-button>
+            <wa-button id="saveProfileLinksButton" variant="brand" appearance="accent" type="submit">Save links</wa-button>
           </div>
         </div>
       </form>
-    </dialog>
+    </wa-dialog>
 
-    <dialog id="deleteConfirmDialog" class="modal compact-modal">
+    <wa-dialog id="deleteConfirmDialog" class="modal compact-modal" style="--width: 620px">
       <form id="deleteConfirmForm" class="confirm-form">
         <div class="modal-head">
           <div>
@@ -455,15 +550,12 @@
         </div>
 
         <div class="modal-body confirm-body">
-          <p class="warning-copy">It is usually safer to do this from the Activity page in your RR software so it can update its own queue state.</p>
-          <label class="checkbox-row">
-            <input id="deleteFromPutio" type="checkbox" checked>
-            <span id="deleteFromPutioLabel">Also delete from put.io</span>
-          </label>
-          <label class="checkbox-row">
-            <input id="deleteLocalFiles" type="checkbox">
-            <span id="deleteLocalFilesLabel">Also delete the downloaded files from disk</span>
-          </label>
+          <wa-callout variant="warning" class="warning-copy">
+            <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
+            It is usually safer to do this from the Activity page in your RR software so it can update its own queue state.
+          </wa-callout>
+          <wa-checkbox id="deleteFromPutio" checked><span id="deleteFromPutioLabel">Also delete from put.io</span></wa-checkbox>
+          <wa-checkbox id="deleteLocalFiles"><span id="deleteLocalFilesLabel">Also delete the downloaded files from disk</span></wa-checkbox>
         </div>
 
         <p id="deleteConfirmMessage" class="message modal-message" role="status"></p>
@@ -471,12 +563,12 @@
         <div class="modal-actions">
           <span></span>
           <div class="button-row">
-            <button class="button secondary" type="button" data-action="cancel-delete">Cancel</button>
-            <button id="deleteConfirmButton" class="button danger" type="submit">Delete</button>
+            <wa-button variant="neutral" appearance="outlined" data-action="cancel-delete">Cancel</wa-button>
+            <wa-button id="deleteConfirmButton" variant="danger" appearance="accent" type="submit">Delete</wa-button>
           </div>
         </div>
       </form>
-    </dialog>
+    </wa-dialog>
 
     <script type="module" src="/app.js"></script>
   </body>
