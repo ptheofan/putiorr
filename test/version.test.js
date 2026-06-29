@@ -24,7 +24,7 @@ test('compareSemver orders major minor and patch versions', () => {
   assert.equal(compareSemver({ version: '1.2.3' }, { version: '1.2.4' }), -1);
 });
 
-test('VersionChecker reports newer GitHub release and caches the result', async () => {
+test('VersionChecker reports newer GitHub release without caching the result', async () => {
   let calls = 0;
   const checker = new VersionChecker({
     currentVersion: '1.0.2',
@@ -44,7 +44,7 @@ test('VersionChecker reports newer GitHub release and caches the result', async 
   const first = await checker.check();
   const second = await checker.check();
 
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   assert.equal(first.status, 'ok');
   assert.equal(first.currentVersion, '1.0.2');
   assert.equal(first.latestVersion, '1.0.3');

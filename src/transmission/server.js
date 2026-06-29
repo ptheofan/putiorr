@@ -429,6 +429,7 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'GET' && requestPath === '/api/version') {
+        res.setHeader('Cache-Control', 'no-store');
         jsonResponse(res, 200, await this.versionChecker.check(), this.sessionId);
         return;
       }

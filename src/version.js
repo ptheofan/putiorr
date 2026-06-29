@@ -6,16 +6,11 @@ import semver from 'semver';
 const PACKAGE_JSON_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../package.json');
 const DEFAULT_RELEASE_API_URL = 'https://api.github.com/repos/ptheofan/putiorr/releases/latest';
 const DEFAULT_RELEASE_URL = 'https://github.com/ptheofan/putiorr/releases/latest';
-const DEFAULT_CHECK_TTL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_CHECK_TIMEOUT_MS = 3_000;
 
 function readPackageVersion() {
-  try {
-    const packageJson = JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf8'));
-    return String(packageJson.version ?? '0.0.0');
-  } catch {
-    return '0.0.0';
-  }
+  const packageJson = JSON.parse(readFileSync(PACKAGE_JSON_PATH, 'utf8'));
+  return String(packageJson.version ?? '0.0.0');
 }
 
 export const CURRENT_VERSION = readPackageVersion();
@@ -51,7 +46,6 @@ export class VersionChecker {
     fetch: fetchImpl = globalThis.fetch,
     releaseApiUrl = DEFAULT_RELEASE_API_URL,
     releaseUrl = DEFAULT_RELEASE_URL,
-    ttlMs = DEFAULT_CHECK_TTL_MS,
     timeoutMs = DEFAULT_CHECK_TIMEOUT_MS,
     now = () => Date.now(),
   } = {}) {
@@ -59,21 +53,12 @@ export class VersionChecker {
     this.fetch = fetchImpl;
     this.releaseApiUrl = releaseApiUrl;
     this.releaseUrl = releaseUrl;
-    this.ttlMs = ttlMs;
     this.timeoutMs = timeoutMs;
     this.now = now;
-    this.cache = undefined;
   }
 
   async check() {
-    const now = this.now();
-    if (this.cache && now - this.cache.checkedAtMs < this.ttlMs) {
-      return this.publicResponse(this.cache);
-    }
-
-    const result = await this.fetchLatest(now);
-    this.cache = result;
-    return this.publicResponse(result);
+    return this.publicResponse(await this.fetchLatest(this.now()));
   }
 
   publicResponse(result) {
