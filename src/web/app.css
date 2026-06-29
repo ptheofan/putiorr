@@ -97,8 +97,19 @@ select {
   white-space: nowrap;
 }
 
+.version-update-link.is-current-version {
+  color: rgba(100, 114, 117, 0.62);
+  font-weight: 650;
+  text-decoration: none;
+  cursor: default;
+}
+
 .version-update-link:hover {
   color: var(--accent);
+}
+
+.version-update-link.is-current-version:hover {
+  color: rgba(100, 114, 117, 0.62);
 }
 
 .version-update-link:focus-visible {
