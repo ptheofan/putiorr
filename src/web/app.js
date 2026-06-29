@@ -2773,6 +2773,34 @@ el.deleteConfirmDialog.addEventListener('click', (event) => {
   if (event.target === el.deleteConfirmDialog) closeDeleteConfirm();
 });
 
+function setSectionCollapsed(panel, toggle, collapsed) {
+  panel.classList.toggle('collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function initCollapsibleSections() {
+  for (const toggle of document.querySelectorAll('[data-action="toggle-section"]')) {
+    const panel = toggle.closest('.panel');
+    if (!panel) continue;
+    const key = `putiorr:collapsed:${panel.id}`;
+    let stored = null;
+    try {
+      stored = localStorage.getItem(key);
+    } catch {}
+    setSectionCollapsed(panel, toggle, stored === '1');
+    const toggleSection = () => {
+      const next = !panel.classList.contains('collapsed');
+      setSectionCollapsed(panel, toggle, next);
+      try {
+        localStorage.setItem(key, next ? '1' : '0');
+      } catch {}
+    };
+    toggle.addEventListener('click', toggleSection);
+    panel.querySelector('.section-heading h2')?.addEventListener('click', toggleSection);
+  }
+}
+
+initCollapsibleSections();
 loadAll().catch((error) => setMessage(error.message, 'error'));
 loadVersion().catch(() => {});
 connectUpdates();
