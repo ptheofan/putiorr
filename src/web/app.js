@@ -2852,43 +2852,69 @@ function renderTopology() {
   }
 
   const NODE_H = 58;
-  const LEAF_H = 54;
-  const LEAF_GAP = 12;
+  const DL_H = 54;
+  const DL_GAP = 12;
   const BAND_GAP = 26;
+  const DP_GAP = 16;
   const PUTIO = { x: 24, w: 184 };
   const RR = { x: 280, w: 224 };
-  const LEAF = { x: 576, w: 300 };
-  const WIDTH = 904;
+  const DP = { x: 572, w: 248 };
+  const DL = { x: 892, w: 256 };
 
+  // RR profile bands, each tall enough for its own downloads (placed in the DL column).
   let cursor = 24;
-  const bands = profiles.map((profile) => {
-    const dpId = profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId();
+  let hasDownloads = false;
+  const rrNodes = profiles.map((profile) => {
     const downloads = topologyDownloadsForProfile(profile);
-    const leaves = [
-      { eyebrow: 'Download profile', title: downloadProfileDisplayName(dpId), sub: '', variant: 'dprofile' },
-      ...downloads.map((download) => ({
-        eyebrow: downloadTopologyEyebrow(download),
-        title: download.name,
-        sub: `${clampPercent(download.combinedProgress)}% complete`,
-        variant: downloadTopologyVariant(download),
-        download: true,
-      })),
-    ];
-    const bandHeight = Math.max(NODE_H, leaves.length * (LEAF_H + LEAF_GAP) - LEAF_GAP);
-    const band = { profile, leaves, top: cursor, height: bandHeight };
-    cursor += bandHeight + BAND_GAP;
-    return band;
+    if (downloads.length) hasDownloads = true;
+    const height = Math.max(NODE_H, downloads.length * (DL_H + DL_GAP) - DL_GAP);
+    const top = cursor;
+    cursor += height + BAND_GAP;
+    const dpId = profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId();
+    return { profile, downloads, top, cy: top + height / 2, dpKey: String(dpId ?? ''), dpName: downloadProfileDisplayName(dpId) };
   });
 
-  const totalHeight = Math.max(cursor - BAND_GAP + 24, NODE_H + 48);
+  // One node per unique download profile, vertically centred on the profiles using it.
+  const dpMap = new Map();
+  for (const rr of rrNodes) {
+    if (!dpMap.has(rr.dpKey)) dpMap.set(rr.dpKey, { key: rr.dpKey, name: rr.dpName, users: [] });
+    dpMap.get(rr.dpKey).users.push(rr);
+  }
+  const dpNodes = [...dpMap.values()].map((dp) => ({
+    ...dp,
+    cy: dp.users.reduce((sum, user) => sum + user.cy, 0) / dp.users.length,
+  }));
+  dpNodes.sort((a, b) => a.cy - b.cy);
+  let prevBottom = -Infinity;
+  for (const dp of dpNodes) {
+    const top = Math.max(dp.cy - NODE_H / 2, prevBottom + DP_GAP);
+    dp.top = top;
+    dp.cy = top + NODE_H / 2;
+    prevBottom = top + NODE_H;
+  }
+
+  const rrBottom = cursor - BAND_GAP + 24;
+  const dpBottom = dpNodes.length ? dpNodes[dpNodes.length - 1].top + NODE_H + 24 : 0;
+  const totalHeight = Math.max(rrBottom, dpBottom, NODE_H + 48);
   const putioY = totalHeight / 2 - NODE_H / 2;
-  const putioRight = PUTIO.x + PUTIO.w;
   const putioCy = putioY + NODE_H / 2;
+  const putioRight = PUTIO.x + PUTIO.w;
 
   const edges = [];
   const nodes = [];
-
   const connected = Boolean(state.settings?.tokenConfigured);
+
+  for (const rr of rrNodes) {
+    edges.push(topologyEdge(putioRight, putioCy, RR.x, rr.cy, connected ? '' : 'topo-edge--muted'));
+    const dp = dpNodes.find((node) => node.key === rr.dpKey);
+    if (dp) edges.push(topologyEdge(RR.x + RR.w, rr.cy, DP.x, dp.cy, 'topo-edge--dprofile'));
+    let dy = rr.top;
+    for (const download of rr.downloads) {
+      edges.push(topologyEdge(RR.x + RR.w, rr.cy, DL.x, dy + DL_H / 2, 'topo-edge--download'));
+      dy += DL_H + DL_GAP;
+    }
+  }
+
   const account = state.putioAccount?.username || (connected ? 'Put.io account' : 'Not connected');
   nodes.push(topologyNode(
     PUTIO.x, putioY, PUTIO.w, NODE_H,
@@ -2896,29 +2922,38 @@ function renderTopology() {
     connected ? 'putio' : 'putio-off',
   ));
 
-  for (const band of bands) {
-    const rrCy = band.top + band.height / 2;
-    edges.push(topologyEdge(putioRight, putioCy, RR.x, rrCy, connected ? '' : 'topo-edge--muted'));
-
-    const profile = band.profile;
-    const rrY = rrCy - NODE_H / 2;
+  for (const rr of rrNodes) {
+    const profile = rr.profile;
     nodes.push(topologyNode(
-      RR.x, rrY, RR.w, NODE_H,
+      RR.x, rr.cy - NODE_H / 2, RR.w, NODE_H,
       profileType(profile.type).label, profileDisplayName(profile),
       profile.enabled === false ? 'Disabled' : 'Enabled',
       profile.enabled === false ? 'rr-off' : 'rr',
     ));
-
-    let leafY = band.top;
-    for (const leaf of band.leaves) {
-      const leafCy = leafY + LEAF_H / 2;
-      edges.push(topologyEdge(RR.x + RR.w, rrCy, LEAF.x, leafCy, leaf.download ? 'topo-edge--download' : 'topo-edge--dprofile'));
-      nodes.push(topologyNode(LEAF.x, leafY, LEAF.w, LEAF_H, leaf.eyebrow, leaf.title, leaf.sub, leaf.variant));
-      leafY += LEAF_H + LEAF_GAP;
+    let dy = rr.top;
+    for (const download of rr.downloads) {
+      nodes.push(topologyNode(
+        DL.x, dy, DL.w, DL_H,
+        downloadTopologyEyebrow(download), download.name,
+        `${clampPercent(download.combinedProgress)}% complete`,
+        downloadTopologyVariant(download),
+      ));
+      dy += DL_H + DL_GAP;
     }
   }
 
-  canvas.innerHTML = `<svg viewBox="0 0 ${WIDTH} ${totalHeight}" class="topo-svg" role="img" aria-label="Topology of put.io connection, RR profiles, download profiles and downloads">${edges.join('')}${nodes.join('')}</svg>`;
+  for (const dp of dpNodes) {
+    const count = dp.users.length;
+    nodes.push(topologyNode(
+      DP.x, dp.top, DP.w, NODE_H,
+      'Download profile', dp.name,
+      count === 1 ? 'Used by 1 RR profile' : `Used by ${count} RR profiles`,
+      'dprofile',
+    ));
+  }
+
+  const width = (hasDownloads ? DL.x + DL.w : DP.x + DP.w) + 24;
+  canvas.innerHTML = `<svg viewBox="0 0 ${width} ${totalHeight}" class="topo-svg" role="img" aria-label="Topology of put.io connection, RR profiles, download profiles and downloads">${edges.join('')}${nodes.join('')}</svg>`;
 }
 
 // --- Sidebar routing (hash-based, no server rewrites needed) ---
