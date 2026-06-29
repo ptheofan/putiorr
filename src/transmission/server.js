@@ -214,9 +214,10 @@ function oauthCallbackHtml() {
 }
 
 export class TransmissionRpcServer {
-  constructor({ config, service, fetch: fetchImpl } = {}) {
+  constructor({ config, service, downloadManager, fetch: fetchImpl } = {}) {
     this.config = config;
     this.service = service;
+    this.downloadManager = downloadManager;
     this.oauth = new PutioOAuthClient({ appId: config.putioAppId });
     this.versionChecker = new VersionChecker({ fetch: fetchImpl });
     this.oauthStates = new Map();
@@ -609,6 +610,18 @@ export class TransmissionRpcServer {
 
       if (method === 'GET' && requestPath === '/api/downloads') {
         jsonResponse(res, 200, this.service.listDownloads(), this.sessionId);
+        return;
+      }
+
+      const downloadStartMatch = requestPath.match(/^\/api\/downloads\/(\d+)\/start$/);
+      if (downloadStartMatch && method === 'POST') {
+        if (!this.downloadManager) throw new Error('Download manager is not available');
+        const result = await this.downloadManager.startTransferDownload(Number(downloadStartMatch[1]));
+        this.scheduleWebSocketDownloadsBroadcast('downloads:start');
+        jsonResponse(res, 200, {
+          ...result,
+          downloads: this.service.listDownloads(),
+        }, this.sessionId);
         return;
       }
 

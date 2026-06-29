@@ -168,6 +168,39 @@ test('prepareTransferSafely keeps the transfer for non-404 errors so the next po
   }
 });
 
+test('manual start stores the failure reason on the download', async () => {
+  const putio = {
+    async listTransfers() {
+      return [];
+    },
+    async listTransferFiles() {
+      const error = new Error('put.io 500: temporary failure');
+      error.status = 500;
+      throw error;
+    },
+  };
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 10 });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await assert.rejects(
+      () => manager.startTransferDownload(transfer.id),
+      /temporary failure/,
+    );
+
+    const updated = harness.store.findTransferById(transfer.id);
+    assert.equal(updated.error, true);
+    assert.equal(updated.error_string, 'put.io 500: temporary failure');
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('downloadToPath resumes an existing part file with a Range request', async () => {
   const harness = await createHarness();
   try {

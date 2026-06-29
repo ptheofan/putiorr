@@ -26,6 +26,7 @@ async function main() {
   const server = new TransmissionRpcServer({
     config,
     service,
+    downloadManager,
   });
 
   await downloadManager.start();
