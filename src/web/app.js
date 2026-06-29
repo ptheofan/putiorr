@@ -1923,7 +1923,7 @@ function updateDownloadRow(row, download) {
   setText(row.querySelector('[data-role="file-count"]'), totalFiles > 0 ? String(totalFiles) : '0');
   const startButton = row.querySelector('[data-action="start-download"]');
   const starting = state.startingDownloads.has(String(download.id));
-  startButton.hidden = download.lifecycle === 'processed';
+  startButton.hidden = !canStartDownload(download);
   startButton.disabled = starting;
   startButton.title = starting ? 'Starting local download' : 'Start local download from put.io';
   setText(startButton.querySelector('[data-role="start-label"]'), starting ? 'Starting' : 'Start');
@@ -2433,6 +2433,15 @@ function formatEta(value) {
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.round(minutes / 60)}h`;
+}
+
+// Mirrors the backend READY_REMOTE_STATUSES: a local download can only start once put.io
+// has the files ready. While COMPLETING/DOWNLOADING/queued the Start button would only
+// produce a "not ready to download yet" error, so it stays hidden.
+const READY_PUTIO_STATUSES = new Set(['COMPLETED', 'SEEDING']);
+
+function canStartDownload(download) {
+  return download.lifecycle === 'remote' && READY_PUTIO_STATUSES.has(download.putioStatus);
 }
 
 const PUTIO_PHASE_LABELS = {
