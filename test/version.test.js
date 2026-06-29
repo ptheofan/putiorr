@@ -20,6 +20,8 @@ test('compareSemver orders major minor and patch versions', () => {
   assert.equal(compareSemver('2.0.0', '1.9.9'), 1);
   assert.equal(compareSemver('1.2.3', '1.2.3'), 0);
   assert.equal(compareSemver('1.2.2', '1.2.3'), -1);
+  assert.equal(compareSemver('bad', '1.2.3'), 0);
+  assert.equal(compareSemver({ version: '1.2.3' }, { version: '1.2.4' }), -1);
 });
 
 test('VersionChecker reports newer GitHub release and caches the result', async () => {
@@ -65,4 +67,32 @@ test('VersionChecker hides update state when release lookup fails', async () => 
   assert.equal(result.status, 'error');
   assert.equal(result.updateAvailable, false);
   assert.equal(result.error, 'offline');
+});
+
+test('VersionChecker reports unsupported, HTTP, bad tag, and timeout errors', async () => {
+  assert.equal((await new VersionChecker({ fetch: null }).check()).error, 'Version check is not supported by this runtime.');
+
+  const http = await new VersionChecker({
+    fetch: async () => new Response('{}', { status: 500 }),
+  }).check();
+  assert.equal(http.error, 'GitHub returned HTTP 500');
+
+  const badTag = await new VersionChecker({
+    fetch: async () => new Response(JSON.stringify({ tag_name: 'latest' })),
+  }).check();
+  assert.equal(badTag.error, 'Latest release tag is not semver.');
+
+  const timeout = await new VersionChecker({
+    timeoutMs: 1,
+    fetch: async (_url, { signal }) => {
+      await new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    },
+  }).check();
+  assert.equal(timeout.error, 'Version check timed out.');
 });
