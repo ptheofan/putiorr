@@ -35,22 +35,32 @@
         </div>
 
         <nav class="sidebar-nav" aria-label="Primary">
-          <a class="nav-item" href="#/downloads" data-route="downloads">
-            <wa-icon name="cloud-arrow-down"></wa-icon>
-            <span>Current downloads</span>
-          </a>
-          <a class="nav-item" href="#/profiles" data-route="profiles">
-            <wa-icon name="server"></wa-icon>
-            <span>RR profiles</span>
-          </a>
-          <a class="nav-item" href="#/download-profiles" data-route="download-profiles">
-            <wa-icon name="sliders"></wa-icon>
-            <span>Download profiles</span>
-          </a>
-          <a class="nav-item" href="#/help" data-route="help">
-            <wa-icon name="circle-question"></wa-icon>
-            <span>How it works</span>
-          </a>
+          <div class="nav-group">
+            <a class="nav-item" href="#/downloads" data-route="downloads">
+              <wa-icon name="cloud-arrow-down"></wa-icon>
+              <span>Current downloads</span>
+            </a>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-group-label">Settings</p>
+            <a class="nav-item" href="#/profiles" data-route="profiles">
+              <wa-icon name="server"></wa-icon>
+              <span>RR profiles</span>
+            </a>
+            <a class="nav-item" href="#/download-profiles" data-route="download-profiles">
+              <wa-icon name="sliders"></wa-icon>
+              <span>Download profiles</span>
+            </a>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-group-label">Help</p>
+            <a class="nav-item" href="#/help" data-route="help">
+              <wa-icon name="circle-question"></wa-icon>
+              <span>How it works</span>
+            </a>
+          </div>
         </nav>
 
         <div class="sidebar-footer">
