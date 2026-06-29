@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>putiorr · Shoelace UI POC</title>
+
+    <!-- putiorr's own stylesheet, so the page chrome matches the real app exactly -->
+    <link rel="stylesheet" href="/app.css" />
+
+    <!-- Shoelace (framework-agnostic Web Components) via CDN, no build step -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css" />
+    <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
+
+    <style>
+      /* Map Shoelace tokens onto putiorr's palette → the kit inherits the teal theme. */
+      :root {
+        --sl-color-primary-500: #0f766e;
+        --sl-color-primary-600: #0f766e;
+        --sl-color-primary-700: #0b5e57;
+        --sl-color-primary-50: #e6f1f0;
+        --sl-input-border-radius-medium: 8px;
+        --sl-border-radius-medium: 8px;
+        --sl-font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      .poc-banner { display: flex; align-items: center; gap: 10px; padding: 12px 16px; margin-bottom: 18px; border: 1px dashed var(--accent); border-radius: 8px; background: var(--panel-2); color: var(--muted); font-size: 14px; }
+      .poc-banner strong { color: var(--text); }
+
+      sl-dialog::part(panel) { border-radius: 12px; }
+      sl-dialog::part(body) { padding-top: 8px; }
+      sl-tab-group { --indicator-color: var(--accent); --track-color: var(--line); }
+      .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; width: 100%; }
+      .dialog-actions.between { justify-content: space-between; }
+      .field-stack { display: grid; gap: 14px; }
+      .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+      .field-pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+      .unit-field { display: grid; gap: 6px; min-width: 0; }
+      .unit-field .field-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 24px; }
+      .unit-field .field-label { font-weight: 700; font-size: 13px; }
+      .unit-row { display: flex; gap: 8px; align-items: center; min-width: 0; }
+      .unit-row sl-input { flex: 1 1 auto; min-width: 0; }
+      .unit-row sl-select { flex: 0 0 96px; width: 96px; }
+
+      sl-card.profile-card { width: 100%; --padding: 18px; }
+      .pc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+      .pc-eyebrow { font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+      .pc-head h3 { margin: 2px 0 4px; }
+      .pc-head p { margin: 0; color: var(--muted); font-size: 13px; }
+      .pc-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 16px 0; }
+      .pc-facts .wide { grid-column: 1 / -1; }
+      .pc-facts dt { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+      .pc-facts dd { margin: 2px 0 0; font-size: 13px; word-break: break-all; }
+      .pc-actions { display: flex; gap: 8px; }
+
+      .dl-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.9fr) minmax(0, 1.1fr) auto; gap: 18px; align-items: start; }
+      .dl-row > div { min-width: 0; }
+      .dl-row strong { display: block; overflow-wrap: anywhere; }
+      .dl-progress { display: grid; gap: 10px; }
+      .dl-progress sl-progress-bar { --height: 8px; }
+      .bar-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+      .metric-label { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); }
+
+      .file-row { display: grid; grid-template-columns: auto 1fr auto auto; gap: 12px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+      .file-row:first-child { border-top: 0; }
+      .file-name { font-size: 13px; word-break: break-all; }
+      .file-meta { font-size: 12px; color: var(--muted); }
+      .links-grid { display: grid; gap: 12px; }
+      .link-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="content">
+        <header class="topbar">
+          <div class="hero-brand">
+            <span class="hero-icon" aria-hidden="true"><img src="/icons/putiorr-icon-128.png?v=portal" alt="" /></span>
+            <div>
+              <h1>putiorr <span style="font-size: 14px; font-weight: 600; color: var(--muted)">· Shoelace POC</span></h1>
+              <p>Transmission-compatible put.io bridge for Sonarr, Radarr, Lidarr, Prowlarr, and friends.</p>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <sl-tag id="versionTag" variant="primary" pill style="cursor: pointer">
+              <sl-icon name="arrow-up-circle" style="margin-right: 4px"></sl-icon> v1.8.2 available
+            </sl-tag>
+            <a class="topbar-icon-link" href="https://ptheofan.github.io/putiorr/" target="_blank" rel="noreferrer" aria-label="Project portal" title="Project portal">
+              <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M12 0.5C5.65 0.5 0.5 5.65 0.5 12c0 5.08 3.29 9.39 7.86 10.91 0.58 0.1 0.79-0.25 0.79-0.56v-2.16c-3.2 0.69-3.87-1.36-3.87-1.36-0.52-1.33-1.28-1.68-1.28-1.68-1.04-0.71 0.08-0.7 0.08-0.7 1.15 0.08 1.76 1.18 1.76 1.18 1.03 1.75 2.69 1.25 3.34 0.95 0.1-0.74 0.4-1.25 0.73-1.54-2.56-0.29-5.25-1.28-5.25-5.7 0-1.26 0.45-2.29 1.18-3.1-0.12-0.29-0.51-1.47 0.11-3.06 0 0 0.96-0.31 3.16 1.18 0.92-0.26 1.9-0.38 2.88-0.39 0.98 0 1.96 0.13 2.88 0.39 2.2-1.49 3.16-1.18 3.16-1.18 0.62 1.59 0.23 2.77 0.11 3.06 0.74 0.81 1.18 1.84 1.18 3.1 0 4.43-2.69 5.41-5.26 5.7 0.41 0.36 0.78 1.06 0.78 2.14v3.17c0 0.31 0.21 0.67 0.79 0.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35 0.5 12 0.5Z"></path></svg>
+            </a>
+            <sl-tooltip id="ledTooltip" content="Put.io connected — click to manage">
+              <button id="putioStatusButton" class="putio-status-button" type="button" data-state="connected" aria-label="Put.io connection status">
+                <span class="status-dot" aria-hidden="true"></span><span>Put.io</span>
+              </button>
+            </sl-tooltip>
+          </div>
+        </header>
+
+        <div class="poc-banner">
+          <sl-icon name="info-circle"></sl-icon>
+          <span><strong>Proof of concept.</strong> Standalone page at <code>/poc.html</code> — the real app is untouched. Every dialog is wired: status LED, profile editor, download-profile editor, link-profiles, and delete confirmation. Right-click the LED to toggle its state. Shoelace is CDN-loaded here; production would vendor it locally.</span>
+        </div>
+
+        <!-- RR profiles -->
+        <section id="profiles" class="panel">
+          <div class="section-head">
+            <div class="section-head-main">
+              <sl-icon-button class="collapse-icon" name="chevron-down" label="Toggle RR profiles" data-action="toggle"></sl-icon-button>
+              <div class="section-heading">
+                <h2>RR profiles</h2>
+                <p>Use the setup wizard to create one profile per app and copy the matching download-client settings.</p>
+              </div>
+            </div>
+            <sl-button variant="primary" data-open="profileDialog"><sl-icon slot="prefix" name="plus-lg"></sl-icon>Setup profile</sl-button>
+          </div>
+          <div class="profiles-list" data-role="body" id="profilesList"></div>
+        </section>
+
+        <!-- Download profiles -->
+        <section id="download-profiles" class="panel">
+          <div class="section-head">
+            <div class="section-head-main">
+              <sl-icon-button class="collapse-icon" name="chevron-down" label="Toggle download profiles" data-action="toggle"></sl-icon-button>
+              <div class="section-heading">
+                <h2>Download profiles</h2>
+                <p>Tune slow-speed reset separately for music, episodes, movies, and other download shapes.</p>
+              </div>
+            </div>
+            <div class="button-row section-actions">
+              <sl-button variant="default" data-open="linksDialog"><sl-icon slot="prefix" name="arrow-left-right"></sl-icon>Link RR profiles</sl-button>
+              <sl-button variant="primary" data-open="downloadProfileDialog"><sl-icon slot="prefix" name="plus-lg"></sl-icon>Add profile</sl-button>
+            </div>
+          </div>
+          <div class="profiles-list" data-role="body" id="downloadProfilesList"></div>
+        </section>
+
+        <!-- Current downloads -->
+        <section id="downloads" class="panel">
+          <div class="section-head">
+            <div class="section-head-main">
+              <div class="section-heading">
+                <h2>Current downloads</h2>
+                <p>Combined put.io and local transfer state from the durable SQLite queue.</p>
+              </div>
+            </div>
+          </div>
+          <div class="downloads-list">
+            <sl-card style="width: 100%; --padding: 18px">
+              <div class="dl-row">
+                <div>
+                  <strong>Pulp.Fiction.1994.2160p.UHD.Remux</strong>
+                  <div style="color: var(--muted); font-size: 13px; margin-top: 4px">Radarr · Default · downloads/movies</div>
+                  <sl-details summary="3 files" style="margin-top: 12px" id="fileDetails">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px">
+                      <sl-checkbox id="selectAllFiles">Select all</sl-checkbox>
+                      <sl-button size="small" variant="danger" outline id="deleteSelected" disabled><sl-icon slot="prefix" name="trash"></sl-icon>Delete selected</sl-button>
+                    </div>
+                    <div id="fileList"></div>
+                  </sl-details>
+                </div>
+                <div>
+                  <div class="metric-label">Status</div>
+                  <strong>Completing on Put.io · 67%</strong>
+                  <div class="file-meta" style="margin-top: 4px">0 / 3 files · 0 B copied</div>
+                </div>
+                <div class="dl-progress">
+                  <div><div class="bar-label"><span>Put.io</span><span>100%</span></div><sl-progress-bar value="100"></sl-progress-bar></div>
+                  <div><div class="bar-label"><span>Local</span><span>0%</span></div><sl-progress-bar value="0"></sl-progress-bar></div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center">
+                  <sl-tooltip content="Not ready — put.io is still completing">
+                    <sl-button size="small" variant="default" disabled><sl-icon slot="prefix" name="play-fill"></sl-icon>Start</sl-button>
+                  </sl-tooltip>
+                  <sl-icon-button name="trash" label="Delete" style="color: var(--danger)" data-open="deleteDialog"></sl-icon-button>
+                </div>
+              </div>
+            </sl-card>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Put.io connection dialog -->
+    <sl-dialog label="Put.io connection" id="putioDialog" style="--width: 560px">
+      <div class="putio-connected-panel" style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px">
+        <span class="status-dot" style="background: var(--ok)"></span>
+        <div><span style="color: var(--muted); font-size: 13px">Connected account</span><br /><strong>ioannis@chio.dev</strong></div>
+      </div>
+      <sl-tab-group>
+        <sl-tab slot="nav" panel="oauth">Put.io OAuth</sl-tab>
+        <sl-tab slot="nav" panel="token">Direct Token</sl-tab>
+        <sl-tab-panel name="oauth">
+          <div class="field-stack">
+            <sl-button variant="primary" size="large"><sl-icon slot="prefix" name="box-arrow-up-right"></sl-icon>Connect with put.io</sl-button>
+            <div class="switch-row"><span style="color: var(--muted)">Using default OAuth relay settings</span><sl-switch id="advancedSwitch">Advanced</sl-switch></div>
+            <div id="advancedPanel" hidden class="field-stack">
+              <sl-input label="OAuth relay URL" value="https://ptheofan.github.io/putiorr/putio-oauth-relay.html"></sl-input>
+              <sl-input label="App ID" value="0000"></sl-input>
+            </div>
+          </div>
+        </sl-tab-panel>
+        <sl-tab-panel name="token">
+          <div class="field-stack">
+            <sl-input label="Put.io API token" type="password" password-toggle placeholder="Paste token…"></sl-input>
+            <sl-button variant="default"><sl-icon slot="prefix" name="lightning-charge"></sl-icon>Test connection</sl-button>
+          </div>
+        </sl-tab-panel>
+      </sl-tab-group>
+      <div class="dialog-actions" slot="footer">
+        <sl-button variant="default" data-close="putioDialog">Cancel</sl-button>
+        <sl-button variant="primary" data-close="putioDialog">Save</sl-button>
+      </div>
+    </sl-dialog>
+
+    <!-- Profile setup/edit dialog: steps + field-guide aside + copy settings -->
+    <sl-dialog label="Set up profile" id="profileDialog" style="--width: 880px">
+      <div class="wizard-layout">
+        <div class="wizard-questions field-stack" style="gap: 20px">
+          <section class="wizard-step">
+            <div class="step-label">1. App</div>
+            <div class="field-pair">
+              <sl-select id="pfType" label="App preset" value="sonarr">
+                <sl-option value="sonarr">Sonarr</sl-option><sl-option value="radarr">Radarr</sl-option>
+                <sl-option value="lidarr">Lidarr</sl-option><sl-option value="readarr">Readarr</sl-option>
+                <sl-option value="prowlarr">Prowlarr</sl-option><sl-option value="custom">Custom</sl-option>
+              </sl-select>
+              <sl-input label="Display name" value="Sonarr" data-guide="The display name becomes the *arr download-client category."></sl-input>
+            </div>
+          </section>
+          <section class="wizard-step">
+            <div class="step-label">2. Storage</div>
+            <div class="field-pair">
+              <sl-input label="Put.io destination folder" value="putiorr" data-guide="The put.io folder transfers are saved into."></sl-input>
+              <sl-input label="Shared download folder" value="/putiorr" data-guide="Must be mounted in the container; the category is appended."></sl-input>
+            </div>
+            <sl-select label="Download profile" value="default">
+              <sl-option value="default">Default</sl-option><sl-option value="movies">Movies</sl-option><sl-option value="music">Music</sl-option>
+            </sl-select>
+          </section>
+          <section class="wizard-step">
+            <div class="step-label">3. RPC endpoint</div>
+            <sl-input label="RPC endpoint path" value="/sonarr/transmission/rpc" data-guide="Point the *arr download client's URL base here."></sl-input>
+            <div class="field-pair">
+              <sl-input label="Host from the *arr container" value="putiorr"></sl-input>
+              <sl-input label="Port" value="9091" inputmode="numeric"></sl-input>
+            </div>
+            <div class="switch-row"><sl-switch>Use SSL for the download client</sl-switch><sl-switch checked>Enable this profile</sl-switch></div>
+          </section>
+        </div>
+        <aside class="setup-preview context-help">
+          <div class="preview-head">
+            <div><span class="step-label">Field guide</span><h3 id="guideTitle">App preset</h3></div>
+            <sl-button size="small" variant="default" id="copySettings"><sl-icon slot="prefix" name="clipboard"></sl-icon>Copy settings</sl-button>
+          </div>
+          <div class="help-body" id="guideBody">The preset fills sensible defaults for each *arr app. Focus a field to see its guide.</div>
+          <div class="endpoint-box"><span>Current effect</span><strong>Sonarr uses /sonarr/transmission/rpc</strong></div>
+        </aside>
+      </div>
+      <div class="dialog-actions between" slot="footer">
+        <sl-button variant="danger" outline><sl-icon slot="prefix" name="trash"></sl-icon>Delete profile</sl-button>
+        <div style="display: flex; gap: 10px">
+          <sl-button variant="default" data-close="profileDialog">Cancel</sl-button>
+          <sl-button variant="primary" data-close="profileDialog"><sl-icon slot="prefix" name="check-lg"></sl-icon>Save &amp; test</sl-button>
+        </div>
+      </div>
+    </sl-dialog>
+
+    <!-- Download profile dialog: slow-speed reset -->
+    <sl-dialog label="Download profile" id="downloadProfileDialog" style="--width: 760px">
+      <div class="field-stack" style="gap: 20px">
+        <section class="wizard-step">
+          <div class="step-label">Profile</div>
+          <sl-input label="Name" value="Movies" placeholder="Movies"></sl-input>
+        </section>
+        <section class="wizard-step">
+          <div class="step-label">Slow-speed reset</div>
+          <div class="field-pair">
+            <div class="unit-field">
+              <div class="field-head"><span class="field-label">Startup grace</span></div>
+              <div class="unit-row">
+                <sl-input type="number" value="30" min="0"></sl-input>
+                <sl-select value="seconds"><sl-option value="seconds">sec</sl-option><sl-option value="minutes">min</sl-option></sl-select>
+              </div>
+            </div>
+            <div class="unit-field">
+              <div class="field-head"><span class="field-label">Ignore below</span><sl-switch size="small">Enabled</sl-switch></div>
+              <div class="unit-row">
+                <sl-input type="number" value="100" min="0"></sl-input>
+                <sl-select value="mb"><sl-option value="bytes">B</sl-option><sl-option value="mb">MB</sl-option><sl-option value="gb">GB</sl-option></sl-select>
+              </div>
+            </div>
+          </div>
+          <div class="field-pair">
+            <div class="unit-field">
+              <div class="field-head"><span class="field-label">Duration</span></div>
+              <div class="unit-row">
+                <sl-input type="number" value="120" min="0"></sl-input>
+                <sl-select value="seconds"><sl-option value="seconds">sec</sl-option><sl-option value="minutes">min</sl-option></sl-select>
+              </div>
+            </div>
+            <div class="unit-field">
+              <div class="field-head"><span class="field-label">Slow threshold</span><sl-switch size="small">Enabled</sl-switch></div>
+              <div class="unit-row">
+                <sl-input type="number" value="100" min="0"></sl-input>
+                <sl-select value="mb"><sl-option value="bytes">B/s</sl-option><sl-option value="mb">MB/s</sl-option><sl-option value="gb">GB/s</sl-option></sl-select>
+              </div>
+            </div>
+          </div>
+          <sl-alert variant="primary" open><sl-icon slot="icon" name="info-circle"></sl-icon>Reset triggers when copy speed stays below the threshold for the duration, after the grace period.</sl-alert>
+        </section>
+      </div>
+      <div class="dialog-actions between" slot="footer">
+        <sl-button variant="danger" outline><sl-icon slot="prefix" name="trash"></sl-icon>Delete profile</sl-button>
+        <div style="display: flex; gap: 10px">
+          <sl-button variant="default" data-close="downloadProfileDialog">Cancel</sl-button>
+          <sl-button variant="primary" data-close="downloadProfileDialog">Save profile</sl-button>
+        </div>
+      </div>
+    </sl-dialog>
+
+    <!-- Link RR profiles dialog -->
+    <sl-dialog label="Link RR profiles" id="linksDialog" style="--width: 560px">
+      <p style="margin-top: 0; color: var(--muted)">Choose which download profile each RR profile uses for local copies.</p>
+      <div class="links-grid" id="linksList"></div>
+      <div class="dialog-actions" slot="footer">
+        <sl-button variant="default" data-close="linksDialog">Cancel</sl-button>
+        <sl-button variant="primary" data-close="linksDialog">Save links</sl-button>
+      </div>
+    </sl-dialog>
+
+    <!-- Delete confirmation dialog -->
+    <sl-dialog label="Delete download" id="deleteDialog" style="--width: 520px">
+      <sl-alert variant="warning" open style="margin-bottom: 16px"><sl-icon slot="icon" name="exclamation-triangle"></sl-icon>It is usually safer to do this from the Activity page in your RR software so it can update its own queue state.</sl-alert>
+      <div class="field-stack">
+        <sl-checkbox checked>Also delete from put.io</sl-checkbox>
+        <sl-checkbox>Also delete the downloaded files from disk</sl-checkbox>
+      </div>
+      <div class="dialog-actions" slot="footer">
+        <sl-button variant="default" data-close="deleteDialog">Cancel</sl-button>
+        <sl-button variant="danger" data-close="deleteDialog"><sl-icon slot="prefix" name="trash"></sl-icon>Delete download</sl-button>
+      </div>
+    </sl-dialog>
+
+    <script type="module">
+      await customElements.whenDefined('sl-dialog');
+
+      const $ = (s, r = document) => r.querySelector(s);
+      const open = (id) => $(`#${id}`).show();
+      const close = (id) => $(`#${id}`).hide();
+
+      // RR profile cards
+      const profiles = [
+        { type: 'Sonarr', name: 'Sonarr', summary: 'TV episodes', putio: 'putiorr', download: '/putiorr/series', dprofile: 'Default', rpc: '/sonarr/transmission/rpc', enabled: true },
+        { type: 'Radarr', name: 'Radarr', summary: 'Movies', putio: 'putiorr', download: '/putiorr/movies', dprofile: 'Movies', rpc: '/radarr/transmission/rpc', enabled: true },
+        { type: 'Prowlarr', name: 'Prowlarr', summary: 'Indexer · auto-cleanup', putio: 'putiorr', download: '/putiorr/prowlarr', dprofile: 'Default', rpc: '/prowlarr/transmission/rpc', enabled: false },
+      ];
+      $('#profilesList').innerHTML = profiles.map((p) => `
+        <sl-card class="profile-card">
+          <div class="pc-head">
+            <div><div class="pc-eyebrow">${p.type}</div><h3>${p.name}</h3><p>${p.summary}</p></div>
+            <sl-badge variant="${p.enabled ? 'success' : 'warning'}" pill>${p.enabled ? 'Enabled' : 'Disabled'}</sl-badge>
+          </div>
+          <div class="pc-facts">
+            <div><dt>Put.io</dt><dd>${p.putio}</dd></div>
+            <div><dt>Download</dt><dd>${p.download}</dd></div>
+            <div class="wide"><dt>Downloader profile</dt><dd>${p.dprofile}</dd></div>
+            <div><dt>RPC</dt><dd>${p.rpc}</dd></div>
+          </div>
+          <div class="pc-actions">
+            <sl-button size="small" variant="default" data-open="profileDialog"><sl-icon slot="prefix" name="pencil"></sl-icon>Edit</sl-button>
+            <sl-button size="small" variant="danger" outline><sl-icon slot="prefix" name="trash"></sl-icon>Delete</sl-button>
+          </div>
+        </sl-card>`).join('');
+
+      // Download profile cards
+      const dprofiles = [ { name: 'Default', summary: 'Slow-speed reset off · 8 workers', rr: 3 }, { name: 'Movies', summary: 'Reset < 1 MB/s for 120s · 8 workers', rr: 1 } ];
+      $('#downloadProfilesList').innerHTML = dprofiles.map((p) => `
+        <sl-card class="profile-card">
+          <div class="pc-head">
+            <div><div class="pc-eyebrow">Download profile</div><h3>${p.name}</h3><p>${p.summary}</p></div>
+            <sl-badge variant="neutral" pill>${p.rr} RR</sl-badge>
+          </div>
+          <div class="pc-actions"><sl-button size="small" variant="default" data-open="downloadProfileDialog"><sl-icon slot="prefix" name="pencil"></sl-icon>Edit</sl-button></div>
+        </sl-card>`).join('');
+
+      // Link RR profiles list
+      $('#linksList').innerHTML = profiles.map((p) => `
+        <div class="link-row">
+          <strong>${p.name}</strong>
+          <sl-select value="${p.dprofile.toLowerCase()}" style="width: 200px">
+            <sl-option value="default">Default</sl-option><sl-option value="movies">Movies</sl-option><sl-option value="music">Music</sl-option>
+          </sl-select>
+        </div>`).join('');
+
+      // File panel rows
+      const files = [ { name: 'Pulp.Fiction.mkv', size: '83.5 GB', status: 'downloading' }, { name: 'Pulp.Fiction.srt', size: '92 KB', status: 'pending' }, { name: 'poster.jpg', size: '1.1 MB', status: 'pending' } ];
+      const variant = (s) => ({ complete: 'success', downloading: 'primary', failed: 'danger' }[s] || 'neutral');
+      $('#fileList').innerHTML = files.map((f, i) => `
+        <div class="file-row">
+          <sl-checkbox class="file-check" data-i="${i}"></sl-checkbox>
+          <div><div class="file-name">${f.name}</div><div class="file-meta">${f.size}</div></div>
+          <sl-badge variant="${variant(f.status)}" pill>${f.status}</sl-badge>
+          <sl-icon-button name="trash" label="Delete file" style="color: var(--danger)"></sl-icon-button>
+        </div>`).join('');
+
+      // generic open/close wiring (delegated, so dynamically-added buttons work)
+      document.addEventListener('click', (e) => {
+        const o = e.target.closest('[data-open]'); if (o) open(o.dataset.open);
+        const c = e.target.closest('[data-close]'); if (c) close(c.dataset.close);
+      });
+
+      // status LED: click opens dialog, right-click toggles state
+      const led = $('#putioStatusButton');
+      led.addEventListener('click', () => open('putioDialog'));
+      led.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const connected = led.dataset.state === 'connected';
+        led.dataset.state = connected ? 'needs-token' : 'connected';
+        $('#ledTooltip').content = connected ? 'Put.io needs a token — click to connect' : 'Put.io connected — click to manage';
+      });
+
+      // version tag opens releases
+      $('#versionTag').addEventListener('click', () => window.open('https://github.com/ptheofan/putiorr/releases/latest', '_blank'));
+
+      // advanced switch
+      const adv = $('#advancedSwitch');
+      adv.addEventListener('sl-change', () => { $('#advancedPanel').hidden = !adv.checked; });
+
+      // field guide updates on focus
+      $('#profileDialog').addEventListener('sl-focus', (e) => {
+        const g = e.target.dataset?.guide; if (g) { $('#guideTitle').textContent = e.target.label; $('#guideBody').textContent = g; }
+      });
+
+      // copy settings demo
+      $('#copySettings').addEventListener('click', async (e) => {
+        try { await navigator.clipboard.writeText('host=putiorr port=9091 path=/sonarr/transmission/rpc'); } catch {}
+        e.target.innerHTML = '<sl-icon slot="prefix" name="check-lg"></sl-icon>Copied';
+        setTimeout(() => { e.target.innerHTML = '<sl-icon slot="prefix" name="clipboard"></sl-icon>Copy settings'; }, 1400);
+      });
+
+      // file panel: select-all + delete-selected enablement
+      const checks = () => [...document.querySelectorAll('.file-check')];
+      const syncDelete = () => { $('#deleteSelected').disabled = !checks().some((c) => c.checked); };
+      $('#selectAllFiles').addEventListener('sl-change', (e) => { checks().forEach((c) => (c.checked = e.target.checked)); syncDelete(); });
+      document.addEventListener('sl-change', (e) => { if (e.target.classList.contains('file-check')) syncDelete(); });
+
+      // collapsible panels
+      for (const btn of document.querySelectorAll('[data-action="toggle"]')) {
+        const body = btn.closest('.panel').querySelector('[data-role="body"]');
+        btn.addEventListener('click', () => { const collapsed = body.hidden = !body.hidden; btn.name = collapsed ? 'chevron-right' : 'chevron-down'; });
+      }
+    </script>
+  </body>
+</html>
