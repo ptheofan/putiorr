@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { mkdtemp } from 'node:fs/promises';
-import { deleteLocalData, extractCategory, resolveInside } from '../src/download/paths.js';
+import {
+  deleteLocalData,
+  deleteLocalFileData,
+  extractCategory,
+  fileExistsWithSize,
+  normalizeRelativePath,
+  resolveInside,
+} from '../src/download/paths.js';
 
 test('extractCategory returns category relative to target dir', () => {
   assert.equal(extractCategory('/downloads', '/downloads/tv'), 'tv');
@@ -21,6 +28,7 @@ test('extractCategory rejects download dirs outside target dir', () => {
 });
 
 test('resolveInside rejects path traversal', () => {
+  assert.equal(resolveInside('/downloads', 'movie'), path.join('/downloads', 'movie'));
   assert.throws(
     () => resolveInside('/downloads', '..', 'etc', 'passwd'),
     /outside/,
@@ -39,4 +47,22 @@ test('deleteLocalData deletes only the requested transfer path', async () => {
   await assert.rejects(stat(path.join(targetDir, 'transfer-a')), { code: 'ENOENT' });
   const sibling = await stat(path.join(targetDir, 'transfer-b', 'file.mkv'));
   assert.equal(sibling.isFile(), true);
+});
+
+test('file helpers normalize paths and remove selected files', async () => {
+  const targetDir = await mkdtemp(path.join(tmpdir(), 'putiorr-path-files-'));
+  const transferDir = path.join(targetDir, 'transfer');
+  await mkdir(path.join(transferDir, 'season'), { recursive: true });
+  await writeFile(path.join(transferDir, 'season', 'episode.mkv'), 'episode');
+  await writeFile(path.join(transferDir, 'season', 'episode.mkv.part'), 'partial');
+  await writeFile(path.join(transferDir, 'keep.mkv'), 'keep');
+
+  assert.equal(normalizeRelativePath('/season\\episode.mkv'), path.join('season', 'episode.mkv'));
+  assert.equal(await fileExistsWithSize(path.join(transferDir, 'keep.mkv'), 4), true);
+  assert.equal(await fileExistsWithSize(path.join(transferDir, 'missing.mkv'), 4), false);
+
+  await deleteLocalFileData(targetDir, 'transfer', path.join('season', 'episode.mkv'));
+
+  await assert.rejects(stat(path.join(transferDir, 'season')), { code: 'ENOENT' });
+  assert.equal(await readFile(path.join(transferDir, 'keep.mkv'), 'utf8'), 'keep');
 });
