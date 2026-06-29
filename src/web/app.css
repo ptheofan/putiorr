@@ -88,7 +88,7 @@ select {
 }
 
 .content {
-  width: min(1180px, 100%);
+  width: min(1440px, 100%);
   margin: 0 auto;
   padding: 32px;
   display: grid;
@@ -145,8 +145,19 @@ select {
   white-space: nowrap;
 }
 
+.version-update-link.is-current-version {
+  color: rgba(100, 114, 117, 0.62);
+  font-weight: 650;
+  text-decoration: none;
+  cursor: default;
+}
+
 .version-update-link:hover {
   color: var(--accent);
+}
+
+.version-update-link.is-current-version:hover {
+  color: rgba(100, 114, 117, 0.62);
 }
 
 .version-update-link:focus-visible {
@@ -265,6 +276,64 @@ p {
   justify-content: space-between;
   align-items: flex-start;
   gap: 18px;
+}
+
+.section-head-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.collapse-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: -2px 0 0 -4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.collapse-toggle:hover {
+  color: var(--accent);
+  background: var(--panel-2);
+}
+
+.collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.collapse-chevron {
+  display: inline-flex;
+  transition: transform 0.18s ease;
+}
+
+.collapse-chevron svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.panel.collapsed .collapse-chevron {
+  transform: rotate(-90deg);
+}
+
+.section-heading h2 {
+  cursor: pointer;
+  width: fit-content;
+}
+
+.panel.collapsed .profiles-list {
+  display: none;
 }
 
 .status {

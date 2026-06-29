@@ -531,6 +531,11 @@ p {
   box-shadow: 0 10px 26px rgba(23, 35, 38, 0.05);
 }
 
+.flow-steps img.putio-flow-icon {
+  border-color: #272b2d;
+  background: #272b2d;
+}
+
 .flow-icon {
   color: var(--teal-dark);
   font-size: 18px;

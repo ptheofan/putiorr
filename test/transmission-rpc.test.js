@@ -1373,7 +1373,7 @@ test('web API stores and resets put.io OAuth setting overrides', async (t) => {
   assert.equal(resetBody.putioOAuth.overridesConfigured, false);
 });
 
-test('web API exposes cached version update status', async (t) => {
+test('web API exposes fresh version update status', async (t) => {
   let versionFetches = 0;
   const current = parseSemver(CURRENT_VERSION);
   assert.ok(current);
@@ -1399,6 +1399,7 @@ test('web API exposes cached version update status', async (t) => {
 
   const firstResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/version'));
   assert.equal(firstResponse.status, 200);
+  assert.equal(firstResponse.headers.get('cache-control'), 'no-store');
   const firstBody = await firstResponse.json();
   assert.equal(firstBody.currentVersion, CURRENT_VERSION);
   assert.equal(firstBody.latestVersion, latestVersion);
@@ -1407,8 +1408,12 @@ test('web API exposes cached version update status', async (t) => {
 
   const secondResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/version'));
   assert.equal(secondResponse.status, 200);
-  assert.deepEqual(await secondResponse.json(), firstBody);
-  assert.equal(versionFetches, 1);
+  const secondBody = await secondResponse.json();
+  assert.equal(secondBody.currentVersion, CURRENT_VERSION);
+  assert.equal(secondBody.latestVersion, latestVersion);
+  assert.equal(secondBody.updateAvailable, true);
+  assert.equal(secondBody.releaseUrl, releaseUrl);
+  assert.equal(versionFetches, 2);
 });
 
 test('web API starts and completes put.io OAuth flow', async (t) => {

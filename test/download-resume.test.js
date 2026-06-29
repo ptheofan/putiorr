@@ -241,6 +241,77 @@ test('downloadToPath resumes an existing part file with a Range request', async 
   }
 });
 
+test('downloadToPath restarts bad partial downloads and records size mismatch', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 4 });
+    const file = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 908,
+      relative_path: 'movie.mkv',
+      size: 4,
+      downloaded_bytes: 8,
+      status: 'pending',
+    });
+    const targetPath = path.join(harness.root, 'bad-partial.mkv');
+    await writeFile(`${targetPath}.part`, 'too-long');
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: async () => createResponse({ body: ['xy'] }),
+    });
+
+    await assert.rejects(
+      () => manager.downloadToPath('https://example.test/file', targetPath, file),
+      /download size mismatch/,
+    );
+
+    const updated = harness.store.findTransferFileById(file.id);
+    assert.equal(updated.downloaded_bytes, 2);
+    assert.equal(updated.status, 'pending');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('downloadToPath restarts when the remote rejects a range request', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 6 });
+    const file = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 909,
+      relative_path: 'movie.mkv',
+      size: 6,
+      downloaded_bytes: 3,
+      status: 'pending',
+    });
+    const targetPath = path.join(harness.root, 'range-retry.mkv');
+    await writeFile(`${targetPath}.part`, 'abc');
+    const requests = [];
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: async (_url, options = {}) => {
+        requests.push(options.headers?.Range ?? '');
+        if (requests.length === 1) return createResponse({ status: 416, body: [] });
+        return createResponse({ body: ['abcdef'] });
+      },
+    });
+
+    await manager.downloadToPath('https://example.test/file', targetPath, file);
+
+    assert.deepEqual(requests, ['bytes=3-', '']);
+    assert.equal(await readFile(targetPath, 'utf8'), 'abcdef');
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('slow-speed reset keeps the part file and resumes without a failed attempt', async () => {
   const harness = await createHarness({
     PUTIORR_SLOW_SPEED_THRESHOLD_BYTES_PER_SECOND: '1000',
@@ -348,4 +419,145 @@ test('slow-speed guard uses the download profile attached to the RR profile', as
   } finally {
     harness.store.close();
   }
+});
+
+test('processFile downloads a pending file, finalizes the transfer, and cleans up put.io', async () => {
+  const deleted = [];
+  const putio = {
+    async getDownloadUrl(fileId) {
+      assert.equal(fileId, 905);
+      return 'https://example.test/movie';
+    },
+    async deleteFile(fileId) {
+      deleted.push(fileId);
+    },
+  };
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 4 });
+    const file = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 905,
+      relative_path: 'movie.mkv',
+      size: 4,
+      downloaded_bytes: 0,
+      status: 'pending',
+    });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: async () => createResponse({ body: ['done'] }),
+    });
+
+    await manager.processFile(file);
+
+    const targetPath = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
+    assert.equal(await readFile(targetPath, 'utf8'), 'done');
+    assert.equal(harness.store.findTransferFileById(file.id).status, 'complete');
+    assert.equal(harness.store.findTransferById(transfer.id).lifecycle, 'processed');
+    assert.deepEqual(deleted, [20]);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('processFile completes an already downloaded file without fetching it', async () => {
+  const harness = await createHarness({}, { async deleteFile() {} });
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 4 });
+    const file = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 910,
+      relative_path: 'movie.mkv',
+      size: 4,
+      downloaded_bytes: 0,
+      status: 'pending',
+    });
+    const targetPath = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, 'done');
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: async () => {
+        throw new Error('should not fetch');
+      },
+    });
+
+    await manager.processFile(file);
+
+    assert.equal(harness.store.findTransferFileById(file.id).status, 'complete');
+    assert.equal(harness.store.findTransferById(transfer.id).lifecycle, 'processed');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('processFile discards locally deleted files and nextPendingFile skips active work', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 8 });
+    const pending = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 906,
+      relative_path: 'pending.mkv',
+      size: 4,
+      downloaded_bytes: 0,
+      status: 'pending',
+    });
+    const deleted = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 907,
+      relative_path: 'season/deleted.mkv',
+      size: 4,
+      downloaded_bytes: 0,
+      status: 'pending',
+    });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    manager.activeFileIds.add(pending.id);
+    assert.equal(manager.nextPendingFile().id, deleted.id);
+    manager.activeFileIds.clear();
+    assert.equal(manager.nextPendingFile().id, pending.id);
+
+    harness.store.updateTransferFile(deleted.id, { status: 'deleted' });
+    const targetPath = path.join(harness.config.targetDir, transfer.name, 'season', 'deleted.mkv');
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    await writeFile(targetPath, 'data');
+    await writeFile(`${targetPath}.part`, 'part');
+
+    await manager.processFile(deleted);
+
+    await assert.rejects(readFile(targetPath), { code: 'ENOENT' });
+    await assert.rejects(readFile(`${targetPath}.part`), { code: 'ENOENT' });
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('download manager start and stop are idempotent without a put.io token', async () => {
+  const manager = new DownloadManager({
+    config: { pollIntervalMs: 60_000, workers: 0 },
+    store: {
+      listActiveTransfers: () => [],
+      purgeDeletedFilesForProcessedTransfers: () => 0,
+    },
+    service: {
+      getPutioToken: () => '',
+    },
+  });
+
+  await manager.start();
+  await manager.start();
+  assert.equal(manager.running, true);
+
+  await manager.stop();
+  await manager.stop();
+  assert.equal(manager.running, false);
 });
