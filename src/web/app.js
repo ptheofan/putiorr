@@ -1896,7 +1896,6 @@ function createDownloadRow(download) {
 function updateDownloadRow(row, download) {
   const putioProgress = clampPercent(download.putioProgress);
   const localProgress = clampPercent(download.localProgress);
-  const combinedProgress = clampPercent(download.combinedProgress);
   const files = download.files ?? {};
   const fileItems = Array.isArray(files.items) ? files.items : [];
   const completeFiles = Number(files.complete ?? 0);
@@ -1917,14 +1916,14 @@ function updateDownloadRow(row, download) {
     row.querySelector('[data-role="download-location"]'),
     `${download.profileName} · ${download.downloadProfileName || 'Default'} · ${download.downloadAt}`,
   );
-  setText(row.querySelector('[data-role="download-status"]'), `${download.lifecycle} · ${combinedProgress}%`);
+  setText(row.querySelector('[data-role="download-status"]'), downloadStatusText(download));
   setText(row.querySelector('[data-role="download-files"]'), download.error || `${fileText} · ${sizeText}`);
   setText(row.querySelector('[data-role="download-speed"]'), formatSpeed(download.speed));
   setText(row.querySelector('[data-role="download-eta"]'), formatEta(download.eta));
   setText(row.querySelector('[data-role="file-count"]'), totalFiles > 0 ? String(totalFiles) : '0');
   const startButton = row.querySelector('[data-action="start-download"]');
   const starting = state.startingDownloads.has(String(download.id));
-  startButton.hidden = download.lifecycle === 'processed';
+  startButton.hidden = !canStartDownload(download);
   startButton.disabled = starting;
   startButton.title = starting ? 'Starting local download' : 'Start local download from put.io';
   setText(startButton.querySelector('[data-role="start-label"]'), starting ? 'Starting' : 'Start');
@@ -2434,6 +2433,42 @@ function formatEta(value) {
   const minutes = Math.round(seconds / 60);
   if (minutes < 60) return `${minutes}m`;
   return `${Math.round(minutes / 60)}h`;
+}
+
+// Mirrors the backend READY_REMOTE_STATUSES: a local download can only start once put.io
+// has the files ready. While COMPLETING/DOWNLOADING/queued the Start button would only
+// produce a "not ready to download yet" error, so it stays hidden.
+const READY_PUTIO_STATUSES = new Set(['COMPLETED', 'SEEDING']);
+
+function canStartDownload(download) {
+  return download.lifecycle === 'remote' && READY_PUTIO_STATUSES.has(download.putioStatus);
+}
+
+const PUTIO_PHASE_LABELS = {
+  IN_QUEUE: 'Queued on Put.io',
+  WAITING: 'Queued on Put.io',
+  PREPARING_DOWNLOAD: 'Preparing on Put.io',
+  DOWNLOADING: 'Downloading on Put.io',
+  COMPLETING: 'Completing on Put.io',
+  SEEDING: 'Ready on Put.io',
+  COMPLETED: 'Ready on Put.io',
+  ERROR: 'Put.io error',
+};
+
+// While a transfer is still `remote`, the local downloader has not started yet, so the
+// lifecycle word alone ("remote") reads as stalled. Surface the put.io phase instead —
+// in particular COMPLETING (put.io finished the torrent and is copying it into storage),
+// which reports percent_done=100 but its real progress in completion_percent.
+function downloadStatusText(download) {
+  const combinedProgress = clampPercent(download.combinedProgress);
+  if (download.lifecycle !== 'remote') {
+    return `${download.lifecycle} · ${combinedProgress}%`;
+  }
+  const phase = PUTIO_PHASE_LABELS[download.putioStatus] ?? 'On Put.io';
+  if (download.putioStatus === 'COMPLETING') {
+    return `${phase} · ${clampPercent(download.putioCompletion)}%`;
+  }
+  return `${phase} · ${clampPercent(download.putioProgress)}%`;
 }
 
 function statusLabel(value) {

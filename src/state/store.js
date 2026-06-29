@@ -208,6 +208,7 @@ export class StateStore {
         lifecycle TEXT NOT NULL DEFAULT 'remote',
         putio_status TEXT NOT NULL DEFAULT 'UNKNOWN',
         percent_done INTEGER NOT NULL DEFAULT 0,
+        completion_percent INTEGER NOT NULL DEFAULT 0,
         total_size INTEGER NOT NULL DEFAULT 0,
         downloaded_ever INTEGER NOT NULL DEFAULT 0,
         uploaded_ever INTEGER NOT NULL DEFAULT 0,
@@ -251,6 +252,7 @@ export class StateStore {
     this.ensureColumn('profiles', 'client_port', "TEXT NOT NULL DEFAULT '9091'");
     this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
+    this.ensureColumn('transfers', 'completion_percent', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     this.migrateMagnetTransferHashes();
   }
@@ -577,11 +579,11 @@ export class StateStore {
         INSERT INTO transfers (
           profile_id, putio_transfer_id, putio_file_id, save_parent_id, hash, name, source,
           source_type, category, download_dir, lifecycle, putio_status,
-          percent_done, total_size, downloaded_ever, uploaded_ever,
+          percent_done, completion_percent, total_size, downloaded_ever, uploaded_ever,
           download_speed, upload_speed, eta, error, error_string,
           created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
       const result = stmt.run(
         input.profile_id ?? null,
@@ -597,6 +599,7 @@ export class StateStore {
         input.lifecycle ?? 'remote',
         input.putio_status ?? 'UNKNOWN',
         input.percent_done ?? 0,
+        input.completion_percent ?? 0,
         input.total_size ?? input.size ?? 0,
         input.downloaded_ever ?? 0,
         input.uploaded_ever ?? 0,
@@ -624,6 +627,7 @@ export class StateStore {
       lifecycle: input.lifecycle ?? existing.lifecycle,
       putio_status: input.putio_status ?? existing.putio_status,
       percent_done: input.percent_done ?? existing.percent_done,
+      completion_percent: input.completion_percent ?? existing.completion_percent,
       total_size: input.total_size ?? input.size ?? existing.total_size,
       downloaded_ever: input.downloaded_ever ?? existing.downloaded_ever,
       uploaded_ever: input.uploaded_ever ?? existing.uploaded_ever,
@@ -638,7 +642,7 @@ export class StateStore {
       UPDATE transfers
       SET profile_id = ?, putio_transfer_id = ?, putio_file_id = ?, save_parent_id = ?,
           name = ?, source = ?, source_type = ?, category = ?, download_dir = ?,
-          lifecycle = ?, putio_status = ?, percent_done = ?, total_size = ?,
+          lifecycle = ?, putio_status = ?, percent_done = ?, completion_percent = ?, total_size = ?,
           downloaded_ever = ?, uploaded_ever = ?, download_speed = ?,
           upload_speed = ?, eta = ?, error = ?, error_string = ?,
           removed_at = NULL, updated_at = ?
@@ -656,6 +660,7 @@ export class StateStore {
       merged.lifecycle,
       merged.putio_status,
       merged.percent_done,
+      merged.completion_percent,
       merged.total_size,
       merged.downloaded_ever,
       merged.uploaded_ever,
@@ -684,6 +689,7 @@ export class StateStore {
       'lifecycle',
       'putio_status',
       'percent_done',
+      'completion_percent',
       'total_size',
       'downloaded_ever',
       'uploaded_ever',

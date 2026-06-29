@@ -38,6 +38,33 @@ test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
   }
 });
 
+test('createOrUpdateTransfer persists put.io completion_percent across updates', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const created = store.createOrUpdateTransfer({
+      putio_transfer_id: 11,
+      hash: 'completinghash',
+      name: 'Completing Transfer',
+      putio_status: 'COMPLETING',
+      percent_done: 100,
+      completion_percent: 67,
+    });
+    assert.equal(created.completion_percent, 67);
+
+    const updated = store.createOrUpdateTransfer({
+      putio_transfer_id: 11,
+      hash: 'completinghash',
+      putio_status: 'COMPLETING',
+      percent_done: 100,
+      completion_percent: 82,
+    });
+    assert.equal(updated.id, created.id);
+    assert.equal(updated.completion_percent, 82);
+  } finally {
+    store.close();
+  }
+});
+
 test('profile rows migrate local_path to downloadAt', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
   const dbPath = path.join(root, 'state.sqlite');
