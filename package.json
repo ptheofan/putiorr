@@ -15,7 +15,8 @@
     "release:create": "node scripts/create-release.js",
     "release:gate": "node scripts/release-gate.js",
     "start": "node --disable-warning=ExperimentalWarning src/main.js",
-    "test": "node --disable-warning=ExperimentalWarning --test"
+    "test": "node --disable-warning=ExperimentalWarning --test",
+    "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-lines=90"
   },
   "dependencies": {
     "semver": "^7.8.4"
