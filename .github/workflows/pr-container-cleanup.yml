@@ -1,0 +1,96 @@
+name: PR Container Cleanup
+
+# When a pull request closes (merged or not), delete the container image versions
+# that were published for it (tags pr-<number> and pr-<number>-<sha>), so closed
+# PRs don't leave images behind in GHCR.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Delete PR image
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+
+    steps:
+      - name: Delete PR image versions
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const packageName = context.repo.repo;
+            const pr = context.payload.pull_request.number;
+            const isMatch = (tag) => tag === `pr-${pr}` || tag.startsWith(`pr-${pr}-`);
+
+            // The package may be owned by a user or an organisation; pick the right API.
+            let ownerType = 'User';
+            try {
+              const { data: account } = await github.rest.users.getByUsername({ username: owner });
+              ownerType = account.type; // 'User' | 'Organization'
+            } catch (error) {
+              core.warning(`Could not resolve owner type, assuming User: ${error.message}`);
+            }
+            const org = ownerType === 'Organization';
+            const list = org
+              ? github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg
+              : github.rest.packages.getAllPackageVersionsForPackageOwnedByUser;
+            const del = org
+              ? github.rest.packages.deletePackageVersionForOrg
+              : github.rest.packages.deletePackageVersionForUser;
+            const base = org
+              ? { package_type: 'container', package_name: packageName, org: owner }
+              : { package_type: 'container', package_name: packageName, username: owner };
+
+            let versions = [];
+            try {
+              versions = await github.paginate(list, { ...base, per_page: 100 });
+            } catch (error) {
+              core.warning(`No package versions to clean up (${error.message}).`);
+              return;
+            }
+
+            const targets = versions.filter((version) =>
+              (version.metadata?.container?.tags ?? []).some(isMatch));
+            if (targets.length === 0) {
+              core.info(`No image versions tagged pr-${pr} found.`);
+              return;
+            }
+
+            for (const version of targets) {
+              try {
+                await del({ ...base, package_version_id: version.id });
+                core.info(`Deleted version ${version.id} (${(version.metadata.container.tags || []).join(', ')}).`);
+              } catch (error) {
+                core.warning(`Failed to delete version ${version.id}: ${error.message}`);
+              }
+            }
+
+      - name: Note removal on the PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request.number;
+            const marker = '<!-- pr-container-image -->';
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo, issue_number: pr, per_page: 100,
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: `${marker}\n### 🐳 PR container image\n\n_Removed — this pull request is closed._`,
+              });
+            }
