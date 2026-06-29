@@ -262,6 +262,49 @@ test('failed RPC surfaces the real error in the Transmission result field', asyn
   assert.match(addBody.result, /requires a magnet link or base64 metainfo/);
 });
 
+test('dashboard manual start calls the download manager', async (t) => {
+  const started = [];
+  const harness = await createHarness({}, {
+    downloadManager: {
+      async startTransferDownload(id) {
+        started.push(id);
+        return { ok: true, transferId: id, files: 1 };
+      },
+    },
+  });
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'manualstarthash',
+    name: 'Manual.Start',
+    lifecycle: 'remote',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/start`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(started, [transfer.id]);
+  assert.equal(body.ok, true);
+  assert.equal(body.transferId, transfer.id);
+  assert.ok(Array.isArray(body.downloads));
+});
+
 test('torrent-remove deletes remote resources and hides transfer', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

@@ -584,6 +584,12 @@ export class TransferService {
           error: file.error_string,
         };
       });
+      const failedFileErrors = fileItems
+        .filter((file) => file.status === 'failed' && file.error)
+        .map((file) => file.error);
+      const fileError = failedFileErrors.length > 0
+        ? `${failedFileErrors.length} file${failedFileErrors.length === 1 ? '' : 's'} failed: ${failedFileErrors[0]}`
+        : '';
       const progress = calculateTransmissionProgress(row, stats);
       return {
         id: row.id,
@@ -605,7 +611,7 @@ export class TransferService {
         combinedProgress: Math.round(progress.percentDone * 100),
         speed: row.download_speed,
         eta: row.eta,
-        error: row.error_string,
+        error: row.error_string || fileError,
         totalSize: row.total_size,
         downloadedSize: Number(stats.downloaded_size ?? 0),
         files: {

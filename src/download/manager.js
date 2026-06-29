@@ -127,28 +127,84 @@ export class DownloadManager {
         });
         return;
       }
-      logger.warn('failed to prepare transfer; will retry next poll', {
-        transferId: row.id,
-        name: row.name,
-        error: error.message,
+      this.recordTransferStartFailure(row, error, 'failed to prepare transfer; will retry next poll');
+    }
+  }
+
+  async startTransferDownload(transferId) {
+    let transfer = this.store.findTransferById(transferId);
+    if (!transfer || transfer.removed_at) throw new Error('Download not found');
+
+    try {
+      if (!this.service.getPutioToken()) {
+        throw new Error('Put.io token is required before starting downloads');
+      }
+
+      if (!READY_REMOTE_STATUSES.has(transfer.putio_status) || !transfer.putio_file_id) {
+        await this.service.refreshRemoteTransfers();
+        transfer = this.store.findTransferById(transferId);
+      }
+
+      if (!transfer || transfer.removed_at) throw new Error('Download not found');
+      if (!READY_REMOTE_STATUSES.has(transfer.putio_status)) {
+        throw new Error(`put.io transfer is ${transfer.putio_status || 'UNKNOWN'}, not ready to download yet`);
+      }
+
+      await this.prepareTransfer(transfer);
+      const files = this.store.listFilesForTransfer(transfer.id);
+      logger.info('manual download start requested', {
+        transferId: transfer.id,
+        name: transfer.name,
+        files: files.length,
+      });
+      return {
+        ok: true,
+        transferId: transfer.id,
+        files: files.length,
+      };
+    } catch (error) {
+      this.recordTransferStartFailure(transfer, error, 'manual download start failed');
+      throw error;
+    }
+  }
+
+  recordTransferStartFailure(transfer, error, message) {
+    if (transfer?.id) {
+      this.store.updateTransfer(transfer.id, {
+        error: true,
+        error_string: error.message,
+        download_speed: 0,
+        eta: -1,
       });
     }
+    logger.warn(message, {
+      transferId: transfer?.id,
+      putioTransferId: transfer?.putio_transfer_id,
+      putioFileId: transfer?.putio_file_id,
+      name: transfer?.name,
+      status: error.status,
+      error: error.message,
+      stack: error.stack,
+    });
   }
 
   async prepareTransfer(transfer) {
     if (!transfer.putio_file_id) {
-      logger.warn('ready transfer has no put.io file id', { id: transfer.id, name: transfer.name });
-      return;
+      throw new Error('ready transfer has no put.io file id');
     }
 
     const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    if (!profile) throw new Error('No RR profile is available for download');
     const remoteFiles = await this.service.getPutio().listTransferFiles(transfer.putio_file_id);
     if (remoteFiles.length === 0) {
-      logger.warn('ready transfer has no files', { id: transfer.id, name: transfer.name });
-      return;
+      throw new Error('ready transfer has no downloadable files on put.io');
     }
 
-    const updated = this.store.updateTransfer(transfer.id, { lifecycle: 'downloading' });
+    const updated = this.store.updateTransfer(transfer.id, {
+      lifecycle: 'downloading',
+      error: false,
+      error_string: '',
+    });
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
       const relativePath = normalizeRelativePath(remoteFile.relativePath ?? remoteFile.name);
@@ -265,12 +321,16 @@ export class DownloadManager {
           download_speed: 0,
           error_string: error.message,
         });
+        const transfer = this.store.findTransferById(job.transfer_id);
         logger.warn('file download failed', {
           worker: index,
+          transferId: job.transfer_id,
+          name: transfer?.name ?? job.transfer_name,
           fileId: job.id,
           putioFileId: job.putio_file_id,
           attempts,
           error: error.message,
+          stack: error.stack,
         });
       } finally {
         this.activeFileRates.delete(job.id);

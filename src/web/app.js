@@ -6,6 +6,7 @@ const state = {
   expandedDownloads: new Set(),
   fileListScrollTops: new Map(),
   selectedFilesByDownload: new Map(),
+  startingDownloads: new Set(),
   pendingDelete: undefined,
   putioConnectionPromptShown: false,
   putioAdvancedOpen: false,
@@ -1841,6 +1842,10 @@ function createDownloadRow(download) {
             <strong data-role="download-speed"></strong>
             <div class="download-meta" data-role="download-eta"></div>
           </div>
+          <button class="button secondary compact-button start-download-button" type="button" data-action="start-download">
+            <span aria-hidden="true">▶</span>
+            <span data-role="start-label">Start</span>
+          </button>
           <button class="icon-button danger bucket-delete-button" type="button" data-action="delete-bucket" aria-label="Delete bucket" title="Delete bucket">${trashIcon()}</button>
         </div>
       </div>
@@ -1868,6 +1873,10 @@ function createDownloadRow(download) {
   row.querySelector('[data-action="delete-bucket"]').addEventListener('click', () => {
     const download = findDownload(row.dataset.id);
     if (download) openBucketDelete(download);
+  });
+  row.querySelector('[data-action="start-download"]').addEventListener('click', () => {
+    const download = findDownload(row.dataset.id);
+    if (download) startDownload(download);
   });
   row.querySelector('[data-action="select-all-files"]').addEventListener('change', (event) => {
     const download = findDownload(row.dataset.id);
@@ -1902,6 +1911,7 @@ function updateDownloadRow(row, download) {
     : `${formatBytes(downloadedSize)} copied`;
 
   setDataValue(row, 'id', download.id);
+  row.dataset.error = download.error ? 'true' : 'false';
   setText(row.querySelector('[data-role="download-title"]'), download.name);
   setText(
     row.querySelector('[data-role="download-location"]'),
@@ -1912,9 +1922,36 @@ function updateDownloadRow(row, download) {
   setText(row.querySelector('[data-role="download-speed"]'), formatSpeed(download.speed));
   setText(row.querySelector('[data-role="download-eta"]'), formatEta(download.eta));
   setText(row.querySelector('[data-role="file-count"]'), totalFiles > 0 ? String(totalFiles) : '0');
+  const startButton = row.querySelector('[data-action="start-download"]');
+  const starting = state.startingDownloads.has(String(download.id));
+  startButton.hidden = download.lifecycle === 'processed';
+  startButton.disabled = starting;
+  startButton.title = starting ? 'Starting local download' : 'Start local download from put.io';
+  setText(startButton.querySelector('[data-role="start-label"]'), starting ? 'Starting' : 'Start');
   setProgressValue(row, 'putio-bar', 'putio-progress', putioProgress);
   setProgressValue(row, 'local-bar', 'local-progress', localProgress);
   populateFilePanel(row, download, fileItems);
+}
+
+async function startDownload(download) {
+  const id = String(download.id);
+  state.startingDownloads.add(id);
+  renderDownloads();
+  try {
+    const result = await api(`/api/downloads/${id}/start`, {
+      method: 'POST',
+      body: '{}',
+    });
+    if (Array.isArray(result.downloads)) state.downloads = result.downloads;
+    else await refreshDownloads();
+  } catch (error) {
+    const current = findDownload(id);
+    if (current) current.error = error.message;
+  } finally {
+    state.startingDownloads.delete(id);
+    renderDownloads();
+    requestStateRefresh();
+  }
 }
 
 function toggleFilePanel(downloadId) {

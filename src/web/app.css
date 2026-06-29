@@ -1230,6 +1230,16 @@ td.center input {
   background: #ffffff;
 }
 
+.download-row[data-error="true"] {
+  border-color: rgba(180, 35, 24, 0.28);
+  background: #fffafa;
+}
+
+.download-row[data-error="true"] [data-role="download-files"] {
+  color: var(--danger);
+  font-weight: 750;
+}
+
 .download-summary {
   display: grid;
   grid-template-columns: minmax(220px, 1.6fr) minmax(170px, 0.9fr) minmax(280px, 1.4fr) minmax(140px, 0.7fr);
@@ -1251,7 +1261,7 @@ td.center input {
 .download-actions {
   display: flex;
   align-items: flex-start;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
 }
 
@@ -1265,6 +1275,10 @@ td.center input {
   min-height: 34px;
   padding: 7px;
   flex: 0 0 auto;
+}
+
+.start-download-button {
+  min-width: 82px;
 }
 
 .compact-button {
