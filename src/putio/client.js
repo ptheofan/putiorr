@@ -41,6 +41,7 @@ export function normalizeTransfer(transfer) {
     statusMessage: transfer.status_message ?? transfer.statusMessage ?? '',
     errorMessage: transfer.error_message ?? transfer.errorMessage ?? '',
     percentDone: Number(transfer.percent_done ?? transfer.percentDone ?? 0),
+    completionPercent: Number(transfer.completion_percent ?? transfer.completionPercent ?? 0),
     size: Number(transfer.size ?? 0),
     downloaded: Number(transfer.downloaded ?? 0),
     uploaded: Number(transfer.uploaded ?? 0),
