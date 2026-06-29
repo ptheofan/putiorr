@@ -596,10 +596,14 @@ function render() {
 function renderVersion() {
   const version = state.version;
   const isUpdateAvailable = Boolean(version?.updateAvailable && version.latestVersion);
-  el.versionUpdateLink.hidden = !isUpdateAvailable;
+  const currentVersion = version?.currentVersion ? `v${version.currentVersion}` : '';
+  el.versionUpdateLink.hidden = !isUpdateAvailable && !currentVersion;
+  el.versionUpdateLink.classList.toggle('is-current-version', !isUpdateAvailable);
   if (!isUpdateAvailable) {
+    el.versionUpdateLink.removeAttribute('href');
     el.versionUpdateLink.removeAttribute('aria-label');
-    el.versionUpdateLink.removeAttribute('title');
+    el.versionUpdateLink.title = currentVersion ? `Current putiorr version: ${currentVersion}.` : '';
+    el.versionUpdateLink.textContent = currentVersion;
     return;
   }
 
