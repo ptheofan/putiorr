@@ -7,7 +7,10 @@ export function applyTheme(theme) {
   const toggle = document.querySelector('#themeToggle');
   if (!toggle) return;
   const icon = toggle.querySelector('wa-icon');
-  if (icon) icon.name = dark ? 'moon' : 'sun';
+  // Show the icon of the mode you'll switch TO: a clear crescent moon in light
+  // mode (switch to dark), a sun in dark mode (switch to light). Showing the sun
+  // in light mode read as a gear because its rays look like cog teeth when small.
+  if (icon) icon.name = dark ? 'sun' : 'moon';
   const label = dark ? 'Switch to light theme' : 'Switch to dark theme';
   toggle.setAttribute('aria-label', label);
   toggle.title = label;
