@@ -13,15 +13,15 @@ This change automates that cleanup.
 ## Background
 
 - Profile `type` is an existing concept. `prowlarr` is already a recognised
-  type (see `src/web/app.js` `PROFILE_TYPES`), stored on the profile row and
+  type (see `/.ts` `PROFILE_TYPES`), stored on the profile row and
   surfaced via `TransferService.listDownloads()` as `profileType`.
 - `DownloadManager.finalizeTransferIfComplete()`
-  (`src/download/manager.js:639`) is the single point where a transfer becomes
+  (`/.ts:639`) is the single point where a transfer becomes
   `processed` after all its files are local. By this point every file has
   already been renamed from its `<name>.part` working name to the final name,
   so "keep files on disk" is clean and complete.
 - `TransferService.deleteDownloadBucket(transferId, { deleteRemote, deleteLocal })`
-  (`src/transfer/service.js:303`) already implements exactly the action we
+  (`/.ts:303`) already implements exactly the action we
   need: with `deleteRemote: true` it deletes the put.io file + transfer and
   hard-removes the local DB row (so it leaves the list); with
   `deleteLocal: false` it leaves disk files alone.
@@ -29,7 +29,7 @@ This change automates that cleanup.
 Feature 2 from the original request (`.partial` suffix for in-progress files)
 was dropped: the download manager already writes in-progress files as
 `<name>.part` and renames them to the final name on completion
-(`src/download/manager.js:362,398`). No change needed.
+(`/.ts:362,398`). No change needed.
 
 ## Behavior
 
@@ -82,5 +82,5 @@ Add `DownloadManager` finalize coverage:
 
 ## Affected files
 
-- `src/download/manager.js` — `finalizeTransferIfComplete()` (~10 lines added).
+- `/.ts` — `finalizeTransferIfComplete()` (~10 lines added).
 - `test/` — new/extended manager finalize test.

@@ -9,16 +9,20 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "dev": "node --watch --disable-warning=ExperimentalWarning src/main.js",
-    "lint": "node scripts/lint.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning src/main.ts",
+    "lint": "tsc --noEmit",
     "release:check": "pnpm release:gate",
-    "release:create": "node scripts/create-release.js",
-    "release:gate": "node scripts/release-gate.js",
-    "start": "node --disable-warning=ExperimentalWarning src/main.js",
-    "test": "node --disable-warning=ExperimentalWarning --test",
-    "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include='src/**/*.js' --test-coverage-lines=90"
+    "release:create": "node scripts/create-release.ts",
+    "release:gate": "node scripts/release-gate.ts",
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "test:coverage": "node --disable-warning=ExperimentalWarning --test --experimental-test-coverage --test-coverage-include='src/**/*.ts' --test-coverage-lines=90 test/*.test.ts"
   },
   "dependencies": {
     "semver": "^7.8.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "typescript": "^6.0.3"
   }
 }

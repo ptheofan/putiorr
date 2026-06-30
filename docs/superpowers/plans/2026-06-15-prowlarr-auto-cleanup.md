@@ -13,12 +13,12 @@
 ### Task 1: Prowlarr auto-cleanup on finalize
 
 **Files:**
-- Modify: `src/download/manager.js` — `finalizeTransferIfComplete()` (insert after the `updateTransfer(... processed ...)` call at `src/download/manager.js:647-654`, before the `cleanupRemoteFiles` block at `:656`)
-- Test: `test/prowlarr-cleanup.test.js` (new)
+- Modify: `/.ts` — `finalizeTransferIfComplete()` (insert after the `updateTransfer(... processed ...)` call at `/.ts:647-654`, before the `cleanupRemoteFiles` block at `:656`)
+- Test: `/.ts` (new)
 
 - [ ] **Step 1: Write the failing test**
 
-Create `test/prowlarr-cleanup.test.js` with this exact content:
+Create `/.ts` with this exact content:
 
 ```javascript
 import assert from 'node:assert/strict';
@@ -26,10 +26,10 @@ import test from 'node:test';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { loadConfig } from '../src/config.js';
-import { DownloadManager } from '../src/download/manager.js';
-import { StateStore } from '../src/state/store.js';
-import { TransferService } from '../src/transfer/service.js';
+import { loadConfig } .ts;
+import { DownloadManager } .ts;
+import { StateStore } .ts;
+import { TransferService } .ts;
 
 class FakePutio {
   constructor() {
@@ -152,12 +152,12 @@ test('finalize leaves a non-prowlarr transfer in the list as processed', async (
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `node --disable-warning=ExperimentalWarning --test test/prowlarr-cleanup.test.js`
+Run: `node --disable-warning=ExperimentalWarning --test /.ts`
 Expected: The first test FAILS — `deletedTransfers` is `[]` (and the row still exists) because finalize does not yet do the bucket delete. The second test passes (it already matches current behavior with cleanup disabled).
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/download/manager.js`, in `finalizeTransferIfComplete()`, immediately after the `this.store.updateTransfer(transferId, { lifecycle: 'processed', ... })` call (currently ending at line 654) and BEFORE the `if (this.config.cleanupRemoteFiles && transfer.putio_file_id) {` block, insert:
+In `/.ts`, in `finalizeTransferIfComplete()`, immediately after the `this.store.updateTransfer(transferId, { lifecycle: 'processed', ... })` call (currently ending at line 654) and BEFORE the `if (this.config.cleanupRemoteFiles && transfer.putio_file_id) {` block, insert:
 
 ```javascript
     const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
@@ -188,7 +188,7 @@ In `src/download/manager.js`, in `finalizeTransferIfComplete()`, immediately aft
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `node --disable-warning=ExperimentalWarning --test test/prowlarr-cleanup.test.js`
+Run: `node --disable-warning=ExperimentalWarning --test /.ts`
 Expected: Both tests PASS.
 
 - [ ] **Step 5: Run the full test suite + lint to check for regressions**
@@ -202,7 +202,7 @@ Expected: No lint errors.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/download/manager.js test/prowlarr-cleanup.test.js
+git add /.ts /.ts
 git commit -m "feat: auto-remove completed prowlarr transfers, keep disk files
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
@@ -237,7 +237,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ## Notes for the implementer
 
-- `deleteDownloadBucket` lives at `src/transfer/service.js:303`. With
+- `deleteDownloadBucket` lives at `/.ts:303`. With
   `deleteRemote: true` it calls `removeRemoteTransfer(transfer, { throwOnError: true })`
   (deletes `putio_file_id` then `putio_transfer_id`) and then `deleteTransfer(row.id)`;
   with `deleteLocal: false` it never touches disk. Do not reimplement this logic.
@@ -246,4 +246,4 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 - It runs regardless of `config.cleanupRemoteFiles`: prowlarr auto-cleanup is its
   own behavior.
 - `profile.type` for prowlarr is the literal string `'prowlarr'` (see
-  `src/web/app.js` `PROFILE_TYPES`).
+  `/.ts` `PROFILE_TYPES`).
