@@ -3,6 +3,27 @@
   gap: 12px;
 }
 
+.download-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.download-bulk-bar[hidden] {
+  display: none;
+}
+
+.download-selection-count {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
 .download-row {
   display: grid;
   gap: 14px;
@@ -28,6 +49,12 @@
   background: color-mix(in srgb, var(--danger) 5%, var(--panel));
 }
 
+.download-row[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+
 .download-row[data-error="true"] [data-role="download-files"] {
   color: var(--danger);
   font-weight: 700;
@@ -35,9 +62,14 @@
 
 .download-summary {
   display: grid;
-  grid-template-columns: minmax(230px, 1.9fr) minmax(150px, 0.9fr) minmax(230px, 1.5fr) minmax(150px, auto);
+  grid-template-columns: 22px minmax(230px, 1.9fr) minmax(150px, 0.9fr) minmax(230px, 1.5fr) minmax(150px, auto);
   gap: 24px;
   align-items: center;
+}
+
+.download-select {
+  align-self: start;
+  margin-top: 2px;
 }
 
 .download-title {
@@ -321,6 +353,7 @@
   flex-wrap: wrap;
 }
 
+.download-select-all,
 .file-select-all,
 .checkbox-row {
   display: flex;
@@ -336,6 +369,8 @@
    so rather than fight it back to the (inconsistent) native control, we own the
    look: a rounded box that fills violet with a crisp SVG check / dash. The
    [type="checkbox"] qualifier keeps specificity above the WA reset. */
+.download-select-all input[type="checkbox"],
+.download-select input[type="checkbox"],
 .file-select-all input[type="checkbox"],
 .checkbox-row input[type="checkbox"],
 .file-select input[type="checkbox"] {
@@ -361,12 +396,16 @@
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
+.download-select-all input[type="checkbox"]:hover,
+.download-select input[type="checkbox"]:hover,
 .file-select-all input[type="checkbox"]:hover,
 .checkbox-row input[type="checkbox"]:hover,
 .file-select input[type="checkbox"]:hover {
   border-color: var(--accent);
 }
 
+.download-select-all input[type="checkbox"]:checked,
+.download-select input[type="checkbox"]:checked,
 .file-select-all input[type="checkbox"]:checked,
 .checkbox-row input[type="checkbox"]:checked,
 .file-select input[type="checkbox"]:checked {
@@ -375,6 +414,8 @@
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%3E%3Cpath%20d%3D'M4%208.4l2.7%202.7L12%204.9'%20fill%3D'none'%20stroke%3D'%23fff'%20stroke-width%3D'2.2'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%2F%3E%3C%2Fsvg%3E");
 }
 
+.download-select-all input[type="checkbox"]:indeterminate,
+.download-select input[type="checkbox"]:indeterminate,
 .file-select-all input[type="checkbox"]:indeterminate,
 .checkbox-row input[type="checkbox"]:indeterminate,
 .file-select input[type="checkbox"]:indeterminate {
@@ -383,6 +424,8 @@
   background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%3E%3Cpath%20d%3D'M4.5%208h7'%20fill%3D'none'%20stroke%3D'%23fff'%20stroke-width%3D'2.2'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E");
 }
 
+.download-select-all input[type="checkbox"]:focus-visible,
+.download-select input[type="checkbox"]:focus-visible,
 .file-select-all input[type="checkbox"]:focus-visible,
 .checkbox-row input[type="checkbox"]:focus-visible,
 .file-select input[type="checkbox"]:focus-visible {
@@ -525,4 +568,3 @@
   white-space: nowrap;
   border: 0;
 }
-
