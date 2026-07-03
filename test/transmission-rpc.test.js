@@ -768,6 +768,62 @@ test('tombstoned transfer kept on put.io is physically pruned once put.io drops 
   assert.deepEqual(harness.store.listFilesForTransfer(transfer.id), []);
 });
 
+test('put.io refresh removes remote transfers cancelled upstream', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const cancelled = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'cancelledremotehash',
+    name: 'Cancelled.Remote',
+    category: 'radarr',
+    lifecycle: 'remote',
+    putio_status: 'DOWNLOADING',
+    percent_done: 42,
+    total_size: 5,
+  });
+  const downloading = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 78,
+    putio_file_id: 89,
+    save_parent_id: 42,
+    hash: 'keepdownloadinghash',
+    name: 'Keep.Downloading',
+    category: 'radarr',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+  const processed = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 79,
+    putio_file_id: 90,
+    save_parent_id: 42,
+    hash: 'keepprocessedhash',
+    name: 'Keep.Processed',
+    category: 'radarr',
+    lifecycle: 'processed',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+
+  harness.putio.transfers = [];
+  await harness.service.refreshRemoteTransfers();
+
+  assert.equal(harness.store.findTransferById(cancelled.id), undefined);
+  assert.equal(harness.store.findTransferById(downloading.id)?.lifecycle, 'downloading');
+  assert.equal(harness.store.findTransferById(processed.id)?.lifecycle, 'processed');
+});
+
 test('tombstoned files under a processed transfer are physically purged; active ones are kept', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
