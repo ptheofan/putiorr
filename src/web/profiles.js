@@ -165,7 +165,7 @@ export const WIZARD_HELP = {
   wizardAutoRemoveCompleted: {
     title: 'Auto-remove completed downloads',
     paragraphs: [
-      'Use this when no downstream download client will call torrent-remove after import.',
+      'Use this when the app will not call torrent-remove to signal import or completion, even though it uses putiorr as a download client.',
       'When enabled, putiorr removes the download from its own list as soon as all files are downloaded locally. The local files stay on disk.',
     ],
     tips: [
