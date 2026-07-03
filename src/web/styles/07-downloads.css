@@ -352,14 +352,25 @@
   cursor: pointer;
 }
 
-.file-select-all input,
-.checkbox-row input,
-.file-select input {
+/* Restore native checkbox rendering + sizing — the Web Awesome global reset
+   forces appearance:none on inputs, which blanks these out. The [type="checkbox"]
+   qualifier raises specificity above that reset without needing !important. */
+.file-select-all input[type="checkbox"],
+.checkbox-row input[type="checkbox"],
+.file-select input[type="checkbox"] {
+  appearance: auto;
+  -webkit-appearance: checkbox;
   width: 16px;
   height: 16px;
+  min-width: 16px;
+  min-height: 16px;
+  max-height: 16px;
+  margin: 0;
+  padding: 0;
   flex: 0 0 auto;
   accent-color: var(--accent);
   cursor: pointer;
+  box-sizing: border-box;
 }
 
 .file-list {
