@@ -717,8 +717,8 @@ export class DownloadManager {
     if (profile?.type === 'prowlarr') {
       // Prowlarr has no downstream *arr import, so a completed transfer would
       // otherwise linger forever. Delete it from put.io and drop it from the
-      // list, but keep the downloaded files on disk. Best-effort: a failure is
-      // logged and the transfer stays as `processed` (same as cleanupRemoteFiles).
+      // list, but keep the downloaded files on disk. If remote cleanup fails,
+      // hide it locally so it does not stay visible at 100% forever.
       try {
         await this.service.deleteDownloadBucket(transferId, {
           deleteRemote: true,
@@ -734,6 +734,18 @@ export class DownloadManager {
           name: transfer.name,
           error: error.message,
         });
+        try {
+          await this.service.deleteDownloadBucket(transferId, {
+            deleteRemote: false,
+            deleteLocal: false,
+          });
+        } catch (localError) {
+          logger.warn('failed to hide prowlarr transfer after remote cleanup failure', {
+            transferId,
+            name: transfer.name,
+            error: localError.message,
+          });
+        }
       }
       return;
     }

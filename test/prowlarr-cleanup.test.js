@@ -14,6 +14,11 @@ class FakePutio {
     this.deletedTransfers = [];
   }
 
+  async getDownloadUrl(fileId) {
+    assert.equal(fileId, 30);
+    return 'https://example.test/prowlarr-file';
+  }
+
   async deleteFile(fileId) {
     this.deletedFiles.push(fileId);
   }
@@ -70,6 +75,18 @@ async function seedCompleteTransfer(harness, profile) {
   return { transfer, filePath };
 }
 
+function createResponse(body) {
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      async *[Symbol.asyncIterator]() {
+        yield Buffer.from(body);
+      },
+    },
+  };
+}
+
 test('finalize auto-removes a prowlarr transfer from put.io and the list, keeping disk files', async () => {
   const harness = await createHarness();
   try {
@@ -104,7 +121,7 @@ test('finalize auto-removes a prowlarr transfer from put.io and the list, keepin
   }
 });
 
-test('finalize keeps a prowlarr transfer as processed (files intact) when the put.io delete fails', async () => {
+test('finalize hides a prowlarr transfer from putiorr when the put.io delete fails', async () => {
   class ThrowingPutio extends FakePutio {
     async deleteFile() {
       throw new Error('put.io is down');
@@ -132,10 +149,66 @@ test('finalize keeps a prowlarr transfer as processed (files intact) when the pu
     // Best-effort contract: a failed remote delete must NOT propagate.
     await assert.doesNotReject(() => manager.finalizeTransferIfComplete(transfer.id));
 
-    // The remote delete throws before the local row is removed, so the row
-    // remains as `processed` and the on-disk file is untouched.
-    assert.equal(harness.store.findTransferById(transfer.id)?.lifecycle, 'processed');
+    // The local row is tombstoned so it disappears from putiorr and cannot be
+    // resurrected by the next remote refresh. Disk files stay untouched.
+    assert.ok(harness.store.findTransferById(transfer.id)?.removed_at);
+    assert.deepEqual(harness.store.listActiveTransfers(), []);
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('processFile removes a completed prowlarr download from the service list with mocked put.io', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.createProfile({
+      name: 'Prowlarr',
+      type: 'prowlarr',
+      slug: 'prowlarr',
+      putio_folder_name: 'prowlarr',
+      downloadAt: path.join(harness.config.targetDir, 'prowlarr'),
+      rpc_path: '/prowlarr/transmission/rpc',
+      enabled: true,
+    });
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 10,
+      putio_file_id: 20,
+      save_parent_id: profile.putio_folder_id ?? 42,
+      hash: 'prowlarrintegrationhash',
+      name: 'Prowlarr.Integration.Release',
+      lifecycle: 'downloading',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+      total_size: 4,
+    });
+    const file = harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 30,
+      relative_path: 'movie.mkv',
+      size: 4,
+      downloaded_bytes: 0,
+      status: 'pending',
+    });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: async () => createResponse('done'),
+    });
+
+    await manager.processFile(file);
+
+    assert.deepEqual(harness.service.listDownloads(), []);
+    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.deepEqual(harness.putio.deletedFiles, [20]);
+    assert.deepEqual(harness.putio.deletedTransfers, [10]);
+    assert.equal(
+      await readFile(path.join(profile.download_at, transfer.name, 'movie.mkv'), 'utf8'),
+      'done',
+    );
   } finally {
     harness.store.close();
   }
