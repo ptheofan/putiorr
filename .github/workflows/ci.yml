@@ -1,11 +1,10 @@
 name: CI
 
+# Validates pull requests before they merge. Pushes to main/master are handled
+# by main-container.yml (which runs the same gates before publishing the :main
+# image), so CI does not also run on push to avoid duplicating lint + tests.
 on:
   pull_request:
-    branches:
-      - main
-      - master
-  push:
     branches:
       - main
       - master
