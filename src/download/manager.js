@@ -27,6 +27,15 @@ function sleep(ms, signal) {
   });
 }
 
+function isProwlarrProfile(profile) {
+  return [
+    profile?.type,
+    profile?.slug,
+    profile?.name,
+    profile?.putio_folder_name,
+  ].some((value) => String(value ?? '').trim().toLowerCase() === 'prowlarr');
+}
+
 async function sizeOf(filePath) {
   try {
     const info = await stat(filePath);
@@ -91,6 +100,7 @@ export class DownloadManager {
     if (purgedFiles > 0) {
       logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
     }
+    await this.removeProcessedProwlarrTransfers();
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {
@@ -262,6 +272,17 @@ export class DownloadManager {
         transferId: transfer.id,
         name: transfer.name,
       });
+    }
+  }
+
+  async removeProcessedProwlarrTransfers() {
+    const transfers = this.store.listActiveTransfers()
+      .filter((transfer) => transfer.lifecycle === 'processed');
+
+    for (const transfer of transfers) {
+      const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+      if (!isProwlarrProfile(profile)) continue;
+      await this.removeCompletedProwlarrTransfer(transfer);
     }
   }
 
@@ -714,39 +735,8 @@ export class DownloadManager {
     });
 
     const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-    if (profile?.type === 'prowlarr') {
-      // Prowlarr has no downstream *arr import, so a completed transfer would
-      // otherwise linger forever. Delete it from put.io and drop it from the
-      // list, but keep the downloaded files on disk. If remote cleanup fails,
-      // hide it locally so it does not stay visible at 100% forever.
-      try {
-        await this.service.deleteDownloadBucket(transferId, {
-          deleteRemote: true,
-          deleteLocal: false,
-        });
-        logger.info('prowlarr transfer auto-removed after download; kept files on disk', {
-          transferId,
-          name: transfer.name,
-        });
-      } catch (error) {
-        logger.warn('failed to auto-remove prowlarr transfer', {
-          transferId,
-          name: transfer.name,
-          error: error.message,
-        });
-        try {
-          await this.service.deleteDownloadBucket(transferId, {
-            deleteRemote: false,
-            deleteLocal: false,
-          });
-        } catch (localError) {
-          logger.warn('failed to hide prowlarr transfer after remote cleanup failure', {
-            transferId,
-            name: transfer.name,
-            error: localError.message,
-          });
-        }
-      }
+    if (isProwlarrProfile(profile)) {
+      await this.removeCompletedProwlarrTransfer(transfer);
       return;
     }
 
@@ -767,5 +757,40 @@ export class DownloadManager {
       name: transfer.name,
       files: Number(stats.total_files),
     });
+  }
+
+  async removeCompletedProwlarrTransfer(transfer) {
+    if (this.service.getPutioToken()) {
+      try {
+        await this.service.deleteDownloadBucket(transfer.id, {
+          deleteRemote: true,
+          deleteLocal: false,
+        });
+        logger.info('prowlarr transfer auto-removed after download; kept files on disk', {
+          transferId: transfer.id,
+          name: transfer.name,
+        });
+        return;
+      } catch (error) {
+        logger.warn('failed to auto-remove prowlarr transfer', {
+          transferId: transfer.id,
+          name: transfer.name,
+          error: error.message,
+        });
+      }
+    }
+
+    try {
+      await this.service.deleteDownloadBucket(transfer.id, {
+        deleteRemote: false,
+        deleteLocal: false,
+      });
+    } catch (error) {
+      logger.warn('failed to hide prowlarr transfer after remote cleanup failure', {
+        transferId: transfer.id,
+        name: transfer.name,
+        error: error.message,
+      });
+    }
   }
 }

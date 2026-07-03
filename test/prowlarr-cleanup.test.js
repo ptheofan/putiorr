@@ -19,6 +19,22 @@ class FakePutio {
     return 'https://example.test/prowlarr-file';
   }
 
+  async ensureFolder() {
+    return 42;
+  }
+
+  async addTransfer() {
+    return {
+      id: 10,
+      fileId: 20,
+      saveParentId: 42,
+      name: 'Prowlarr.Integration.Release',
+      status: 'COMPLETED',
+      percentDone: 100,
+      size: 4,
+    };
+  }
+
   async deleteFile(fileId) {
     this.deletedFiles.push(fileId);
   }
@@ -159,30 +175,24 @@ test('finalize hides a prowlarr transfer from putiorr when the put.io delete fai
   }
 });
 
-test('processFile removes a completed prowlarr download from the service list with mocked put.io', async () => {
+test('processFile removes a completed prowlarr download linked to a prowlarr profile', async () => {
   const harness = await createHarness();
   try {
     const profile = harness.store.createProfile({
       name: 'Prowlarr',
-      type: 'prowlarr',
+      type: 'custom',
       slug: 'prowlarr',
       putio_folder_name: 'prowlarr',
       downloadAt: path.join(harness.config.targetDir, 'prowlarr'),
       rpc_path: '/prowlarr/transmission/rpc',
       enabled: true,
     });
-    const transfer = harness.store.createOrUpdateTransfer({
-      profile_id: profile.id,
-      putio_transfer_id: 10,
-      putio_file_id: 20,
-      save_parent_id: profile.putio_folder_id ?? 42,
-      hash: 'prowlarrintegrationhash',
-      name: 'Prowlarr.Integration.Release',
-      lifecycle: 'downloading',
-      putio_status: 'COMPLETED',
-      percent_done: 100,
-      total_size: 4,
-    });
+    await harness.service.addTorrent({
+      magnetLink: 'magnet:?xt=urn:btih:abcdef1234567890&dn=Prowlarr.Integration.Release',
+    }, profile);
+    const [transfer] = harness.store.listActiveTransfers({ profileId: profile.id });
+    assert.equal(transfer.profile_id, profile.id);
+    harness.store.updateTransfer(transfer.id, { lifecycle: 'downloading' });
     const file = harness.store.upsertTransferFile({
       transfer_id: transfer.id,
       putio_file_id: 30,
@@ -209,6 +219,37 @@ test('processFile removes a completed prowlarr download from the service list wi
       await readFile(path.join(profile.download_at, transfer.name, 'movie.mkv'), 'utf8'),
       'done',
     );
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('poll removes an already processed prowlarr download that still has local files', async () => {
+  const harness = await createHarness({ PUTIORR_PUTIO_TOKEN: '' });
+  try {
+    const profile = harness.store.createProfile({
+      name: 'Prowlarr',
+      type: 'prowlarr',
+      slug: 'prowlarr',
+      putio_folder_name: 'prowlarr',
+      downloadAt: path.join(harness.config.targetDir, 'prowlarr'),
+      rpc_path: '/prowlarr/transmission/rpc',
+      enabled: true,
+    });
+    const { transfer, filePath } = await seedCompleteTransfer(harness, profile);
+    harness.store.updateTransfer(transfer.id, { lifecycle: 'processed' });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await manager.pollOnce();
+
+    assert.ok(harness.store.findTransferById(transfer.id)?.removed_at);
+    assert.deepEqual(harness.service.listDownloads(), []);
+    assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
   } finally {
     harness.store.close();
   }
