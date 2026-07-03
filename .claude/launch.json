@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "servers": [
+    {
+      "id": "putiorr",
+      "name": "putiorr dev server",
+      "description": "put.io Transmission RPC bridge + web UI, running under Node --watch.",
+      "type": "node",
+      "command": "pnpm dev",
+      "cwd": ".",
+      "env": {
+        "PUTIORR_LISTEN_HOST": "0.0.0.0",
+        "PUTIORR_LISTEN_PORT": "9091"
+      },
+      "port": 9091,
+      "url": "http://localhost:9091/",
+      "endpoints": {
+        "webUi": "http://localhost:9091/",
+        "transmissionRpc": "http://localhost:9091/transmission/rpc"
+      },
+      "readyWhen": { "portOpen": 9091 }
+    }
+  ]
+}
