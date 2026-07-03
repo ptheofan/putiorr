@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "putiorr",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev"],
+      "port": 9091,
+      "env": {
+        "PUTIORR_LISTEN_HOST": "127.0.0.1",
+        "PUTIORR_LISTEN_PORT": "9091"
+      }
+    }
+  ]
+}
