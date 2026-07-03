@@ -275,10 +275,24 @@ export class DownloadManager {
       .filter((transfer) => transfer.lifecycle === 'processed');
 
     for (const transfer of transfers) {
-      const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+      const profile = this.autoRemoveProfileForTransfer(transfer);
       if (!profileAutoRemovesCompleted(profile)) continue;
       await this.removeCompletedAutoRemoveTransfer(transfer);
     }
+  }
+
+  autoRemoveProfileForTransfer(transfer) {
+    const storedProfile = this.store.findProfileById(transfer.profile_id);
+    const categoryProfile = this.service.findProfileByCategory?.(transfer.category);
+    if (categoryProfile && storedProfile && categoryProfile.id !== storedProfile.id) {
+      logger.warn('completed transfer auto-remove resolved by category instead of stored profile', {
+        transferId: transfer.id,
+        storedProfile: storedProfile.slug,
+        category: transfer.category,
+        resolvedProfile: categoryProfile.slug,
+      });
+    }
+    return categoryProfile ?? storedProfile ?? this.service.getDefaultProfile();
   }
 
   async hasLocalTransferData(profile, transfer) {
@@ -729,7 +743,7 @@ export class DownloadManager {
       eta: -1,
     });
 
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    const profile = this.autoRemoveProfileForTransfer(transfer);
     if (profileAutoRemovesCompleted(profile)) {
       await this.removeCompletedAutoRemoveTransfer(transfer);
       return;

@@ -64,7 +64,7 @@ async function createHarness(env = {}, putio = new FakePutio()) {
 
 // Creates a complete transfer (one fully-downloaded file) attached to `profile`,
 // with the file written to disk so "kept on disk" can be asserted.
-async function seedCompleteTransfer(harness, profile) {
+async function seedCompleteTransfer(harness, profile, patch = {}) {
   const transfer = harness.store.createOrUpdateTransfer({
     profile_id: profile.id,
     putio_transfer_id: 10,
@@ -76,6 +76,7 @@ async function seedCompleteTransfer(harness, profile) {
     putio_status: 'COMPLETED',
     percent_done: 100,
     total_size: 10,
+    ...patch,
   });
   harness.store.upsertTransferFile({
     transfer_id: transfer.id,
@@ -85,7 +86,7 @@ async function seedCompleteTransfer(harness, profile) {
     downloaded_bytes: 10,
     status: 'complete',
   });
-  const filePath = path.join(profile.download_at, transfer.name, 'movie.mkv');
+  const filePath = path.join(profile.download_at, transfer.category ?? '', transfer.name, 'movie.mkv');
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, 'downloaded!!');
   return { transfer, filePath };
@@ -251,6 +252,53 @@ test('poll removes an already processed prowlarr download that still has local f
     assert.ok(harness.store.findTransferById(transfer.id)?.removed_at);
     assert.deepEqual(harness.service.listDownloads(), []);
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('processed auto-remove uses category profile when the stored profile is wrong', async () => {
+  const harness = await createHarness();
+  try {
+    const prowlarr = harness.store.createProfile({
+      name: 'Prowlarr',
+      type: 'prowlarr',
+      slug: 'prowlarr',
+      auto_remove_completed: true,
+      putio_folder_name: 'prowlarr',
+      downloadAt: harness.config.targetDir,
+      rpc_path: '/prowlarr/transmission/rpc',
+      enabled: true,
+    });
+    const lidarr = harness.store.createProfile({
+      name: 'Lidarr',
+      type: 'lidarr',
+      slug: 'lidarr',
+      auto_remove_completed: false,
+      putio_folder_name: 'lidarr',
+      downloadAt: harness.config.targetDir,
+      rpc_path: '/lidarr/transmission/rpc',
+      enabled: true,
+    });
+    const { transfer, filePath } = await seedCompleteTransfer(harness, lidarr, {
+      category: 'prowlarr',
+      download_dir: path.join(harness.config.targetDir, 'prowlarr'),
+      lifecycle: 'processed',
+    });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await manager.removeProcessedAutoRemoveTransfers();
+
+    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.deepEqual(harness.putio.deletedFiles, [20]);
+    assert.deepEqual(harness.putio.deletedTransfers, [10]);
+    assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
+    assert.equal(prowlarr.auto_remove_completed, true);
   } finally {
     harness.store.close();
   }
