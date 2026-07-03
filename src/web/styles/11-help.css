@@ -1,0 +1,149 @@
+/* ==========================================================================
+   Help / "How it works" page
+   ========================================================================== */
+.help-panel {
+  gap: 26px;
+}
+
+.help-lead {
+  max-width: 820px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.help-lead strong {
+  color: var(--accent-strong);
+}
+
+.help-diagram {
+  overflow-x: auto;
+  padding: 6px 0 2px;
+}
+
+.help-diagram svg {
+  display: block;
+  width: 100%;
+  min-width: 680px;
+  height: auto;
+}
+
+.hd-node {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.hd-node--accent {
+  fill: var(--accent-quiet);
+  stroke: var(--accent);
+}
+
+.hd-title {
+  fill: var(--text);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.hd-title--accent {
+  fill: var(--accent-strong);
+}
+
+.hd-sub {
+  fill: var(--muted);
+  font-size: 12px;
+}
+
+.hd-label {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.hd-sublabel {
+  fill: var(--muted);
+  font-size: 11px;
+}
+
+.hd-arrow {
+  fill: none;
+  stroke: var(--accent-strong);
+  stroke-width: 2;
+}
+
+.hd-arrow--return {
+  stroke: var(--line);
+  stroke-dasharray: 5 5;
+}
+
+.hd-arrowhead {
+  fill: var(--accent-strong);
+}
+
+.help-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+  gap: 14px;
+}
+
+.help-step {
+  display: flex;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.help-step-num {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.help-step h3 {
+  margin: 2px 0 5px;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.help-step p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.help-step strong {
+  color: var(--text);
+}
+
+.help-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(124, 58, 237, 0.32);
+  border-radius: 12px;
+  background: rgba(124, 58, 237, 0.08);
+}
+
+.help-cta h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+@media (max-width: 860px) {
+  .help-cta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+

@@ -1,0 +1,500 @@
+.downloads-list {
+  display: grid;
+  gap: 12px;
+}
+
+.download-row {
+  position: relative;
+  display: grid;
+  gap: 14px;
+  padding: 16px 18px 16px 20px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.download-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  transition: background 0.18s ease, top 0.18s ease, bottom 0.18s ease;
+}
+
+.download-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+  box-shadow: 0 12px 32px -14px color-mix(in srgb, var(--accent) 55%, transparent);
+  transform: translateY(-1px);
+}
+
+.download-row:hover::before {
+  top: 6px;
+  bottom: 6px;
+  background: var(--accent);
+}
+
+.download-row[data-error="true"] {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+  background: color-mix(in srgb, var(--danger) 5%, var(--panel));
+}
+
+.download-row[data-error="true"]::before {
+  background: var(--danger);
+}
+
+.download-row[data-error="true"] [data-role="download-files"] {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.download-summary {
+  display: grid;
+  grid-template-columns: minmax(230px, 1.9fr) minmax(150px, 0.9fr) minmax(230px, 1.5fr) minmax(150px, auto);
+  gap: 24px;
+  align-items: center;
+}
+
+.download-title {
+  font-weight: 750;
+  font-size: 15px;
+  line-height: 1.32;
+  letter-spacing: -0.01em;
+  margin-bottom: 5px;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.download-meta,
+.metric-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+[data-role="download-location"] {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.metric-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 700;
+  font-size: 10.5px;
+  margin-bottom: 3px;
+}
+
+[data-role="download-status"] {
+  font-size: 13.5px;
+  font-weight: 750;
+}
+
+[data-role="download-speed"] {
+  font-size: 13.5px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+[data-role="download-files"],
+[data-role="download-eta"] {
+  margin-top: 3px;
+}
+
+.download-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.download-speed-metric {
+  min-width: 0;
+  text-align: right;
+}
+
+.bucket-delete-button,
+.file-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.bucket-delete-button:hover,
+.file-delete-button:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: var(--danger-quiet);
+}
+
+.delete-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.start-download-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  min-width: 84px;
+  padding: 6px 13px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line));
+  border-radius: 999px;
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.1s ease, box-shadow 0.16s ease;
+}
+
+.start-download-button:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 8px 20px -8px var(--accent);
+}
+
+.start-download-button:active {
+  transform: translateY(1px);
+}
+
+.start-download-button[disabled] {
+  opacity: 0.6;
+  cursor: default;
+  box-shadow: none;
+}
+
+.compact-button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.file-toggle {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px 3px 11px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, color 0.16s ease;
+}
+
+.file-toggle:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+  color: var(--accent-strong);
+}
+
+.file-toggle span {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
+.file-toggle::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(45deg) translateY(-1px);
+  opacity: 0.55;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.file-toggle.open {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+}
+
+.file-toggle.open::after {
+  transform: rotate(-135deg) translateY(1px);
+  opacity: 0.9;
+}
+
+.file-toggle.open span {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  color: var(--accent-strong);
+}
+
+.progress-group {
+  display: grid;
+  gap: 9px;
+}
+
+.progress-line {
+  display: grid;
+  grid-template-columns: 44px 1fr 42px;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+.progress-line > span:first-child {
+  font-weight: 650;
+}
+
+.progress-line [data-role$="progress"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.bar {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  width: var(--value, 0%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 78%, #ffffff), var(--accent));
+  box-shadow: 0 0 8px -2px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bar.local > span {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--amber) 82%, #ffffff), var(--amber));
+  box-shadow: 0 0 8px -2px color-mix(in srgb, var(--amber) 55%, transparent);
+}
+
+.file-panel {
+  border-top: 1px solid var(--line);
+  margin-top: 2px;
+  padding-top: 14px;
+}
+
+.file-panel[hidden] {
+  display: none;
+}
+
+.file-panel-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.file-panel-title {
+  display: grid;
+  gap: 2px;
+}
+
+.file-panel-title strong {
+  font-size: 13px;
+}
+
+.file-panel-title span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.file-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.file-select-all,
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.file-select-all input,
+.checkbox-row input,
+.file-select input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.file-list {
+  display: grid;
+  max-height: 340px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--surface);
+}
+
+.file-row {
+  display: grid;
+  grid-template-columns: 22px minmax(160px, 1fr) 96px minmax(150px, 240px) 32px;
+  gap: 12px;
+  align-items: center;
+  min-height: 50px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  transition: background 0.12s ease;
+}
+
+.file-row:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.file-row:last-child {
+  border-bottom: 0;
+}
+
+.file-name {
+  font-size: 12.5px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+[data-role="file-size"] {
+  margin-top: 1px;
+}
+
+.file-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.file-status {
+  justify-self: start;
+  min-width: 78px;
+  border-radius: 999px;
+  padding: 3px 9px;
+  text-align: center;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.file-status[data-status="complete"] {
+  background: color-mix(in srgb, var(--ok) 13%, transparent);
+  color: var(--ok);
+}
+
+.file-status[data-status="downloading"] {
+  background: color-mix(in srgb, var(--amber) 15%, transparent);
+  color: var(--amber);
+}
+
+.file-status[data-status="failed"] {
+  background: var(--danger-quiet);
+  color: var(--danger);
+}
+
+.file-progress {
+  display: grid;
+  grid-template-columns: 1fr 40px;
+  gap: 9px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+
+.file-progress [data-role="file-progress"] {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.file-empty {
+  padding: 18px;
+  color: var(--muted);
+  font-size: 12.5px;
+  text-align: center;
+}
+
+.empty-state {
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  padding: 40px 28px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.confirm-form {
+  display: grid;
+}
+
+.confirm-body {
+  display: grid;
+  gap: 16px;
+}
+
+.warning-copy {
+  color: #714600;
+  background: #fff4dc;
+  border: 1px solid rgba(183, 121, 31, 0.22);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
