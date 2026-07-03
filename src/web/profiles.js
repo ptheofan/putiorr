@@ -10,6 +10,7 @@ import {
   DEFAULT_HELP_FIELD,
 } from './constants.js';
 import {
+  fieldChecked,
   fieldValue,
   slugify,
   numericSelectValue,
@@ -32,7 +33,8 @@ export const WIZARD_HELP = {
   wizardProfileType: {
     title: 'App preset',
     paragraphs: [
-      'The preset picks the normal display name and RPC path for the app you are connecting. It does not change how putiorr talks to put.io; it only gives each app its own endpoint and category.',
+      'The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.',
+      'For apps such as Prowlarr that do not later signal import completion, the preset can remove completed local downloads from putiorr automatically.',
       'Use Custom when another app will send Transmission RPC requests to putiorr, or when you want to name and route an endpoint yourself.',
     ],
     tips: [
@@ -160,6 +162,21 @@ export const WIZARD_HELP = {
     valueLabel: 'Profile state',
     value: (profile) => profile.enabled ? 'Enabled: accepts new RPC requests' : 'Disabled: saved, but not used for new RPC requests',
   },
+  wizardAutoRemoveCompleted: {
+    title: 'Auto-remove completed downloads',
+    paragraphs: [
+      'Use this when no downstream download client will call torrent-remove after import.',
+      'When enabled, putiorr removes the download from its own list as soon as all files are downloaded locally. The local files stay on disk.',
+    ],
+    tips: [
+      'Leave this off for Sonarr, Radarr, Lidarr, and Readarr because those apps remove imported downloads themselves.',
+      'The Prowlarr preset enables this by default.',
+    ],
+    valueLabel: 'Completion behavior',
+    value: (profile) => profile.auto_remove_completed || profile.autoRemoveCompleted
+      ? 'Auto-remove from putiorr after local download'
+      : 'Wait for the app to remove the download',
+  },
 };
 
 export function renderProfiles() {
@@ -249,6 +266,17 @@ export function upsertProfileState(profile) {
   else state.profiles.push(profile);
 }
 
+function setWizardField(input, value) {
+  const nextValue = String(value ?? '');
+  input.value = nextValue;
+  input.setAttribute('value', nextValue);
+}
+
+function setWizardChecked(input, checked) {
+  input.checked = Boolean(checked);
+  input.toggleAttribute('checked', Boolean(checked));
+}
+
 export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE_TYPE)) {
   const type = profile.type || DEFAULT_PROFILE_TYPE;
   const detail = profileType(type);
@@ -260,17 +288,22 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
     ? `Set up ${displayName}`
     : `Set up ${detail.label}`;
   el.profileWizardIntro.textContent = 'Answer a few setup questions, then copy the matching *arr download-client values.';
-  el.wizardProfileId.value = profile.id || '';
-  el.wizardProfileType.value = type;
-  el.wizardProfileName.value = displayName;
-  el.wizardPutioFolder.value = profile.putio_folder_name || DEFAULT_PUTIO_FOLDER;
-  el.wizardDownloadAt.value = profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder();
+  setWizardField(el.wizardProfileId, profile.id || '');
+  setWizardField(el.wizardProfileType, type);
+  setWizardField(el.wizardProfileName, displayName);
+  setWizardField(el.wizardPutioFolder, profile.putio_folder_name || DEFAULT_PUTIO_FOLDER);
+  setWizardField(el.wizardDownloadAt, profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder());
   renderDownloadProfileOptions(profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId());
-  el.wizardRpcPath.value = profile.rpc_path || defaultRpcPathForType(type);
-  el.wizardClientHost.value = profile.client_host ?? profile.clientHost ?? DEFAULT_CLIENT_HOST;
-  el.wizardClientPort.value = profile.client_port ?? profile.clientPort ?? DEFAULT_CLIENT_PORT;
-  el.wizardUseSsl.checked = Boolean(profile.client_use_ssl ?? profile.clientUseSsl);
-  el.wizardEnabled.checked = profile.enabled !== false;
+  setWizardField(el.wizardRpcPath, profile.rpc_path || defaultRpcPathForType(type));
+  setWizardField(el.wizardClientHost, profile.client_host ?? profile.clientHost ?? DEFAULT_CLIENT_HOST);
+  setWizardField(el.wizardClientPort, profile.client_port ?? profile.clientPort ?? DEFAULT_CLIENT_PORT);
+  setWizardChecked(el.wizardUseSsl, Boolean(profile.client_use_ssl ?? profile.clientUseSsl));
+  setWizardChecked(el.wizardEnabled, profile.enabled !== false);
+  setWizardChecked(el.wizardAutoRemoveCompleted, Boolean(
+    profile.auto_remove_completed
+      ?? profile.autoRemoveCompleted
+      ?? detail.autoRemoveCompleted,
+  ));
   el.deleteProfileButton.hidden = !isExisting;
   el.saveProfileButton.textContent = 'Save & test';
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
@@ -306,6 +339,7 @@ export function createDefaultProfile(type) {
     downloadAt: defaultDownloadFolder(),
     download_profile_id: defaultDownloadProfileId(),
     rpc_path: defaultRpcPathForType(type),
+    auto_remove_completed: Boolean(detail.autoRemoveCompleted),
     enabled: true,
   };
 }
@@ -316,11 +350,12 @@ export function renderDownloadProfileOptions(selectedId = defaultDownloadProfile
 }
 
 export function syncWizardDefaultsForType() {
-  const nextType = el.wizardProfileType.value || DEFAULT_PROFILE_TYPE;
+  const nextType = fieldValue(el.wizardProfileType) || DEFAULT_PROFILE_TYPE;
   const nextDetail = profileType(nextType);
 
-  el.wizardProfileName.value = nextDetail.label;
-  el.wizardRpcPath.value = defaultRpcPathForType(nextType);
+  setWizardField(el.wizardProfileName, nextDetail.label);
+  setWizardField(el.wizardRpcPath, defaultRpcPathForType(nextType));
+  setWizardChecked(el.wizardAutoRemoveCompleted, Boolean(nextDetail.autoRemoveCompleted));
   el.profileWizard.dataset.previousType = nextType;
   updateWizardPreview();
 }
@@ -328,7 +363,7 @@ export function syncWizardDefaultsForType() {
 export function getWizardPayload() {
   return {
     name: fieldValue(el.wizardProfileName).trim(),
-    type: el.wizardProfileType.value,
+    type: fieldValue(el.wizardProfileType) || DEFAULT_PROFILE_TYPE,
     slug: slugify(fieldValue(el.wizardProfileName)),
     putio_folder_name: fieldValue(el.wizardPutioFolder).trim(),
     downloadAt: fieldValue(el.wizardDownloadAt).trim(),
@@ -336,8 +371,9 @@ export function getWizardPayload() {
     rpc_path: normalizeRpcPath(fieldValue(el.wizardRpcPath)),
     client_host: fieldValue(el.wizardClientHost).trim() || DEFAULT_CLIENT_HOST,
     client_port: fieldValue(el.wizardClientPort).trim(),
-    client_use_ssl: el.wizardUseSsl.checked,
-    enabled: el.wizardEnabled.checked,
+    client_use_ssl: fieldChecked(el.wizardUseSsl),
+    auto_remove_completed: fieldChecked(el.wizardAutoRemoveCompleted),
+    enabled: fieldChecked(el.wizardEnabled),
   };
 }
 
@@ -475,7 +511,7 @@ export function getClientSettingsFromProfile(profile) {
   const detail = profileType(profile.type);
   const host = (profile.client_host ?? profile.clientHost ?? fieldValue(el.wizardClientHost).trim()) || DEFAULT_CLIENT_HOST;
   const port = (profile.client_port ?? profile.clientPort ?? fieldValue(el.wizardClientPort).trim()) || DEFAULT_CLIENT_PORT;
-  const useSsl = Boolean(profile.client_use_ssl ?? profile.clientUseSsl ?? el.wizardUseSsl?.checked);
+  const useSsl = Boolean(profile.client_use_ssl ?? profile.clientUseSsl ?? fieldChecked(el.wizardUseSsl));
   const rpcPath = normalizeRpcPath(profile.rpc_path || defaultRpcPathForType(profile.type));
   const protocol = useSsl ? 'https' : 'http';
   const portSuffix = port ? `:${port}` : '';

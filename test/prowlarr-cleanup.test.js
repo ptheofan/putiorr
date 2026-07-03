@@ -28,7 +28,7 @@ class FakePutio {
       id: 10,
       fileId: 20,
       saveParentId: 42,
-      name: 'Prowlarr.Integration.Release',
+      name: 'Direct.Integration.Release',
       status: 'COMPLETED',
       percentDone: 100,
       size: 4,
@@ -175,20 +175,21 @@ test('finalize hides a prowlarr transfer from putiorr when the put.io delete fai
   }
 });
 
-test('processFile removes a completed prowlarr download linked to a prowlarr profile', async () => {
+test('processFile removes a completed download for a profile with auto-remove enabled', async () => {
   const harness = await createHarness();
   try {
     const profile = harness.store.createProfile({
-      name: 'Prowlarr',
+      name: 'Direct Client',
       type: 'custom',
-      slug: 'prowlarr',
-      putio_folder_name: 'prowlarr',
-      downloadAt: path.join(harness.config.targetDir, 'prowlarr'),
-      rpc_path: '/prowlarr/transmission/rpc',
+      slug: 'direct-client',
+      auto_remove_completed: true,
+      putio_folder_name: 'direct-client',
+      downloadAt: path.join(harness.config.targetDir, 'direct-client'),
+      rpc_path: '/direct-client/transmission/rpc',
       enabled: true,
     });
     await harness.service.addTorrent({
-      magnetLink: 'magnet:?xt=urn:btih:abcdef1234567890&dn=Prowlarr.Integration.Release',
+      magnetLink: 'magnet:?xt=urn:btih:abcdef1234567890&dn=Direct.Integration.Release',
     }, profile);
     const [transfer] = harness.store.listActiveTransfers({ profileId: profile.id });
     assert.equal(transfer.profile_id, profile.id);

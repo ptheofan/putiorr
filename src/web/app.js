@@ -257,6 +257,7 @@ for (const input of [
   el.wizardClientPort,
   el.wizardUseSsl,
   el.wizardEnabled,
+  el.wizardAutoRemoveCompleted,
 ]) {
   input.addEventListener('input', updateWizardPreview);
   input.addEventListener('change', updateWizardPreview);

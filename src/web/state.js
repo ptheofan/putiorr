@@ -75,6 +75,7 @@ export const el = {
   wizardClientPort: document.querySelector('#wizardClientPort'),
   wizardUseSsl: document.querySelector('#wizardUseSsl'),
   wizardEnabled: document.querySelector('#wizardEnabled'),
+  wizardAutoRemoveCompleted: document.querySelector('#wizardAutoRemoveCompleted'),
   wizardHelpKicker: document.querySelector('#wizardHelpKicker'),
   wizardHelpTitle: document.querySelector('#wizardHelpTitle'),
   wizardHelpBody: document.querySelector('#wizardHelpBody'),

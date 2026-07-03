@@ -22,6 +22,7 @@ export const PROFILE_TYPES = {
   prowlarr: {
     label: 'Prowlarr',
     root: '',
+    autoRemoveCompleted: true,
     note: 'Prowlarr usually talks to Sonarr/Radarr/Lidarr instead of putiorr. Use this only if Prowlarr sends grabs directly to a Transmission client.',
   },
   custom: {

@@ -27,13 +27,8 @@ function sleep(ms, signal) {
   });
 }
 
-function isProwlarrProfile(profile) {
-  return [
-    profile?.type,
-    profile?.slug,
-    profile?.name,
-    profile?.putio_folder_name,
-  ].some((value) => String(value ?? '').trim().toLowerCase() === 'prowlarr');
+function profileAutoRemovesCompleted(profile) {
+  return Boolean(profile?.auto_remove_completed ?? profile?.autoRemoveCompleted);
 }
 
 async function sizeOf(filePath) {
@@ -100,7 +95,7 @@ export class DownloadManager {
     if (purgedFiles > 0) {
       logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
     }
-    await this.removeProcessedProwlarrTransfers();
+    await this.removeProcessedAutoRemoveTransfers();
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {
@@ -275,14 +270,14 @@ export class DownloadManager {
     }
   }
 
-  async removeProcessedProwlarrTransfers() {
+  async removeProcessedAutoRemoveTransfers() {
     const transfers = this.store.listActiveTransfers()
       .filter((transfer) => transfer.lifecycle === 'processed');
 
     for (const transfer of transfers) {
       const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-      if (!isProwlarrProfile(profile)) continue;
-      await this.removeCompletedProwlarrTransfer(transfer);
+      if (!profileAutoRemovesCompleted(profile)) continue;
+      await this.removeCompletedAutoRemoveTransfer(transfer);
     }
   }
 
@@ -735,8 +730,8 @@ export class DownloadManager {
     });
 
     const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-    if (isProwlarrProfile(profile)) {
-      await this.removeCompletedProwlarrTransfer(transfer);
+    if (profileAutoRemovesCompleted(profile)) {
+      await this.removeCompletedAutoRemoveTransfer(transfer);
       return;
     }
 
@@ -759,20 +754,20 @@ export class DownloadManager {
     });
   }
 
-  async removeCompletedProwlarrTransfer(transfer) {
+  async removeCompletedAutoRemoveTransfer(transfer) {
     if (this.service.getPutioToken()) {
       try {
         await this.service.deleteDownloadBucket(transfer.id, {
           deleteRemote: true,
           deleteLocal: false,
         });
-        logger.info('prowlarr transfer auto-removed after download; kept files on disk', {
+        logger.info('completed transfer auto-removed after local download; kept files on disk', {
           transferId: transfer.id,
           name: transfer.name,
         });
         return;
       } catch (error) {
-        logger.warn('failed to auto-remove prowlarr transfer', {
+        logger.warn('failed to auto-remove completed transfer', {
           transferId: transfer.id,
           name: transfer.name,
           error: error.message,
@@ -786,7 +781,7 @@ export class DownloadManager {
         deleteLocal: false,
       });
     } catch (error) {
-      logger.warn('failed to hide prowlarr transfer after remote cleanup failure', {
+      logger.warn('failed to hide completed transfer after remote cleanup failure', {
         transferId: transfer.id,
         name: transfer.name,
         error: error.message,
