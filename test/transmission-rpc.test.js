@@ -646,6 +646,58 @@ test('dashboard bucket delete keeps local files when deleteLocal is omitted', as
   assert.equal(harness.store.findTransferById(transfer.id), undefined);
 });
 
+test('dashboard can delete multiple selected buckets through mocked put.io', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfers = [1, 2, 3].map((index) => {
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 770 + index,
+      putio_file_id: 880 + index,
+      save_parent_id: 42,
+      hash: `bulkdeletehash${index}`,
+      name: `Bulk.Delete.${index}`,
+      category: 'radarr',
+      lifecycle: 'remote',
+      putio_status: 'DOWNLOADING',
+      percent_done: 40,
+      total_size: 5,
+    });
+    harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 200 + index,
+      relative_path: `Bulk.Delete.${index}.mkv`,
+      size: 5,
+      status: 'pending',
+    });
+    return transfer;
+  });
+
+  for (const transfer of transfers) {
+    const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/delete`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteRemote: true, deleteLocal: false }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.bucketDeleted, true);
+  }
+
+  assert.deepEqual(harness.putio.deletedFiles, [881, 882, 883]);
+  assert.deepEqual(harness.putio.deletedTransfers, [771, 772, 773]);
+  assert.deepEqual(harness.store.listActiveTransfers(), []);
+
+  const downloadsResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/downloads'));
+  assert.equal(downloadsResponse.status, 200);
+  assert.deepEqual(await downloadsResponse.json(), []);
+});
+
 test('dashboard file delete keeps local files when deleteLocal is omitted', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

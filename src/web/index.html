@@ -137,6 +137,15 @@
             </div>
           </div>
 
+          <div id="downloadsBulkBar" class="download-bulk-bar" data-testid="downloads-bulk-bar" hidden>
+            <label class="download-select-all checkbox-row">
+              <input id="downloadsSelectAll" type="checkbox" data-testid="downloads-select-all">
+              <span>Select all</span>
+            </label>
+            <span id="downloadsSelectedCount" class="download-selection-count" data-testid="downloads-selected-count">0 selected</span>
+            <button id="deleteSelectedDownloadsButton" class="button danger compact-button" type="button" data-testid="downloads-delete-selected" disabled>Delete selected</button>
+          </div>
+
           <div id="downloadsList" class="downloads-list"></div>
         </section>
 
@@ -573,12 +582,12 @@
       </form>
     </wa-dialog>
 
-    <wa-dialog id="deleteConfirmDialog" class="modal compact-modal" style="--width: 620px">
+    <wa-dialog id="deleteConfirmDialog" class="modal compact-modal" data-testid="delete-confirm-dialog" style="--width: 620px">
       <form id="deleteConfirmForm" class="confirm-form">
         <div class="modal-head">
           <div>
-            <h2 id="deleteConfirmTitle">Delete download</h2>
-            <p id="deleteConfirmIntro">Confirm this delete action.</p>
+            <h2 id="deleteConfirmTitle" data-testid="delete-confirm-title">Delete download</h2>
+            <p id="deleteConfirmIntro" data-testid="delete-confirm-intro">Confirm this delete action.</p>
           </div>
           <button id="deleteConfirmClose" class="icon-button" type="button" aria-label="Close delete confirmation">×</button>
         </div>
@@ -588,8 +597,8 @@
             <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
             It is usually safer to do this from the Activity page in your RR software so it can update its own queue state.
           </wa-callout>
-          <wa-checkbox id="deleteFromPutio" checked><span id="deleteFromPutioLabel">Also delete from put.io</span></wa-checkbox>
-          <wa-checkbox id="deleteLocalFiles"><span id="deleteLocalFilesLabel">Also delete the downloaded files from disk</span></wa-checkbox>
+          <wa-checkbox id="deleteFromPutio" data-testid="delete-from-putio" checked><span id="deleteFromPutioLabel">Also delete from put.io</span></wa-checkbox>
+          <wa-checkbox id="deleteLocalFiles" data-testid="delete-local-files"><span id="deleteLocalFilesLabel">Also delete the downloaded files from disk</span></wa-checkbox>
         </div>
 
         <p id="deleteConfirmMessage" class="message modal-message" role="status"></p>
@@ -598,7 +607,7 @@
           <span></span>
           <div class="button-row">
             <wa-button variant="neutral" appearance="outlined" data-action="cancel-delete">Cancel</wa-button>
-            <wa-button id="deleteConfirmButton" variant="danger" appearance="accent" type="submit">Delete</wa-button>
+            <wa-button id="deleteConfirmButton" variant="danger" appearance="accent" type="submit" data-testid="delete-confirm-submit">Delete</wa-button>
           </div>
         </div>
       </form>

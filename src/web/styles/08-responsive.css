@@ -98,13 +98,23 @@
     flex-direction: column;
   }
 
+  .download-bulk-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .file-panel-actions {
     align-items: stretch;
     flex-direction: column;
   }
 
   .download-summary {
+    grid-template-columns: 22px minmax(0, 1fr);
     gap: 14px;
+  }
+
+  .download-summary > :not(.download-select) {
+    grid-column: 2;
   }
 
   /* Keep the speed/ETA metric full width, but let Start + delete share a row. */
@@ -157,4 +167,3 @@
     justify-self: start;
   }
 }
-
