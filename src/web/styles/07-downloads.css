@@ -352,14 +352,16 @@
   cursor: pointer;
 }
 
-/* Restore native checkbox rendering + sizing — the Web Awesome global reset
-   forces appearance:none on inputs, which blanks these out. The [type="checkbox"]
-   qualifier raises specificity above that reset without needing !important. */
+/* Custom checkbox. Web Awesome's global reset forces appearance:none on inputs,
+   so rather than fight it back to the (inconsistent) native control, we own the
+   look: a rounded box that fills violet with a crisp SVG check / dash. The
+   [type="checkbox"] qualifier keeps specificity above the WA reset. */
 .file-select-all input[type="checkbox"],
 .checkbox-row input[type="checkbox"],
 .file-select input[type="checkbox"] {
-  appearance: auto;
-  -webkit-appearance: checkbox;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
   width: 16px;
   height: 16px;
   min-width: 16px;
@@ -368,9 +370,44 @@
   margin: 0;
   padding: 0;
   flex: 0 0 auto;
-  accent-color: var(--accent);
-  cursor: pointer;
   box-sizing: border-box;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 50%, var(--line));
+  border-radius: 5px;
+  background-color: var(--panel);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.file-select-all input[type="checkbox"]:hover,
+.checkbox-row input[type="checkbox"]:hover,
+.file-select input[type="checkbox"]:hover {
+  border-color: var(--accent);
+}
+
+.file-select-all input[type="checkbox"]:checked,
+.checkbox-row input[type="checkbox"]:checked,
+.file-select input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%3E%3Cpath%20d%3D'M4%208.4l2.7%202.7L12%204.9'%20fill%3D'none'%20stroke%3D'%23fff'%20stroke-width%3D'2.2'%20stroke-linecap%3D'round'%20stroke-linejoin%3D'round'%2F%3E%3C%2Fsvg%3E");
+}
+
+.file-select-all input[type="checkbox"]:indeterminate,
+.checkbox-row input[type="checkbox"]:indeterminate,
+.file-select input[type="checkbox"]:indeterminate {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2016%2016'%3E%3Cpath%20d%3D'M4.5%208h7'%20fill%3D'none'%20stroke%3D'%23fff'%20stroke-width%3D'2.2'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E");
+}
+
+.file-select-all input[type="checkbox"]:focus-visible,
+.checkbox-row input[type="checkbox"]:focus-visible,
+.file-select input[type="checkbox"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
 }
 
 .file-list {
