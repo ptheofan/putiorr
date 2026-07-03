@@ -1255,6 +1255,56 @@ test('generic RPC endpoint routes torrent-add to a profile matching the category
   assert.equal(row.category, 'sonarr');
 });
 
+test('torrent-add category can override a mismatched profile-specific RPC path', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const prowlarr = harness.store.createProfile({
+    name: 'Prowlarr',
+    type: 'prowlarr',
+    slug: 'prowlarr',
+    putio_folder_name: 'prowlarr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/prowlarr/transmission/rpc',
+    enabled: true,
+  });
+  const lidarr = harness.store.createProfile({
+    name: 'Lidarr',
+    type: 'lidarr',
+    slug: 'lidarr',
+    putio_folder_name: 'lidarr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/lidarr/transmission/rpc',
+    enabled: true,
+  });
+
+  const lidarrUrl = harness.url.replace('/transmission/rpc', lidarr.rpc_path);
+  const first = await fetch(lidarrUrl, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+  const addResponse = await fetch(lidarrUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: {
+        filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+        'download-dir': path.join(harness.config.targetDir, 'prowlarr'),
+      },
+    }),
+  });
+
+  assert.equal(addResponse.status, 200);
+  const row = harness.store.findTransferByHash('ABCDEF');
+  assert.equal(row.profile_id, prowlarr.id);
+  assert.equal(row.category, 'prowlarr');
+});
+
 test('web API exposes settings and profile CRUD', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
