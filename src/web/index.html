@@ -389,7 +389,7 @@
                 </wa-select>
                 <wa-input id="wizardProfileName" label="Display name" type="text" autocomplete="off" placeholder="Sonarr"></wa-input>
               </div>
-              <p class="field-help">The preset fills sensible defaults. The display name becomes the *arr download-client category.</p>
+              <p class="field-help">The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.</p>
             </section>
 
             <section class="wizard-step">
@@ -412,6 +412,7 @@
               <div class="check-grid">
                 <wa-checkbox id="wizardUseSsl">Use SSL for the download client</wa-checkbox>
                 <wa-checkbox id="wizardEnabled">Enable this profile</wa-checkbox>
+                <wa-checkbox id="wizardAutoRemoveCompleted" data-testid="profile-auto-remove-completed">App will not signal import completion; remove from putiorr once files download locally</wa-checkbox>
               </div>
             </section>
           </div>

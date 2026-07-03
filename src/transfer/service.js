@@ -133,11 +133,19 @@ export class TransferService {
   }
 
   resolveProfileForAdd(args = {}, profile) {
-    if (profile) return profile;
     const fallbackProfile = this.getDefaultProfile();
     const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
-    const category = extractCategory(fallbackProfile?.download_at ?? this.config.targetDir, downloadDir);
-    return this.findProfileByCategory(category) ?? fallbackProfile;
+    const baseProfile = profile ?? fallbackProfile;
+    const category = extractCategory(baseProfile?.download_at ?? this.config.targetDir, downloadDir);
+    const categoryProfile = this.findProfileByCategory(category);
+    if (profile && categoryProfile && categoryProfile.id !== profile.id) {
+      logger.warn('torrent-add category routed to a different profile than the RPC endpoint', {
+        rpcProfile: profile.slug,
+        category,
+        routedProfile: categoryProfile.slug,
+      });
+    }
+    return categoryProfile ?? baseProfile;
   }
 
   requireProfile(profile) {
