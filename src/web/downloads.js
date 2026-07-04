@@ -609,14 +609,16 @@ export function canStartDownload(download) {
 
 // While a transfer is still `remote`, the local downloader has not started yet, so the
 // lifecycle word alone ("remote") reads as stalled. Surface the put.io phase instead —
-// in particular COMPLETING (put.io finished the torrent and is copying it into storage).
-// put.io exposes a single `percent_done` field that tracks whichever phase `status`
-// names, so it carries the finishing progress during COMPLETING too.
+// in particular COMPLETING (put.io finished the torrent and is copying it into storage),
+// which reports percent_done=100 but its real progress in completion_percent.
 export function downloadStatusText(download) {
   const combinedProgress = clampPercent(download.combinedProgress);
   if (download.lifecycle !== 'remote') {
     return `${download.lifecycle} · ${combinedProgress}%`;
   }
   const phase = PUTIO_PHASE_LABELS[download.putioStatus] ?? 'On Put.io';
+  if (download.putioStatus === 'COMPLETING') {
+    return `${phase} · ${clampPercent(download.putioCompletion)}%`;
+  }
   return `${phase} · ${clampPercent(download.putioProgress)}%`;
 }
