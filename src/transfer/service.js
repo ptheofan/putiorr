@@ -48,6 +48,13 @@ function remoteDeleteErrorMessage(errors) {
   return `Failed to delete from put.io${messages.length > 0 ? `: ${messages.join('; ')}` : ''}`;
 }
 
+function isTransferStillListed(transfer, remoteIds, remoteHashes) {
+  return (
+    (transfer.putio_transfer_id != null && remoteIds.has(transfer.putio_transfer_id)) ||
+    (transfer.hash && remoteHashes.has(String(transfer.hash).trim().toLowerCase()))
+  );
+}
+
 function putioTransferToStoreInput(transfer, fallback = {}) {
   const lifecycle = fallback.lifecycle ?? 'remote';
   const useLocalMetrics = lifecycle !== 'remote';
@@ -125,11 +132,19 @@ export class TransferService {
   }
 
   resolveProfileForAdd(args = {}, profile) {
-    if (profile) return profile;
     const fallbackProfile = this.getDefaultProfile();
     const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
-    const category = extractCategory(fallbackProfile?.download_at ?? this.config.targetDir, downloadDir);
-    return this.findProfileByCategory(category) ?? fallbackProfile;
+    const baseProfile = profile ?? fallbackProfile;
+    const category = extractCategory(baseProfile?.download_at ?? this.config.targetDir, downloadDir);
+    const categoryProfile = this.findProfileByCategory(category);
+    if (profile && categoryProfile && categoryProfile.id !== profile.id) {
+      logger.warn('torrent-add category routed to a different profile than the RPC endpoint', {
+        rpcProfile: profile.slug,
+        category,
+        routedProfile: categoryProfile.slug,
+      });
+    }
+    return categoryProfile ?? baseProfile;
   }
 
   requireProfile(profile) {
@@ -216,7 +231,7 @@ export class TransferService {
     const rows = [];
     for (const remote of remoteTransfers) {
       if (remote.id != null) remoteIds.add(remote.id);
-      if (remote.hash) remoteHashes.add(remote.hash);
+      if (remote.hash) remoteHashes.add(String(remote.hash).trim().toLowerCase());
       const profile = byFolderId.get(remote.saveParentId);
       if (!profile) continue;
       const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
@@ -233,8 +248,23 @@ export class TransferService {
         source_type: existing?.source_type ?? 'remote',
       })));
     }
+    this.pruneRemoteTransfers(remoteIds, remoteHashes);
     this.pruneRemovedTransfers(remoteIds, remoteHashes);
     return rows;
+  }
+
+  pruneRemoteTransfers(remoteIds, remoteHashes) {
+    for (const transfer of this.store.listActiveTransfers()) {
+      if (transfer.lifecycle !== 'remote' || transfer.putio_transfer_id == null) continue;
+      if (isTransferStillListed(transfer, remoteIds, remoteHashes)) continue;
+      this.store.deleteTransfer(transfer.id);
+      logger.info('pruned remote transfer no longer on put.io', {
+        id: transfer.id,
+        putioTransferId: transfer.putio_transfer_id,
+        hash: transfer.hash,
+        name: transfer.name,
+      });
+    }
   }
 
   // Tombstoned transfers (deleted from the dashboard but kept on put.io) only need to
@@ -243,10 +273,7 @@ export class TransferService {
   // reuses the transfer list already fetched by the poll — no extra API calls.
   pruneRemovedTransfers(remoteIds, remoteHashes) {
     for (const removed of this.store.listRemovedTransfers()) {
-      const stillRemote =
-        (removed.putio_transfer_id != null && remoteIds.has(removed.putio_transfer_id)) ||
-        (removed.hash && remoteHashes.has(removed.hash));
-      if (!stillRemote) {
+      if (!isTransferStillListed(removed, remoteIds, remoteHashes)) {
         this.store.deleteTransfer(removed.id);
         logger.info('pruned tombstoned transfer no longer on put.io', {
           id: removed.id,

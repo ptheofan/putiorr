@@ -1097,6 +1097,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const type = input.type == null ? undefined : String(input.type).trim().toLowerCase();
   const slug = input.slug == null ? undefined : slugify(input.slug || name);
   const downloadProfileId = input.download_profile_id ?? input.downloadProfileId;
+  const autoRemoveCompleted = input.auto_remove_completed ?? input.autoRemoveCompleted;
   const putioFolderName = input.putio_folder_name ?? input.putioFolderName;
   const downloadAt = input.downloadAt ?? input.download_at ?? input.local_path ?? input.localPath;
   const rpcPath = input.rpc_path ?? input.rpcPath;
@@ -1108,6 +1109,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (type !== undefined) output.type = type || 'custom';
   if (slug !== undefined) output.slug = slug;
   if (downloadProfileId !== undefined) output.download_profile_id = normalizeOptionalId(downloadProfileId);
+  if (autoRemoveCompleted !== undefined) output.auto_remove_completed = normalizeBooleanInput(autoRemoveCompleted);
   if (putioFolderName !== undefined) output.putio_folder_name = String(putioFolderName).trim();
   if (downloadAt !== undefined) output.download_at = path.resolve(String(downloadAt).trim());
   if (rpcPath !== undefined) output.rpc_path = normalizeRpcPath(rpcPath);
@@ -1186,6 +1188,10 @@ function copyNonNegativePolicyValue(output, input, camelKey, snakeKey) {
 function normalizeOptionalId(value) {
   const number = Number(value);
   return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function normalizeBooleanInput(value) {
+  return value === true || value === 1 || value === '1' || value === 'true';
 }
 
 function slugify(value) {

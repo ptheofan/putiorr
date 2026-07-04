@@ -1,0 +1,305 @@
+/* ==========================================================================
+   Sidebar + routed views layout
+   ========================================================================== */
+.shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 252px;
+  flex: 0 0 252px;
+  height: 100vh;
+  padding: 20px 16px;
+  background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 6px 8px;
+}
+
+.sidebar-brand .hero-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+}
+
+.sidebar-brand h1 {
+  font-size: 21px;
+  line-height: 1.1;
+}
+
+.sidebar-tagline {
+  margin-top: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-group + .nav-group {
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.nav-group-label {
+  margin: 0 0 4px;
+  padding: 0 12px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 750;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.nav-item wa-icon {
+  font-size: 18px;
+  flex: 0 0 auto;
+}
+
+/* Short tab labels are only used in the mobile bottom bar. */
+.nav-short {
+  display: none;
+}
+
+.nav-item:hover {
+  background: var(--surface);
+  color: var(--text);
+}
+
+.nav-item.active {
+  background: var(--accent-quiet);
+  color: var(--accent-strong);
+}
+
+.nav-item:focus-visible {
+  outline: 2px solid rgba(124, 58, 237, 0.4);
+  outline-offset: 2px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 8px 6px 2px;
+}
+
+.sidebar-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-putio {
+  width: 100%;
+  justify-content: flex-start;
+  min-height: 40px;
+}
+
+.content {
+  flex: 1 1 auto;
+  width: auto;
+  max-width: 1200px;
+  margin: 0 auto;
+  align-content: start;
+}
+
+/* Grid panels must not stretch their rows to fill the full-height content
+   column — that balloons the panel and its single card vertically. */
+.panel {
+  align-content: start;
+}
+
+.profiles-list {
+  align-items: start;
+}
+
+.topbar {
+  align-items: center;
+}
+
+.topbar-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+@media (max-width: 860px) {
+  .shell {
+    flex-direction: column;
+  }
+
+  /* Sidebar collapses to a slim sticky top bar (brand + status + theme); the nav
+     moves to a fixed bottom tab bar so primary navigation is thumb-reachable. */
+  .sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    width: 100%;
+    flex: none;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+
+  .sidebar-brand {
+    padding: 0;
+    gap: 10px;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .sidebar-brand .hero-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+  }
+
+  .sidebar-brand h1 {
+    font-size: 18px;
+  }
+
+  .sidebar-tagline {
+    display: none;
+  }
+
+  /* Bottom tab bar */
+  .sidebar-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    flex-direction: row;
+    gap: 2px;
+    padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.16);
+  }
+
+  .nav-group {
+    display: contents;
+  }
+
+  .nav-group-label {
+    display: none;
+  }
+
+  .nav-item {
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-width: 0;
+    padding: 6px 2px;
+    border-radius: 10px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-align: center;
+  }
+
+  .nav-item wa-icon {
+    font-size: 20px;
+  }
+
+  .nav-full {
+    display: none;
+  }
+
+  .nav-short {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Footer controls move onto the top bar, to the right of the brand. */
+  .sidebar-footer {
+    margin: 0;
+    flex: 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar-putio {
+    width: auto;
+    min-height: 34px;
+    padding: 0 10px;
+  }
+
+  .sidebar-footer-links {
+    gap: 8px;
+  }
+
+  /* Non-essential on a phone: drop the version link and the project-portal link
+     to keep the top bar uncluttered (still available on the Help page footer). */
+  .sidebar-footer-links .version-update-link,
+  .sidebar-footer-links a.topbar-icon-link {
+    display: none;
+  }
+
+  /* Clear the fixed bottom bar. */
+  .content {
+    padding: 16px 14px 84px;
+  }
+
+  .topbar {
+    margin-bottom: 2px;
+  }
+
+  .topbar-title {
+    font-size: 20px;
+  }
+}
+

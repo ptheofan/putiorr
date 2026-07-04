@@ -1,0 +1,199 @@
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+}
+
+.content {
+  width: min(1440px, 100%);
+  margin: 0 auto;
+  padding: 32px;
+  display: grid;
+  gap: 22px;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 0 0 auto;
+}
+
+.hero-brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.hero-icon {
+  display: block;
+  width: 86px;
+  height: 86px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid rgba(15, 118, 110, 0.28);
+  border-radius: 18px;
+  background: #073f41;
+  box-shadow: 0 18px 42px rgba(15, 118, 110, 0.2);
+}
+
+.hero-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.version-update-link {
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 4px;
+  white-space: nowrap;
+}
+
+.version-update-link.is-current-version {
+  color: rgba(100, 114, 117, 0.62);
+  font-weight: 650;
+  text-decoration: none;
+  cursor: default;
+}
+
+.version-update-link:hover {
+  color: var(--accent);
+}
+
+.version-update-link.is-current-version:hover {
+  color: rgba(100, 114, 117, 0.62);
+}
+
+.version-update-link:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: 4px;
+}
+
+.topbar-icon-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  min-height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #193235;
+  box-shadow: 0 8px 24px rgba(23, 35, 38, 0.06);
+}
+
+.topbar-icon-link:hover {
+  background: #f8fbfb;
+  color: var(--accent-strong);
+}
+
+.topbar-icon-link:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: 2px;
+}
+
+.topbar-icon-link svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.putio-status-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  background: #ffffff;
+  color: #2c3a3d;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(23, 35, 38, 0.06);
+}
+
+.putio-status-button:hover {
+  background: #f8fbfb;
+}
+
+.putio-status-button:focus-visible {
+  outline: 2px solid rgba(15, 118, 110, 0.22);
+  outline-offset: 2px;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px rgba(100, 114, 117, 0.12);
+}
+
+.putio-status-button[data-state="connected"] .status-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px rgba(22, 128, 63, 0.14);
+}
+
+.putio-status-button[data-state="needs-token"] .status-dot {
+  background: var(--amber);
+  box-shadow: 0 0 0 3px rgba(183, 121, 31, 0.16);
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+h2 {
+  font-size: 18px;
+  line-height: 1.3;
+}
+
+p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+

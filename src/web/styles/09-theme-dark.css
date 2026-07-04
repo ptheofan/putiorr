@@ -1,0 +1,191 @@
+/* ==========================================================================
+   Dark + violet theme — surface overrides for rules that hardcode light hexes,
+   plus Web Awesome component integration. Appended last so it wins on source
+   order. The token flip above handles colours that reference var(--*); the
+   blocks below repaint the literal #ffffff/#f8fbfb/#edf4f4 surfaces.
+   ========================================================================== */
+
+body { background: var(--bg); color: var(--text); }
+
+.content { width: min(1280px, 100%); }
+
+.brand-accent { color: var(--accent-strong); }
+
+h1 { letter-spacing: -0.01em; }
+
+/* Brand mark */
+.hero-icon {
+  border-color: rgba(124, 58, 237, 0.45);
+  background: #0a0a12;
+  box-shadow: 0 18px 42px rgba(124, 58, 237, 0.28);
+}
+
+/* Topbar pills */
+.topbar-icon-link {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.topbar-icon-link:hover { background: var(--surface-2); color: var(--accent-strong); }
+.topbar-icon-link wa-icon { font-size: 17px; }
+
+.putio-status-button {
+  background: var(--panel-2);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: none;
+}
+.putio-status-button:hover { background: var(--surface-2); }
+
+.version-update-link { color: var(--accent-strong); }
+.version-update-link:hover { color: #c4b5fd; }
+
+/* Panels & headings */
+.panel { background: var(--panel); border-color: var(--line); }
+
+.profile-eyebrow,
+.step-label,
+.profile-action.primary,
+.text-button { color: var(--accent-strong); }
+
+.endpoint-box strong,
+.help-body p,
+.link-profile strong,
+.field-help strong,
+label,
+.field-control,
+.check-row,
+.file-select-all,
+.checkbox-row,
+.input-control-addon,
+.byte-disable { color: var(--text); }
+
+/* Native form controls */
+input,
+select {
+  background: var(--surface);
+  border-color: var(--line);
+  color: var(--text);
+}
+input::placeholder { color: #6b6b85; }
+input:focus,
+select:focus {
+  outline-color: rgba(124, 58, 237, 0.4);
+  border-color: var(--accent);
+}
+
+/* Compound byte/time inputs (kept native, repainted dark) */
+.input-control { background: var(--surface); border-color: var(--line); }
+.input-control:focus-within { outline-color: rgba(124, 58, 237, 0.4); border-color: var(--accent); }
+.input-control-field { background: transparent; color: var(--text); }
+.input-control-addon { background-color: var(--surface-2); color: var(--text); }
+.input-control-prefix { border-right-color: var(--line); }
+.input-control-suffix { border-left-color: var(--line); }
+select.input-control-addon {
+  background-color: var(--surface-2);
+}
+html.wa-dark select.input-control-addon {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 7l5 5 5-5' fill='none' stroke='%23c4b5fd' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.byte-disable { background: var(--surface-2); color: var(--muted); }
+.byte-disable input { accent-color: var(--accent); }
+.input-control.is-disabled .input-control-field,
+.input-control.is-disabled .input-control-suffix {
+  color: var(--muted);
+  background-color: var(--panel);
+}
+
+/* Native buttons that remain (card actions, file chrome) */
+.button.primary { background: var(--accent); color: #fff; }
+.button.primary:hover { background: var(--accent-hover); }
+.button.secondary,
+.icon-button { background: var(--surface-2); color: var(--text); }
+.button.secondary:hover,
+.icon-button:hover { background: color-mix(in srgb, var(--surface-2) 86%, var(--text)); }
+.button.danger { background: var(--danger-quiet); color: var(--danger); }
+.button.danger:hover,
+.icon-button.danger:hover { background: color-mix(in srgb, var(--danger-quiet) 84%, var(--danger)); }
+.icon-button.danger { background: var(--danger-quiet); color: var(--danger); }
+
+/* Status chips */
+.status { border-color: var(--line); color: var(--muted); }
+.status.ok { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.1); color: var(--ok); }
+.status.warn { border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.1); color: var(--amber); }
+
+/* Cards */
+.profile-card {
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.profile-facts { border-top-color: var(--line-soft); }
+.profile-actions { border-top-color: var(--line-soft); }
+.profile-facts dd { color: var(--text); }
+.profile-action { color: var(--text); }
+.profile-action:hover { background: var(--surface-2); }
+.profile-action.danger { color: var(--danger); }
+.profile-action.danger:hover { background: var(--danger-quiet); }
+
+/* Dialogs (wa-dialog) — we supply our own header inside, so hide WA chrome */
+wa-dialog::part(header) { display: none; }
+wa-dialog::part(body) { padding: 0; }
+wa-dialog::part(dialog) {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--text);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.6);
+  max-height: calc(100vh - 32px);
+}
+
+.modal-head { border-bottom-color: var(--line); }
+.modal-actions { border-top-color: var(--line); }
+.icon-button { color: var(--text); }
+
+/* Put.io connection dialog internals */
+.putio-tabs { border-bottom-color: var(--line-soft); }
+.putio-tab:hover { color: var(--text); background: var(--surface); }
+.putio-tab[aria-selected="true"] { color: var(--accent-strong); border-bottom-color: var(--accent); }
+.message-box { background: var(--surface); border-color: var(--line); }
+.message-box[data-tone="ok"] { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.1); }
+.message-box[data-tone="warn"] { border-color: rgba(251, 191, 36, 0.3); background: rgba(251, 191, 36, 0.1); }
+.message-box[data-tone="error"] { border-color: rgba(244, 115, 115, 0.3); background: rgba(244, 115, 115, 0.1); }
+.message-box .message { color: var(--text); }
+.message-box .icon-button { background: rgba(255, 255, 255, 0.06); }
+
+.oauth-panel { background: var(--surface); border-color: var(--line); }
+.oauth-panel a { color: var(--accent-strong); }
+.oauth-setup-hint { background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.3); color: var(--warn-ink); }
+.oauth-callback-row code { color: var(--text); }
+
+.putio-connected-panel { border-color: rgba(52, 211, 153, 0.3); background: rgba(52, 211, 153, 0.08); }
+.putio-connected-panel strong { color: var(--text); }
+.putio-advanced { background: var(--surface); border-color: var(--line); }
+
+/* Setup wizard help rail */
+.wizard-step { border-bottom-color: var(--line-soft); }
+.setup-preview { background: var(--surface); border-left-color: var(--line); }
+.endpoint-box { background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.32); }
+
+#profileWizardMessage { background: var(--surface); border-color: var(--line); color: var(--text); }
+#profileWizardMessage[data-tone="info"] { background: rgba(124, 58, 237, 0.1); border-color: rgba(124, 58, 237, 0.32); color: var(--accent-strong); }
+#profileWizardMessage[data-tone="warn"] { background: rgba(251, 191, 36, 0.1); border-color: rgba(251, 191, 36, 0.3); color: var(--warn-ink); }
+
+/* Link rows */
+.link-row { background: var(--surface); border-color: var(--line); }
+
+/* Downloads styling is now fully token-based in the base rules above and themes
+   automatically — no dark-specific overrides needed. */
+
+.warning-copy { color: var(--warn-ink); background: rgba(251, 191, 36, 0.08); border-color: rgba(251, 191, 36, 0.3); }
+.empty-state { border-color: var(--line); color: var(--muted); }
+
+/* Web Awesome component theming */
+wa-callout::part(base) { border-radius: 10px; }
+.warning-copy.wa-callout,
+wa-callout.warning-copy { background: rgba(251, 191, 36, 0.08); }
+wa-input::part(form-control-label),
+wa-select::part(form-control-label),
+wa-checkbox::part(label) { color: var(--text); font-weight: 700; font-size: 13px; }
+

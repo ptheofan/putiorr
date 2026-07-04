@@ -27,6 +27,10 @@ function sleep(ms, signal) {
   });
 }
 
+function profileAutoRemovesCompleted(profile) {
+  return Boolean(profile?.auto_remove_completed ?? profile?.autoRemoveCompleted);
+}
+
 async function sizeOf(filePath) {
   try {
     const info = await stat(filePath);
@@ -91,6 +95,7 @@ export class DownloadManager {
     if (purgedFiles > 0) {
       logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
     }
+    await this.removeProcessedAutoRemoveTransfers();
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {
@@ -263,6 +268,31 @@ export class DownloadManager {
         name: transfer.name,
       });
     }
+  }
+
+  async removeProcessedAutoRemoveTransfers() {
+    const transfers = this.store.listActiveTransfers()
+      .filter((transfer) => transfer.lifecycle === 'processed');
+
+    for (const transfer of transfers) {
+      const profile = this.autoRemoveProfileForTransfer(transfer);
+      if (!profileAutoRemovesCompleted(profile)) continue;
+      await this.removeCompletedAutoRemoveTransfer(transfer);
+    }
+  }
+
+  autoRemoveProfileForTransfer(transfer) {
+    const storedProfile = this.store.findProfileById(transfer.profile_id);
+    const categoryProfile = this.service.findProfileByCategory?.(transfer.category);
+    if (categoryProfile && storedProfile && categoryProfile.id !== storedProfile.id) {
+      logger.warn('completed transfer auto-remove resolved by category instead of stored profile', {
+        transferId: transfer.id,
+        storedProfile: storedProfile.slug,
+        category: transfer.category,
+        resolvedProfile: categoryProfile.slug,
+      });
+    }
+    return categoryProfile ?? storedProfile ?? this.service.getDefaultProfile();
   }
 
   async hasLocalTransferData(profile, transfer) {
@@ -713,28 +743,9 @@ export class DownloadManager {
       eta: -1,
     });
 
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-    if (profile?.type === 'prowlarr') {
-      // Prowlarr has no downstream *arr import, so a completed transfer would
-      // otherwise linger forever. Delete it from put.io and drop it from the
-      // list, but keep the downloaded files on disk. Best-effort: a failure is
-      // logged and the transfer stays as `processed` (same as cleanupRemoteFiles).
-      try {
-        await this.service.deleteDownloadBucket(transferId, {
-          deleteRemote: true,
-          deleteLocal: false,
-        });
-        logger.info('prowlarr transfer auto-removed after download; kept files on disk', {
-          transferId,
-          name: transfer.name,
-        });
-      } catch (error) {
-        logger.warn('failed to auto-remove prowlarr transfer', {
-          transferId,
-          name: transfer.name,
-          error: error.message,
-        });
-      }
+    const profile = this.autoRemoveProfileForTransfer(transfer);
+    if (profileAutoRemovesCompleted(profile)) {
+      await this.removeCompletedAutoRemoveTransfer(transfer);
       return;
     }
 
@@ -755,5 +766,40 @@ export class DownloadManager {
       name: transfer.name,
       files: Number(stats.total_files),
     });
+  }
+
+  async removeCompletedAutoRemoveTransfer(transfer) {
+    if (this.service.getPutioToken()) {
+      try {
+        await this.service.deleteDownloadBucket(transfer.id, {
+          deleteRemote: true,
+          deleteLocal: false,
+        });
+        logger.info('completed transfer auto-removed after local download; kept files on disk', {
+          transferId: transfer.id,
+          name: transfer.name,
+        });
+        return;
+      } catch (error) {
+        logger.warn('failed to auto-remove completed transfer', {
+          transferId: transfer.id,
+          name: transfer.name,
+          error: error.message,
+        });
+      }
+    }
+
+    try {
+      await this.service.deleteDownloadBucket(transfer.id, {
+        deleteRemote: false,
+        deleteLocal: false,
+      });
+    } catch (error) {
+      logger.warn('failed to hide completed transfer after remote cleanup failure', {
+        transferId: transfer.id,
+        name: transfer.name,
+        error: error.message,
+      });
+    }
   }
 }

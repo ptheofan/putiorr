@@ -52,8 +52,11 @@ import {
 } from './download-profiles.js';
 import {
   renderDownloads,
+  setAllDownloadSelection,
+  openSelectedDownloadsDelete,
   confirmPendingDelete,
   closeDeleteConfirm,
+  handleDeleteOptionChange,
   updateDeleteConfirmButtonState,
 } from './downloads.js';
 import { initTheme } from './theme.js';
@@ -254,6 +257,7 @@ for (const input of [
   el.wizardClientPort,
   el.wizardUseSsl,
   el.wizardEnabled,
+  el.wizardAutoRemoveCompleted,
 ]) {
   input.addEventListener('input', updateWizardPreview);
   input.addEventListener('change', updateWizardPreview);
@@ -331,8 +335,12 @@ el.deleteConfirmForm.addEventListener('submit', (event) => {
   event.preventDefault();
   confirmPendingDelete();
 });
-el.deleteFromPutio.addEventListener('change', updateDeleteConfirmButtonState);
-el.deleteLocalFiles.addEventListener('change', updateDeleteConfirmButtonState);
+el.downloadsSelectAll.addEventListener('change', (event) => {
+  setAllDownloadSelection(event.target.checked);
+});
+el.deleteSelectedDownloadsButton.addEventListener('click', openSelectedDownloadsDelete);
+el.deleteFromPutio.addEventListener('change', handleDeleteOptionChange);
+el.deleteLocalFiles.addEventListener('change', handleDeleteOptionChange);
 el.deleteConfirmClose.addEventListener('click', closeDeleteConfirm);
 el.deleteConfirmDialog.querySelector('[data-action="cancel-delete"]').addEventListener('click', closeDeleteConfirm);
 el.deleteConfirmDialog.addEventListener('click', (event) => {

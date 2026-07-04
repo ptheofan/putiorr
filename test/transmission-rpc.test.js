@@ -646,6 +646,58 @@ test('dashboard bucket delete keeps local files when deleteLocal is omitted', as
   assert.equal(harness.store.findTransferById(transfer.id), undefined);
 });
 
+test('dashboard can delete multiple selected buckets through mocked put.io', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfers = [1, 2, 3].map((index) => {
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 770 + index,
+      putio_file_id: 880 + index,
+      save_parent_id: 42,
+      hash: `bulkdeletehash${index}`,
+      name: `Bulk.Delete.${index}`,
+      category: 'radarr',
+      lifecycle: 'remote',
+      putio_status: 'DOWNLOADING',
+      percent_done: 40,
+      total_size: 5,
+    });
+    harness.store.upsertTransferFile({
+      transfer_id: transfer.id,
+      putio_file_id: 200 + index,
+      relative_path: `Bulk.Delete.${index}.mkv`,
+      size: 5,
+      status: 'pending',
+    });
+    return transfer;
+  });
+
+  for (const transfer of transfers) {
+    const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/delete`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deleteRemote: true, deleteLocal: false }),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(body.bucketDeleted, true);
+  }
+
+  assert.deepEqual(harness.putio.deletedFiles, [881, 882, 883]);
+  assert.deepEqual(harness.putio.deletedTransfers, [771, 772, 773]);
+  assert.deepEqual(harness.store.listActiveTransfers(), []);
+
+  const downloadsResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/downloads'));
+  assert.equal(downloadsResponse.status, 200);
+  assert.deepEqual(await downloadsResponse.json(), []);
+});
+
 test('dashboard file delete keeps local files when deleteLocal is omitted', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
@@ -766,6 +818,62 @@ test('tombstoned transfer kept on put.io is physically pruned once put.io drops 
   await harness.service.refreshRemoteTransfers();
   assert.equal(harness.store.findTransferById(transfer.id), undefined);
   assert.deepEqual(harness.store.listFilesForTransfer(transfer.id), []);
+});
+
+test('put.io refresh removes remote transfers cancelled upstream', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const cancelled = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'cancelledremotehash',
+    name: 'Cancelled.Remote',
+    category: 'radarr',
+    lifecycle: 'remote',
+    putio_status: 'DOWNLOADING',
+    percent_done: 42,
+    total_size: 5,
+  });
+  const downloading = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 78,
+    putio_file_id: 89,
+    save_parent_id: 42,
+    hash: 'keepdownloadinghash',
+    name: 'Keep.Downloading',
+    category: 'radarr',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+  const processed = harness.store.createOrUpdateTransfer({
+    profile_id: profile.id,
+    putio_transfer_id: 79,
+    putio_file_id: 90,
+    save_parent_id: 42,
+    hash: 'keepprocessedhash',
+    name: 'Keep.Processed',
+    category: 'radarr',
+    lifecycle: 'processed',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 5,
+  });
+
+  harness.putio.transfers = [];
+  await harness.service.refreshRemoteTransfers();
+
+  assert.equal(harness.store.findTransferById(cancelled.id), undefined);
+  assert.equal(harness.store.findTransferById(downloading.id)?.lifecycle, 'downloading');
+  assert.equal(harness.store.findTransferById(processed.id)?.lifecycle, 'processed');
 });
 
 test('tombstoned files under a processed transfer are physically purged; active ones are kept', async (t) => {
@@ -1145,6 +1253,56 @@ test('generic RPC endpoint routes torrent-add to a profile matching the category
   const row = harness.store.findTransferByHash('ABCDEF');
   assert.equal(row.profile_id, sonarr.id);
   assert.equal(row.category, 'sonarr');
+});
+
+test('torrent-add category can override a mismatched profile-specific RPC path', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const prowlarr = harness.store.createProfile({
+    name: 'Prowlarr',
+    type: 'prowlarr',
+    slug: 'prowlarr',
+    putio_folder_name: 'prowlarr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/prowlarr/transmission/rpc',
+    enabled: true,
+  });
+  const lidarr = harness.store.createProfile({
+    name: 'Lidarr',
+    type: 'lidarr',
+    slug: 'lidarr',
+    putio_folder_name: 'lidarr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/lidarr/transmission/rpc',
+    enabled: true,
+  });
+
+  const lidarrUrl = harness.url.replace('/transmission/rpc', lidarr.rpc_path);
+  const first = await fetch(lidarrUrl, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+  const addResponse = await fetch(lidarrUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: {
+        filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+        'download-dir': path.join(harness.config.targetDir, 'prowlarr'),
+      },
+    }),
+  });
+
+  assert.equal(addResponse.status, 200);
+  const row = harness.store.findTransferByHash('ABCDEF');
+  assert.equal(row.profile_id, prowlarr.id);
+  assert.equal(row.category, 'prowlarr');
 });
 
 test('web API exposes settings and profile CRUD', async (t) => {
