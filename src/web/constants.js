@@ -54,7 +54,7 @@ export const PUTIO_PHASE_LABELS = {
   WAITING: 'Queued on Put.io',
   PREPARING_DOWNLOAD: 'Preparing on Put.io',
   DOWNLOADING: 'Downloading on Put.io',
-  COMPLETING: 'Completing on Put.io',
+  COMPLETING: 'Finishing on Put.io',
   SEEDING: 'Ready on Put.io',
   COMPLETED: 'Ready on Put.io',
   ERROR: 'Put.io error',
