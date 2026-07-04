@@ -2,6 +2,14 @@ import { state, el } from './state.js';
 import { api, requestStateRefresh } from './api.js';
 import { READY_PUTIO_STATUSES, PUTIO_PHASE_LABELS } from './constants.js';
 import {
+  visibleDownloadIds as visibleDownloadIdsFor,
+  selectedVisibleDownloads as selectedVisibleDownloadsFor,
+  selectedVisibleCount,
+  toggleDownloadSelectionState,
+  setAllDownloadSelectionState,
+  pruneDownloadSelectionState,
+} from './download-selection.js';
+import {
   clampPercent,
   formatBytes,
   formatSpeed,
@@ -31,6 +39,7 @@ export function renderDownloads() {
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();
   pruneDownloadUiState();
+  renderDownloadBulkControls();
 
   if (state.downloads.length === 0) {
     const empty = document.createElement('div');
@@ -67,8 +76,14 @@ export function createDownloadRow(download) {
   const row = document.createElement('article');
   row.className = 'download-row';
   row.dataset.id = download.id;
+  row.dataset.downloadId = download.id;
+  row.setAttribute('data-testid', 'download-row');
   row.innerHTML = `
     <div class="download-summary">
+      <label class="download-select checkbox-row">
+        <input type="checkbox" data-action="select-download" data-testid="download-select-checkbox">
+        <span class="sr-only">Select download</span>
+      </label>
       <div>
         <div class="download-title" data-role="download-title"></div>
         <div class="download-meta" data-role="download-location"></div>
@@ -97,7 +112,7 @@ export function createDownloadRow(download) {
             <span aria-hidden="true">▶</span>
             <span data-role="start-label">Start</span>
           </button>
-          <button class="icon-button danger bucket-delete-button" type="button" data-action="delete-bucket" aria-label="Delete bucket" title="Delete bucket">${trashIcon()}</button>
+          <button class="icon-button danger bucket-delete-button" type="button" data-action="delete-bucket" data-testid="download-delete-bucket" aria-label="Delete bucket" title="Delete bucket">${trashIcon()}</button>
         </div>
       </div>
     </div>
@@ -118,6 +133,9 @@ export function createDownloadRow(download) {
       <div class="file-list" data-role="file-list"></div>
     </div>
   `;
+  row.querySelector('[data-action="select-download"]').addEventListener('click', (event) => {
+    toggleDownloadSelection(row.dataset.id, event.target.checked, { range: event.shiftKey });
+  });
   row.querySelector('[data-action="toggle-files"]').addEventListener('click', () => {
     toggleFilePanel(row.dataset.id);
   });
@@ -162,6 +180,11 @@ export function updateDownloadRow(row, download) {
 
   setDataValue(row, 'id', download.id);
   row.dataset.error = download.error ? 'true' : 'false';
+  const selected = state.selectedDownloadIds.has(String(download.id));
+  row.dataset.selected = selected ? 'true' : 'false';
+  const selectDownload = row.querySelector('[data-action="select-download"]');
+  selectDownload.checked = selected;
+  selectDownload.setAttribute('aria-label', `Select ${download.name || 'download'}`);
   setText(row.querySelector('[data-role="download-title"]'), download.name);
   setText(
     row.querySelector('[data-role="download-location"]'),
@@ -355,6 +378,39 @@ export function findDownloadFile(download, fileId) {
   return downloadFileItems(download).find((file) => String(file.id) === String(fileId));
 }
 
+export function visibleDownloadIds() {
+  return visibleDownloadIdsFor(state.downloads);
+}
+
+export function selectedVisibleDownloads() {
+  return selectedVisibleDownloadsFor(state.downloads, state.selectedDownloadIds);
+}
+
+export function renderDownloadBulkControls() {
+  const visibleIds = visibleDownloadIds();
+  const selectedCount = selectedVisibleCount(state.downloads, state.selectedDownloadIds);
+  el.downloadsBulkBar.hidden = visibleIds.length === 0;
+  el.downloadsSelectAll.checked = visibleIds.length > 0 && selectedCount === visibleIds.length;
+  el.downloadsSelectAll.indeterminate = selectedCount > 0 && selectedCount < visibleIds.length;
+  el.downloadsSelectAll.disabled = visibleIds.length === 0;
+  el.deleteSelectedDownloadsButton.disabled = selectedCount === 0;
+  setText(el.downloadsSelectedCount, `${selectedCount} selected`);
+  setText(
+    el.deleteSelectedDownloadsButton,
+    selectedCount > 0 ? `Delete selected (${selectedCount})` : 'Delete selected',
+  );
+}
+
+export function toggleDownloadSelection(downloadId, selected, { range = false } = {}) {
+  toggleDownloadSelectionState(state, downloadId, selected, { range });
+  renderDownloads();
+}
+
+export function setAllDownloadSelection(selected) {
+  setAllDownloadSelectionState(state, selected);
+  renderDownloads();
+}
+
 export function selectedFileIdsForDownload(downloadId) {
   return state.selectedFilesByDownload.get(String(downloadId)) ?? new Set();
 }
@@ -434,19 +490,50 @@ export function openSelectedFilesDelete(download) {
   });
 }
 
+export function openSelectedDownloadsDelete() {
+  const downloads = selectedVisibleDownloads();
+  if (downloads.length === 0) return;
+  if (downloads.length === 1) {
+    openBucketDelete(downloads[0]);
+    return;
+  }
+  openDeleteConfirm({
+    type: 'buckets',
+    downloadIds: downloads.map((download) => String(download.id)),
+  });
+}
+
 export function openDeleteConfirm(pendingDelete) {
-  const download = findDownload(pendingDelete.downloadId);
-  if (!download) return;
-  const count = pendingDelete.type === 'bucket'
-    ? downloadFileItems(download).length
-    : pendingDelete.fileIds.length;
+  const downloads = pendingDelete.type === 'buckets'
+    ? pendingDelete.downloadIds.map(findDownload).filter(Boolean)
+    : [];
+  const download = pendingDelete.type === 'buckets' ? undefined : findDownload(pendingDelete.downloadId);
+  if (pendingDelete.type === 'buckets' && downloads.length === 0) return;
+  if (pendingDelete.type !== 'buckets' && !download) return;
+  const count = pendingDelete.type === 'buckets'
+    ? downloads.reduce((sum, item) => sum + downloadFileItems(item).length, 0)
+    : pendingDelete.type === 'bucket'
+      ? downloadFileItems(download).length
+      : pendingDelete.fileIds.length;
   const fileWord = count === 1 ? 'file' : 'files';
-  state.pendingDelete = pendingDelete;
-  el.deleteFromPutio.checked = true;
-  el.deleteLocalFiles.checked = false;
+  state.pendingDelete = pendingDelete.type === 'buckets'
+    ? { ...pendingDelete, downloadIds: downloads.map((item) => String(item.id)) }
+    : pendingDelete;
+  setCheckboxChecked(el.deleteFromPutio, true);
+  setCheckboxChecked(el.deleteLocalFiles, false);
   setDeleteConfirmMessage('');
 
-  if (pendingDelete.type === 'bucket') {
+  if (pendingDelete.type === 'buckets') {
+    const downloadWord = downloads.length === 1 ? 'download' : 'downloads';
+    const fileSummary = count > 0 ? ` and all ${count} ${fileWord}` : '';
+    setText(el.deleteConfirmTitle, `Delete ${downloads.length} ${downloadWord}`);
+    setText(
+      el.deleteConfirmIntro,
+      `This will delete ${downloads.length} selected ${downloadWord}${fileSummary} from putiorr.`,
+    );
+    setText(el.deleteFromPutioLabel, 'Also delete these buckets from put.io');
+    setText(el.deleteLocalFilesLabel, 'Also delete the downloaded files from disk');
+  } else if (pendingDelete.type === 'bucket') {
     setText(el.deleteConfirmTitle, 'Delete bucket');
     setText(
       el.deleteConfirmIntro,
@@ -479,8 +566,13 @@ export function closeDeleteConfirm() {
 }
 
 export function updateDeleteConfirmButtonState() {
-  const anyChecked = el.deleteFromPutio.checked || el.deleteLocalFiles.checked;
-  el.deleteConfirmButton.disabled = !anyChecked;
+  const anyChecked = isCheckboxChecked(el.deleteFromPutio) || isCheckboxChecked(el.deleteLocalFiles);
+  setButtonDisabled(el.deleteConfirmButton, !anyChecked);
+}
+
+export function handleDeleteOptionChange(event) {
+  setCheckboxChecked(event.target, Boolean(event.target.checked));
+  updateDeleteConfirmButtonState();
 }
 
 export function setDeleteConfirmMessage(message, tone = 'neutral') {
@@ -488,16 +580,47 @@ export function setDeleteConfirmMessage(message, tone = 'neutral') {
   el.deleteConfirmMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
 }
 
+export function setCheckboxChecked(checkbox, checked) {
+  checkbox.checked = checked;
+  checkbox.toggleAttribute('checked', checked);
+}
+
+export function isCheckboxChecked(checkbox) {
+  return Boolean(checkbox.checked || checkbox.hasAttribute('checked'));
+}
+
+export function setButtonDisabled(button, disabled) {
+  button.disabled = disabled;
+  button.toggleAttribute('disabled', disabled);
+}
+
 export async function confirmPendingDelete() {
   const pendingDelete = state.pendingDelete;
   if (!pendingDelete) return;
 
-  el.deleteConfirmButton.disabled = true;
+  setButtonDisabled(el.deleteConfirmButton, true);
   setDeleteConfirmMessage('Deleting...', 'neutral');
-  const deleteRemote = Boolean(el.deleteFromPutio.checked);
-  const deleteLocal = Boolean(el.deleteLocalFiles.checked);
+  const deleteRemote = isCheckboxChecked(el.deleteFromPutio);
+  const deleteLocal = isCheckboxChecked(el.deleteLocalFiles);
 
   try {
+    if (pendingDelete.type === 'buckets') {
+      for (const downloadId of pendingDelete.downloadIds) {
+        await api(`/api/downloads/${downloadId}/delete`, {
+          method: 'POST',
+          body: JSON.stringify({ deleteRemote, deleteLocal }),
+        });
+        state.selectedDownloadIds.delete(String(downloadId));
+        state.selectedFilesByDownload.delete(String(downloadId));
+        state.expandedDownloads.delete(String(downloadId));
+        state.fileListScrollTops.delete(String(downloadId));
+      }
+      closeDeleteConfirm();
+      await refreshDownloads();
+      requestStateRefresh();
+      return;
+    }
+
     const result = pendingDelete.type === 'bucket'
       ? await api(`/api/downloads/${pendingDelete.downloadId}/delete`, {
           method: 'POST',
@@ -513,6 +636,7 @@ export async function confirmPendingDelete() {
         });
 
     if (result.bucketDeleted) {
+      state.selectedDownloadIds.delete(String(pendingDelete.downloadId));
       state.selectedFilesByDownload.delete(String(pendingDelete.downloadId));
       state.expandedDownloads.delete(String(pendingDelete.downloadId));
       state.fileListScrollTops.delete(String(pendingDelete.downloadId));
@@ -526,6 +650,7 @@ export async function confirmPendingDelete() {
     await refreshDownloads();
     requestStateRefresh();
   } catch (error) {
+    await refreshDownloads().catch(() => {});
     setDeleteConfirmMessage(error.message, 'error');
   } finally {
     updateDeleteConfirmButtonState();
@@ -571,6 +696,7 @@ export function rememberFileListScrollTops() {
 export function pruneDownloadUiState() {
   const ids = new Set(state.downloads.map((download) => String(download.id)));
   const downloadsById = new Map(state.downloads.map((download) => [String(download.id), download]));
+  pruneDownloadSelectionState(state);
   for (const id of state.expandedDownloads) {
     if (!ids.has(id)) state.expandedDownloads.delete(id);
   }

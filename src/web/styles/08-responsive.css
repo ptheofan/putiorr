@@ -1,0 +1,168 @@
+@media (max-width: 860px) {
+  .content {
+    padding: 18px;
+  }
+
+  .topbar,
+  .section-head,
+  .form-grid,
+  .policy-grid,
+  .oauth-panel {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .topbar-actions {
+    align-self: stretch;
+    justify-content: flex-end;
+  }
+
+  .hero-brand {
+    align-items: flex-start;
+  }
+
+  .hero-icon {
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+  }
+
+  .download-summary,
+  .wizard-layout,
+  .link-row,
+  .field-pair,
+  .field-pair.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .profiles-list {
+    grid-template-columns: 1fr;
+  }
+
+  .putio-status-button {
+    align-self: flex-start;
+  }
+
+  .putio-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .putio-tab {
+    width: 100%;
+  }
+
+  .putio-connect-actions #putioDisconnectButton {
+    margin-left: 0;
+  }
+
+  .putio-advanced-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .putio-advanced-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .profile-card-main,
+  .preview-head,
+  .modal-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .modal-actions [data-action="cancel-putio"] {
+    margin-right: 0;
+  }
+
+  .profile-facts div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+
+  .setup-preview {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .modal-head {
+    align-items: stretch;
+  }
+
+  .file-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .download-bulk-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .file-panel-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .download-summary {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .download-summary > :not(.download-select) {
+    grid-column: 2;
+  }
+
+  /* Keep the speed/ETA metric full width, but let Start + delete share a row. */
+  .download-actions {
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .download-speed-metric {
+    flex: 1 1 100%;
+    text-align: left;
+  }
+
+  .start-download-button {
+    flex: 1 1 auto;
+  }
+
+  /* Reflow file rows: name + delete on top, status and progress stacked beneath,
+     with the checkbox spanning the left rail. */
+  .file-row {
+    grid-template-columns: 22px 1fr auto;
+    grid-template-areas:
+      "sel name del"
+      "sel status status"
+      "sel prog prog";
+    row-gap: 6px;
+  }
+
+  .file-select {
+    grid-area: sel;
+    align-self: start;
+    margin-top: 4px;
+  }
+
+  .file-main {
+    grid-area: name;
+  }
+
+  .file-status {
+    grid-area: status;
+  }
+
+  .file-progress {
+    grid-area: prog;
+  }
+
+  .file-delete-button {
+    grid-area: del;
+    justify-self: start;
+  }
+}

@@ -4,7 +4,11 @@ import { BYTE_UNITS, TIME_UNITS, DEFAULT_PROFILE_TYPE } from './constants.js';
 // rather than ''. Normalize to a string so the many `.value.trim()` reads below
 // never throw on untouched fields.
 export function fieldValue(input) {
-  return String(input?.value ?? '');
+  return String(input?.value ?? input?.getAttribute?.('value') ?? '');
+}
+
+export function fieldChecked(input) {
+  return Boolean(input?.checked || input?.hasAttribute?.('checked'));
 }
 
 export function numericSelectValue(value) {

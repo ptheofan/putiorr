@@ -56,6 +56,7 @@ function normalizeFileRow(row) {
 function normalizeProfileRow(row) {
   if (!row) return undefined;
   const downloadAt = row.download_at ?? row.local_path;
+  const autoRemoveCompleted = toBool(row.auto_remove_completed);
   const {
     local_path: _localPath,
     download_at: _downloadAt,
@@ -67,6 +68,8 @@ function normalizeProfileRow(row) {
     download_at: downloadAt,
     downloadAt,
     downloadProfileId: row.download_profile_id,
+    auto_remove_completed: autoRemoveCompleted,
+    autoRemoveCompleted,
     client_use_ssl: toBool(clientUseSsl),
     clientHost: row.client_host,
     clientPort: row.client_port,
@@ -117,6 +120,22 @@ function profileClientPort(input) {
 
 function profileClientUseSsl(input) {
   return input.client_use_ssl ?? input.clientUseSsl;
+}
+
+function profileAutoRemoveCompleted(input) {
+  const value = input.auto_remove_completed ?? input.autoRemoveCompleted;
+  if (value === undefined) return undefined;
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function profileDefaultsToAutoRemoveCompleted(input) {
+  return [
+    input.type,
+    input.slug,
+    input.name,
+    input.putio_folder_name,
+    input.putioFolderName,
+  ].some((value) => String(value ?? '').trim().toLowerCase() === 'prowlarr');
 }
 
 function normalizeOptionalId(value) {
@@ -184,6 +203,7 @@ export class StateStore {
         type TEXT NOT NULL DEFAULT 'custom',
         slug TEXT NOT NULL UNIQUE,
         download_profile_id INTEGER REFERENCES download_profiles(id) ON DELETE SET NULL,
+        auto_remove_completed INTEGER NOT NULL DEFAULT 0,
         putio_folder_name TEXT NOT NULL,
         putio_folder_id INTEGER,
         download_at TEXT NOT NULL,
@@ -247,6 +267,7 @@ export class StateStore {
       CREATE INDEX IF NOT EXISTS idx_transfer_files_status ON transfer_files(status);
     `);
     this.migrateProfileDownloadAt();
+    this.migrateProfileAutoRemoveCompleted();
     this.ensureColumn('profiles', 'download_profile_id', 'INTEGER REFERENCES download_profiles(id) ON DELETE SET NULL');
     this.ensureColumn('profiles', 'client_host', "TEXT NOT NULL DEFAULT 'putiorr'");
     this.ensureColumn('profiles', 'client_port', "TEXT NOT NULL DEFAULT '9091'");
@@ -265,6 +286,20 @@ export class StateStore {
     const columns = this.getColumns(table);
     if (columns.some((row) => row.name === column)) return;
     this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
+
+  migrateProfileAutoRemoveCompleted() {
+    const columns = this.getColumns('profiles');
+    if (columns.some((row) => row.name === 'auto_remove_completed')) return;
+    this.db.exec('ALTER TABLE profiles ADD COLUMN auto_remove_completed INTEGER NOT NULL DEFAULT 0');
+    this.db.prepare(`
+      UPDATE profiles
+      SET auto_remove_completed = 1, updated_at = ?
+      WHERE lower(type) = 'prowlarr'
+        OR lower(slug) = 'prowlarr'
+        OR lower(name) = 'prowlarr'
+        OR lower(putio_folder_name) = 'prowlarr'
+    `).run(nowIso());
   }
 
   migrateProfileDownloadAt() {
@@ -463,17 +498,19 @@ export class StateStore {
   createProfile(input) {
     const timestamp = nowIso();
     const downloadProfileId = profileDownloadProfileId(input);
+    const autoRemoveCompleted = profileAutoRemoveCompleted(input) ?? profileDefaultsToAutoRemoveCompleted(input);
     const result = this.db.prepare(`
       INSERT INTO profiles (
-        name, type, slug, download_profile_id, putio_folder_name, putio_folder_id,
+        name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
         download_at, rpc_path, client_host, client_port, client_use_ssl, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.name,
       input.type ?? 'custom',
       input.slug,
       downloadProfileId == null ? null : normalizeOptionalId(downloadProfileId),
+      autoRemoveCompleted ? 1 : 0,
       input.putio_folder_name,
       input.putio_folder_id ?? null,
       profileDownloadAt(input),
@@ -504,11 +541,14 @@ export class StateStore {
     if (nextClientPort !== undefined) normalizedPatch.client_port = nextClientPort;
     const nextClientUseSsl = profileClientUseSsl(patch);
     if (nextClientUseSsl !== undefined) normalizedPatch.client_use_ssl = nextClientUseSsl;
+    const nextAutoRemoveCompleted = profileAutoRemoveCompleted(patch);
+    if (nextAutoRemoveCompleted !== undefined) normalizedPatch.auto_remove_completed = nextAutoRemoveCompleted;
     const allowed = [
       'name',
       'type',
       'slug',
       'download_profile_id',
+      'auto_remove_completed',
       'putio_folder_name',
       'putio_folder_id',
       'download_at',
@@ -522,7 +562,9 @@ export class StateStore {
     if (keys.length === 0) return existing;
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
     const values = keys.map((key) => (
-      key === 'enabled' || key === 'client_use_ssl' ? (normalizedPatch[key] ? 1 : 0) : normalizedPatch[key]
+      key === 'enabled' || key === 'client_use_ssl' || key === 'auto_remove_completed'
+        ? (normalizedPatch[key] ? 1 : 0)
+        : normalizedPatch[key]
     ));
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE profiles SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);

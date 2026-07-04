@@ -104,9 +104,88 @@ test('profile rows migrate local_path to downloadAt', async () => {
     assert.equal(profile.client_host, 'putiorr');
     assert.equal(profile.client_port, '9091');
     assert.equal(profile.client_use_ssl, false);
+    assert.equal(profile.auto_remove_completed, false);
     assert.equal(Object.hasOwn(profile, 'local_path'), false);
   } finally {
     store.close();
+  }
+});
+
+test('prowlarr profiles default to removing completed local downloads', async () => {
+  const store = new StateStore(':memory:');
+  try {
+    const prowlarr = store.createProfile({
+      name: 'Prowlarr',
+      type: 'prowlarr',
+      slug: 'prowlarr',
+      putio_folder_name: 'prowlarr',
+      downloadAt: '/downloads',
+      rpc_path: '/prowlarr/transmission/rpc',
+      enabled: true,
+    });
+    const custom = store.createProfile({
+      name: 'Custom',
+      type: 'custom',
+      slug: 'custom',
+      putio_folder_name: 'custom',
+      downloadAt: '/downloads',
+      rpc_path: '/custom/transmission/rpc',
+      enabled: true,
+    });
+
+    assert.equal(prowlarr.auto_remove_completed, true);
+    assert.equal(prowlarr.autoRemoveCompleted, true);
+    assert.equal(custom.auto_remove_completed, false);
+  } finally {
+    store.close();
+  }
+});
+
+test('migration enables auto-remove for existing prowlarr profiles once', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
+  const dbPath = path.join(root, 'state.sqlite');
+  const legacy = new DatabaseSync(dbPath);
+  try {
+    legacy.exec(`
+      CREATE TABLE profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'custom',
+        slug TEXT NOT NULL UNIQUE,
+        putio_folder_name TEXT NOT NULL,
+        putio_folder_id INTEGER,
+        download_at TEXT NOT NULL,
+        rpc_path TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `);
+    legacy.prepare(`
+      INSERT INTO profiles (
+        name, type, slug, putio_folder_name, download_at,
+        rpc_path, enabled, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run('Prowlarr', 'prowlarr', 'prowlarr', 'prowlarr', '/downloads', '/prowlarr/transmission/rpc', 1, 'now', 'now');
+  } finally {
+    legacy.close();
+  }
+
+  const store = new StateStore(dbPath);
+  try {
+    const profile = store.findProfileBySlug('prowlarr');
+    assert.equal(profile.auto_remove_completed, true);
+    store.updateProfile(profile.id, { auto_remove_completed: false });
+  } finally {
+    store.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    assert.equal(reopened.findProfileBySlug('prowlarr').auto_remove_completed, false);
+  } finally {
+    reopened.close();
   }
 });
 
