@@ -1255,6 +1255,56 @@ test('generic RPC endpoint routes torrent-add to a profile matching the category
   assert.equal(row.category, 'sonarr');
 });
 
+test('put.io refresh repairs a transfer mismatched by a shared profile folder', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const sonarr = harness.store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/sonarr/transmission/rpc',
+    enabled: true,
+  });
+  const lidarr = harness.store.createProfile({
+    name: 'Lidarr',
+    type: 'lidarr',
+    slug: 'lidarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/lidarr/transmission/rpc',
+    enabled: true,
+  });
+  harness.store.createOrUpdateTransfer({
+    profile_id: lidarr.id,
+    putio_transfer_id: 77,
+    hash: 'sharedfolderhash',
+    name: 'House.of.the.Dragon',
+    category: 'sonarr',
+    lifecycle: 'remote',
+  });
+  harness.putio.transfers = [{
+    id: 77,
+    name: 'House.of.the.Dragon',
+    hash: 'sharedfolderhash',
+    status: 'COMPLETED',
+    percentDone: 100,
+    size: 1_000,
+    saveParentId: 42,
+  }];
+
+  await harness.service.refreshRemoteTransfers();
+
+  const transfer = harness.store.findTransferByPutioId(77);
+  assert.equal(transfer.profile_id, sonarr.id);
+  assert.equal(harness.service.listDownloads()[0].profileName, 'Sonarr');
+});
+
 test('torrent-add category can override a mismatched profile-specific RPC path', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

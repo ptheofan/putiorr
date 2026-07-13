@@ -109,11 +109,13 @@
 
   .download-summary {
     grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-areas:
+      "select title"
+      ". context"
+      ". status"
+      ". progress"
+      ". actions";
     gap: 14px;
-  }
-
-  .download-summary > :not(.download-select) {
-    grid-column: 2;
   }
 
   /* Keep the speed/ETA metric full width, but let Start + delete share a row. */
