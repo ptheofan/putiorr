@@ -87,7 +87,6 @@ export function createDownloadRow(download) {
       <div class="download-heading">
         <div class="download-title" data-role="download-title"></div>
       </div>
-      <button class="icon-button danger bucket-delete-button" type="button" data-action="delete-bucket" data-testid="download-delete-bucket" aria-label="Delete bucket" title="Delete bucket">${trashIcon()}</button>
       <div class="download-status-metric">
         <div class="metric-label">Status</div>
         <strong data-role="download-status"></strong>
@@ -115,6 +114,10 @@ export function createDownloadRow(download) {
         <span data-role="file-count"></span>
       </button>
       <div class="download-meta" data-role="download-location"></div>
+      <button class="button danger compact-button" type="button" data-action="delete-bucket" data-testid="download-delete-bucket" aria-label="Delete bucket">
+        ${trashIcon()}
+        <span>Delete</span>
+      </button>
     </div>
     <div class="file-panel" data-role="file-panel" hidden>
       <div class="file-panel-head">

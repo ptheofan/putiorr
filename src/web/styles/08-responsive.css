@@ -108,16 +108,17 @@
   }
 
   .download-summary {
-    grid-template-columns: 22px minmax(0, 1fr) 32px;
+    grid-template-columns: 22px minmax(0, 1fr);
     grid-template-areas:
-      "select title delete"
-      ". status status"
-      ". progress progress"
-      ". actions actions";
+      "select title"
+      ". status"
+      ". progress"
+      ". actions";
     gap: 14px;
   }
 
   .download-footer {
+    display: flex;
     align-items: stretch;
     flex-direction: column;
   }

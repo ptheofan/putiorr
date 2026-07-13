@@ -62,10 +62,10 @@
 
 .download-summary {
   display: grid;
-  grid-template-columns: 22px minmax(150px, 0.8fr) minmax(230px, 1.2fr) minmax(150px, auto) 32px;
+  grid-template-columns: 22px minmax(150px, 0.8fr) minmax(230px, 1.2fr) minmax(150px, auto);
   grid-template-areas:
-    "select title title title delete"
-    ". status progress actions actions";
+    "select title title title"
+    ". status progress actions";
   column-gap: 24px;
   row-gap: 14px;
   align-items: center;
@@ -142,7 +142,6 @@
   text-align: right;
 }
 
-.bucket-delete-button,
 .file-delete-button {
   display: inline-flex;
   align-items: center;
@@ -159,11 +158,6 @@
   transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
 }
 
-.bucket-delete-button {
-  grid-area: delete;
-}
-
-.bucket-delete-button:hover,
 .file-delete-button:hover {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
@@ -284,9 +278,9 @@
 }
 
 .download-footer {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
