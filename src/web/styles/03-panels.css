@@ -1,18 +1,30 @@
 .panel {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  box-shadow: var(--shadow);
-  padding: 20px;
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .section-head {
+  display: grid;
+  gap: 8px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.section-title-row {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   gap: 18px;
+  min-width: 0;
+}
+
+.section-title-row h2 {
+  font-size: 22px;
+  line-height: 28px;
 }
 
 .section-head-main {
@@ -122,4 +134,3 @@ label {
   font-size: 13px;
   font-weight: 700;
 }
-

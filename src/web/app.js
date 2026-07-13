@@ -61,6 +61,7 @@ import {
 } from './downloads.js';
 import { initTheme } from './theme.js';
 import { initRouter } from './router.js';
+import { initSectionActionOverflow } from './section-actions.js';
 
 export async function loadAll() {
   const [settings, profiles, downloadProfiles, downloads] = await Promise.all([
@@ -349,6 +350,7 @@ el.deleteConfirmDialog.addEventListener('click', (event) => {
 
 initTheme();
 initRouter();
+initSectionActionOverflow();
 
 loadAll().catch((error) => setMessage(error.message, 'error'));
 loadVersion().catch(() => {});

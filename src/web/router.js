@@ -1,14 +1,7 @@
-import { setText, setHidden } from './util.js';
+import { setHidden } from './util.js';
 
 // --- Sidebar routing (hash-based, no server rewrites needed) ---
 export const ROUTES = ['topology', 'downloads', 'download-profiles', 'profiles', 'help'];
-export const ROUTE_TITLES = {
-  topology: 'Topology',
-  profiles: 'RR profiles',
-  'download-profiles': 'Download profiles',
-  downloads: 'Current downloads',
-  help: 'How it works',
-};
 
 export function currentRoute() {
   const hash = window.location.hash.replace(/^#\/?/, '');
@@ -26,8 +19,6 @@ export function applyRoute() {
     if (active) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
   }
-  const title = document.querySelector('#routeTitle');
-  if (title) setText(title, ROUTE_TITLES[route]);
 }
 
 export function initRouter() {
