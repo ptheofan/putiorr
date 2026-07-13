@@ -278,8 +278,7 @@
 }
 
 .download-footer {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 16px;
   padding-top: 12px;
@@ -288,6 +287,7 @@
 
 .download-footer [data-role="download-location"] {
   min-width: 0;
+  margin-left: auto;
   text-align: right;
 }
 

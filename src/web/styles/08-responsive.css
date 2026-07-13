@@ -118,19 +118,27 @@
   }
 
   .download-footer {
-    display: flex;
-    align-items: stretch;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .download-footer .file-toggle,
   .download-footer [data-role="download-location"] {
+    grid-column: 1 / -1;
+    margin-left: 0;
     white-space: normal;
     text-align: left;
   }
 
-  /* Keep the speed/ETA metric full width, but let Start + delete share a row. */
+  .download-footer [data-action="start-download"] {
+    grid-column: 1;
+  }
+
+  .download-footer [data-action="delete-bucket"] {
+    grid-column: 2;
+  }
+
   .download-actions {
-    flex-wrap: wrap;
     align-items: center;
     justify-content: flex-start;
   }
@@ -138,10 +146,6 @@
   .download-speed-metric {
     flex: 1 1 100%;
     text-align: left;
-  }
-
-  .start-download-button {
-    flex: 1 1 auto;
   }
 
   /* Reflow file rows: name + delete on top, status and progress stacked beneath,
