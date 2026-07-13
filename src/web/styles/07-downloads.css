@@ -62,10 +62,10 @@
 
 .download-summary {
   display: grid;
-  grid-template-columns: 22px minmax(180px, 0.9fr) minmax(150px, 0.7fr) minmax(230px, 1.2fr) minmax(150px, auto);
+  grid-template-columns: 22px minmax(150px, 0.8fr) minmax(230px, 1.2fr) minmax(150px, auto) 32px;
   grid-template-areas:
-    "select title title title title"
-    ". context status progress actions";
+    "select title title title delete"
+    ". status progress actions actions";
   column-gap: 24px;
   row-gap: 14px;
   align-items: center;
@@ -79,11 +79,6 @@
 
 .download-heading {
   grid-area: title;
-}
-
-.download-context {
-  grid-area: context;
-  min-width: 0;
 }
 
 .download-status-metric {
@@ -162,6 +157,10 @@
   color: var(--muted);
   cursor: pointer;
   transition: color 0.16s ease, border-color 0.16s ease, background 0.16s ease;
+}
+
+.bucket-delete-button {
+  grid-area: delete;
 }
 
 .bucket-delete-button:hover,
@@ -285,8 +284,17 @@
 }
 
 .download-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
+}
+
+.download-footer [data-role="download-location"] {
+  min-width: 0;
+  text-align: right;
 }
 
 .progress-line {

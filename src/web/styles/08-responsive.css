@@ -108,14 +108,23 @@
   }
 
   .download-summary {
-    grid-template-columns: 22px minmax(0, 1fr);
+    grid-template-columns: 22px minmax(0, 1fr) 32px;
     grid-template-areas:
-      "select title"
-      ". context"
-      ". status"
-      ". progress"
-      ". actions";
+      "select title delete"
+      ". status status"
+      ". progress progress"
+      ". actions actions";
     gap: 14px;
+  }
+
+  .download-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .download-footer [data-role="download-location"] {
+    white-space: normal;
+    text-align: left;
   }
 
   /* Keep the speed/ETA metric full width, but let Start + delete share a row. */
