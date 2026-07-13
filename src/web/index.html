@@ -92,19 +92,18 @@
       </aside>
 
       <main class="content">
-        <header class="topbar">
-          <div class="topbar-title" id="routeTitle">RR profiles</div>
-        </header>
-
         <section id="profiles" class="panel" data-route-view="profiles">
           <div class="section-head">
-            <div>
-              <p>Use the setup wizard to create one profile per app and copy the matching download-client settings.</p>
+            <div class="section-title-row">
+              <h2>RR profiles</h2>
+              <div class="button-row section-actions">
+                <wa-button id="addProfileButton" variant="brand" appearance="accent">
+                  <wa-icon slot="start" name="plus"></wa-icon>
+                  Setup profile
+                </wa-button>
+              </div>
             </div>
-            <wa-button id="addProfileButton" variant="brand" appearance="accent">
-              <wa-icon slot="start" name="plus"></wa-icon>
-              Setup profile
-            </wa-button>
+            <p>Use the setup wizard to create one profile per app and copy the matching download-client settings.</p>
           </div>
 
           <div id="profilesBody" class="profiles-list"></div>
@@ -112,19 +111,20 @@
 
         <section id="download-profiles" class="panel" data-route-view="download-profiles" hidden>
           <div class="section-head">
-            <div>
-              <p>Tune slow-speed reset separately for music, episodes, movies, and other download shapes.</p>
+            <div class="section-title-row">
+              <h2>Download profiles</h2>
+              <div class="button-row section-actions">
+                <wa-button id="linkDownloadProfilesButton" variant="neutral" appearance="outlined">
+                  <wa-icon slot="start" name="right-left"></wa-icon>
+                  Link RR profiles
+                </wa-button>
+                <wa-button id="addDownloadProfileButton" variant="brand" appearance="accent">
+                  <wa-icon slot="start" name="plus"></wa-icon>
+                  Add profile
+                </wa-button>
+              </div>
             </div>
-            <div class="button-row section-actions">
-              <wa-button id="linkDownloadProfilesButton" variant="neutral" appearance="outlined">
-                <wa-icon slot="start" name="right-left"></wa-icon>
-                Link RR profiles
-              </wa-button>
-              <wa-button id="addDownloadProfileButton" variant="brand" appearance="accent">
-                <wa-icon slot="start" name="plus"></wa-icon>
-                Add profile
-              </wa-button>
-            </div>
+            <p>Tune slow-speed reset separately for music, episodes, movies, and other download shapes.</p>
           </div>
 
           <div id="downloadProfilesBody" class="profiles-list"></div>
@@ -132,9 +132,10 @@
 
         <section id="downloads" class="panel" data-route-view="downloads" hidden>
           <div class="section-head">
-            <div>
-              <p>Combined put.io and local transfer state from the durable SQLite queue.</p>
+            <div class="section-title-row">
+              <h2>Current downloads</h2>
             </div>
+            <p>Combined put.io and local transfer state from the durable SQLite queue.</p>
           </div>
 
           <div id="downloadsBulkBar" class="download-bulk-bar" data-testid="downloads-bulk-bar" hidden>
@@ -151,20 +152,28 @@
 
         <section id="topology" class="panel topo-panel" data-route-view="topology" hidden>
           <div class="section-head">
-            <div>
-              <p>A live map of how your put.io connection, RR profiles, download profiles and active downloads connect.</p>
+            <div class="section-title-row">
+              <h2>Topology</h2>
             </div>
-            <div class="topo-legend">
-              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--putio"></i>Put.io</span>
-              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--rr"></i>RR profile</span>
-              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--dprofile"></i>Download profile</span>
-              <span class="topo-legend-item"><i class="topo-swatch topo-swatch--download"></i>Download</span>
-            </div>
+            <p>A live map of how your put.io connection, RR profiles, download profiles and active downloads connect.</p>
+          </div>
+          <div class="topo-legend">
+            <span class="topo-legend-label">Legend:</span>
+            <span class="topo-legend-item"><i class="topo-swatch topo-swatch--putio"></i>Put.io</span>
+            <span class="topo-legend-item"><i class="topo-swatch topo-swatch--rr"></i>RR profile</span>
+            <span class="topo-legend-item"><i class="topo-swatch topo-swatch--dprofile"></i>Download profile</span>
+            <span class="topo-legend-item"><i class="topo-swatch topo-swatch--download"></i>Download</span>
           </div>
           <div id="topologyCanvas" class="topo-canvas"></div>
         </section>
 
         <section id="help" class="panel help-panel" data-route-view="help" hidden>
+          <div class="section-head">
+            <div class="section-title-row">
+              <h2>How it works</h2>
+            </div>
+          </div>
+
           <p class="help-lead">putiorr makes <strong>put.io</strong> look like a local <strong>Transmission</strong> download client. Your *arr apps send releases to putiorr, put.io downloads them in the cloud, then putiorr copies the finished files into a folder your *arr app imports from — no local seeding, no torrent client to babysit.</p>
 
           <div class="help-diagram">

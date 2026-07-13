@@ -136,7 +136,67 @@ select.input-control-addon {
 }
 
 .section-actions {
+  align-items: flex-start;
+  gap: 8px;
   justify-content: flex-end;
+}
+
+.section-actions wa-button::part(base) {
+  min-height: 28px;
+  height: 28px;
+  padding-inline: 10px;
+  font-size: 12px;
+}
+
+.section-actions wa-icon {
+  font-size: 14px;
+}
+
+.section-actions-overflow {
+  position: relative;
+}
+
+.section-actions-more {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+}
+
+.section-actions-more::-webkit-details-marker {
+  display: none;
+}
+
+.section-actions-more svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.section-actions-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 6px;
+  min-width: max-content;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.section-actions-menu > * {
+  width: 100%;
+}
+
+.section-actions-overflow:not([open]) .section-actions-menu {
+  display: none;
 }
 
 .button,
@@ -308,4 +368,3 @@ select.input-control-addon {
   color: var(--text);
   overflow-wrap: anywhere;
 }
-

@@ -42,7 +42,7 @@ h1 { letter-spacing: -0.01em; }
 .version-update-link:hover { color: #c4b5fd; }
 
 /* Panels & headings */
-.panel { background: var(--panel); border-color: var(--line); }
+.section-head { background: var(--panel); border-color: var(--line); }
 
 .profile-eyebrow,
 .step-label,
@@ -188,4 +188,3 @@ wa-callout.warning-copy { background: rgba(251, 191, 36, 0.08); }
 wa-input::part(form-control-label),
 wa-select::part(form-control-label),
 wa-checkbox::part(label) { color: var(--text); font-weight: 700; font-size: 13px; }
-
