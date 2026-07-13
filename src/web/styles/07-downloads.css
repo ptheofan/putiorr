@@ -73,8 +73,8 @@
 
 .download-select {
   grid-area: select;
-  align-self: start;
-  margin-top: 2px;
+  align-self: center;
+  margin-top: 0;
 }
 
 .download-heading {
