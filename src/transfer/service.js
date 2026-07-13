@@ -237,8 +237,9 @@ export class TransferService {
       if (!profile) continue;
       const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
       if (existing?.removed_at) continue;
+      const categoryProfile = this.findProfileByCategory(existing?.category);
       rows.push(this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
-        profile_id: profile.id,
+        profile_id: categoryProfile?.id ?? existing?.profile_id ?? profile.id,
         hash: existing?.hash,
         category: existing?.category ?? '',
         download_dir: existing?.download_dir ?? '',

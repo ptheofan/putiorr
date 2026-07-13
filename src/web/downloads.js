@@ -84,15 +84,10 @@ export function createDownloadRow(download) {
         <input type="checkbox" data-action="select-download" data-testid="download-select-checkbox">
         <span class="sr-only">Select download</span>
       </label>
-      <div>
+      <div class="download-heading">
         <div class="download-title" data-role="download-title"></div>
-        <div class="download-meta" data-role="download-location"></div>
-        <button class="file-toggle" type="button" data-action="toggle-files">
-          Files
-          <span data-role="file-count"></span>
-        </button>
       </div>
-      <div>
+      <div class="download-status-metric">
         <div class="metric-label">Status</div>
         <strong data-role="download-status"></strong>
         <div class="download-meta" data-role="download-files"></div>
@@ -101,20 +96,28 @@ export function createDownloadRow(download) {
         ${progressLine('Put.io', 0, 'putio-bar', 'putio-progress')}
         ${progressLine('Local', 0, 'local-bar', 'local-progress', 'local')}
       </div>
-      <div>
-        <div class="download-actions">
-          <div class="download-speed-metric">
-            <div class="metric-label">Speed / ETA</div>
-            <strong data-role="download-speed"></strong>
-            <div class="download-meta" data-role="download-eta"></div>
-          </div>
-          <button class="button secondary compact-button start-download-button" type="button" data-action="start-download">
-            <span aria-hidden="true">▶</span>
-            <span data-role="start-label">Start</span>
-          </button>
-          <button class="icon-button danger bucket-delete-button" type="button" data-action="delete-bucket" data-testid="download-delete-bucket" aria-label="Delete bucket" title="Delete bucket">${trashIcon()}</button>
+      <div class="download-actions">
+        <div class="download-speed-metric">
+          <div class="metric-label">Speed / ETA</div>
+          <strong data-role="download-speed"></strong>
+          <div class="download-meta" data-role="download-eta"></div>
         </div>
       </div>
+    </div>
+    <div class="download-footer">
+      <button class="file-toggle" type="button" data-action="toggle-files">
+        Files
+        <span data-role="file-count"></span>
+      </button>
+      <div class="download-meta" data-role="download-location"></div>
+      <button class="button secondary compact-button start-download-button" type="button" data-action="start-download">
+        <span aria-hidden="true">▶</span>
+        <span data-role="start-label">Start</span>
+      </button>
+      <button class="button danger compact-button" type="button" data-action="delete-bucket" data-testid="download-delete-bucket" aria-label="Delete bucket">
+        ${trashIcon()}
+        <span>Delete</span>
+      </button>
     </div>
     <div class="file-panel" data-role="file-panel" hidden>
       <div class="file-panel-head">
