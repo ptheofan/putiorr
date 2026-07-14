@@ -76,18 +76,27 @@ export function topologyEdge(x1, y1, x2, y2, cls = '', related = '') {
 }
 
 function traceTopologyRoute(canvas, node) {
+  traceTopologyKey(canvas, node?.dataset.topologyKey);
+}
+
+function traceTopologyKey(canvas, key) {
   const svg = canvas.querySelector('.topo-svg');
-  const key = node?.dataset.topologyKey;
   if (!svg || !key) return;
-  svg.classList.add('is-tracing');
+  let found = false;
   for (const item of svg.querySelectorAll('[data-topology-related]')) {
-    item.classList.toggle('is-highlighted', item.dataset.topologyRelated.split(' ').includes(key));
+    const highlighted = item.dataset.topologyRelated.split(' ').includes(key);
+    item.classList.toggle('is-highlighted', highlighted);
+    if (highlighted) found = true;
   }
+  if (!found) return clearTopologyTrace(canvas);
+  canvas.dataset.topologyTraceKey = key;
+  svg.classList.add('is-tracing');
 }
 
 function clearTopologyTrace(canvas) {
   const svg = canvas.querySelector('.topo-svg');
   if (!svg) return;
+  delete canvas.dataset.topologyTraceKey;
   svg.classList.remove('is-tracing');
   for (const item of svg.querySelectorAll('.is-highlighted')) item.classList.remove('is-highlighted');
 }
@@ -228,5 +237,6 @@ export function renderTopology() {
 
   const width = (hasDownloads ? DL.x + DL.w : RR.x + RR.w) + 24;
   canvas.innerHTML = `<svg viewBox="0 0 ${width} ${totalHeight}" class="topo-svg" role="img" aria-label="Topology of put.io connection, RR profiles, download profiles and downloads">${edges.join('')}${nodes.join('')}</svg>`;
+  traceTopologyKey(canvas, canvas.dataset.topologyTraceKey);
   bindTopologyTracing(canvas);
 }

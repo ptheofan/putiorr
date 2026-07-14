@@ -13,5 +13,7 @@ test('topology routes downloads through their download profile and exposes route
   assert.match(topology, /data-topology-related/);
   assert.match(topology, /canvas\.onpointerover/);
   assert.match(topology, /canvas\.onfocusin/);
+  assert.match(topology, /canvas\.dataset\.topologyTraceKey = key/);
+  assert.match(topology, /canvas\.innerHTML = [\s\S]*traceTopologyKey\(canvas, canvas\.dataset\.topologyTraceKey\)/);
   assert.match(styles, /\.topo-svg\.is-tracing/);
 });
