@@ -1260,12 +1260,16 @@ test('unowned generic RPC endpoint rejects ambiguous torrent creation', async (t
       headers: {
         'Content-Type': 'application/json',
         'X-Transmission-Session-Id': sessionId,
+        Authorization: 'Basic c29uYXJyOnNlY3JldA==',
+        Cookie: 'session=secret',
+        'User-Agent': 'Sonarr/4.0',
       },
       body: JSON.stringify({
         method: 'torrent-add',
         arguments: {
           filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
           'download-dir': path.join(harness.config.targetDir, 'sonarr'),
+          labels: ['sonarr'],
         },
       }),
     });
@@ -1282,6 +1286,18 @@ test('unowned generic RPC endpoint rejects ambiguous torrent creation', async (t
   assert.equal(errorLog.meta.requestMethod, 'POST');
   assert.equal(errorLog.meta.requestUrl, '/transmission/rpc');
   assert.equal(errorLog.meta.requestPath, '/transmission/rpc');
+  assert.equal(errorLog.meta.requestHeaders.authorization, '[REDACTED]');
+  assert.equal(errorLog.meta.requestHeaders.cookie, '[REDACTED]');
+  assert.equal(errorLog.meta.requestHeaders['user-agent'], 'Sonarr/4.0');
+  assert.equal(errorLog.meta.requestHeaders['x-transmission-session-id'], sessionId);
+  assert.deepEqual(errorLog.meta.requestPayload, {
+    method: 'torrent-add',
+    arguments: {
+      filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+      'download-dir': path.join(harness.config.targetDir, 'sonarr'),
+      labels: ['sonarr'],
+    },
+  });
   assert.equal(errorLog.meta.matchedProfile, null);
   assert.deepEqual(
     errorLog.meta.enabledProfiles.map((profile) => ({ slug: profile.slug, rpcPath: profile.rpcPath })),

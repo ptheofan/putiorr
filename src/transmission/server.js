@@ -67,6 +67,13 @@ function timingSafeEqualString(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+function requestHeadersForLog(headers) {
+  const sensitive = new Set(['authorization', 'cookie', 'proxy-authorization', 'x-api-key', 'x-auth-token']);
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [name, sensitive.has(name) ? '[REDACTED]' : value]),
+  );
+}
+
 function websocketAccept(key) {
   return crypto
     .createHash('sha1')
@@ -405,6 +412,8 @@ export class TransmissionRpcServer {
         requestMethod: req.method,
         requestUrl,
         requestPath,
+        requestHeaders: requestHeadersForLog(req.headers),
+        requestPayload: rpcRequest,
         matchedProfile: currentProfile
           ? {
               id: currentProfile.id,
