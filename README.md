@@ -291,6 +291,12 @@ Each profile maps one *arr app to:
 - a local download folder
 - a Transmission RPC endpoint path
 
+Every enabled profile must have its own RPC endpoint. That request path is the
+authoritative client identity: category and download-directory values only
+choose the staging subfolder and never reroute a request to another profile.
+An unassigned generic endpoint rejects client operations when multiple profiles
+are enabled because ownership would be ambiguous.
+
 Recommended profiles:
 
 | App | put.io folder | Download folder | RPC endpoint |
@@ -310,7 +316,10 @@ Lidarr category: lidarr -> /putiorr/lidarr
 ```
 
 That gives each app a separate staging folder while still using one shared SSD
-mount.
+mount. Profiles may also share the same put.io folder. If two profiles request
+the same put.io transfer, putiorr keeps one remote transfer and independent
+profile associations/local staging copies; removing one does not remove the
+other.
 
 ## Configure Radarr
 

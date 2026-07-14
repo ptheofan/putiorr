@@ -354,9 +354,7 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const rpcProfile = requestPath === '/transmission/rpc'
-      ? undefined
-      : this.service.store.findProfileByRpcPath(requestPath);
+    const rpcProfile = this.service.store.findProfileByRpcPath(requestPath);
     if (rpcProfile || requestPath === '/transmission/rpc') {
       await this.handleRpc(req, res, rpcProfile);
       return;
@@ -980,8 +978,7 @@ export class TransmissionRpcServer {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
-        profile ??= this.service.getDefaultProfile();
-        this.service.requireProfile(profile);
+        profile = this.service.resolveRpcProfile(profile);
         return {
           'download-dir': profile.download_at,
           'rpc-version': 15,

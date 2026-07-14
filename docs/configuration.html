@@ -54,6 +54,14 @@
               The app's download-client category creates the final import
               subfolder under that target.
             </p>
+            <p>
+              Every enabled profile needs a unique RPC endpoint. The request
+              path selects the profile authoritatively; category and download
+              directory only select its staging subfolder and cannot reroute a
+              request to another profile. If two profiles request the same
+              put.io transfer, putiorr keeps one remote transfer with separate
+              profile associations and staging copies.
+            </p>
             <div class="doc-table-wrap">
               <table class="doc-table">
                 <thead>

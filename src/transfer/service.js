@@ -85,6 +85,7 @@ function putioTransferToStoreInput(transfer, fallback = {}) {
       : transfer.estimatedTime,
     error: Boolean(transfer.errorMessage),
     error_string: transfer.errorMessage ?? '',
+    reactivate: fallback.reactivate,
   };
 }
 
@@ -118,7 +119,15 @@ export class TransferService {
   }
 
   getProfileForRpcPath(rpcPath) {
-    return this.store.findProfileByRpcPath(rpcPath) ?? this.getDefaultProfile();
+    return this.store.findProfileByRpcPath(rpcPath);
+  }
+
+  resolveRpcProfile(profile) {
+    if (profile) return this.requireProfile(profile);
+    const profiles = this.store.listProfiles();
+    if (profiles.length === 1) return profiles[0];
+    if (profiles.length === 0) throw new Error('No enabled RR profile is configured');
+    throw new Error('RPC endpoint is ambiguous; use the unique RPC path configured for this RR profile');
   }
 
   findProfileByCategory(category) {
@@ -133,19 +142,16 @@ export class TransferService {
   }
 
   resolveProfileForAdd(args = {}, profile) {
-    const fallbackProfile = this.getDefaultProfile();
+    const currentProfile = this.resolveRpcProfile(profile);
     const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
-    const baseProfile = profile ?? fallbackProfile;
-    const category = extractCategory(baseProfile?.download_at ?? this.config.targetDir, downloadDir);
+    const category = extractCategory(currentProfile.download_at, downloadDir);
     const categoryProfile = this.findProfileByCategory(category);
-    if (profile && categoryProfile && categoryProfile.id !== profile.id) {
-      logger.warn('torrent-add category routed to a different profile than the RPC endpoint', {
-        rpcProfile: profile.slug,
-        category,
-        routedProfile: categoryProfile.slug,
-      });
+    if (categoryProfile && categoryProfile.id !== currentProfile.id) {
+      throw new Error(
+        `Category ${category} conflicts with RPC profile ${currentProfile.name}; use ${categoryProfile.rpc_path} for ${categoryProfile.name}`,
+      );
     }
-    return categoryProfile ?? baseProfile;
+    return currentProfile;
   }
 
   requireProfile(profile) {
@@ -225,7 +231,12 @@ export class TransferService {
       profiles.push(await this.ensureProfileFolder(profile));
     }
 
-    const byFolderId = new Map(profiles.map((profile) => [profile.putio_folder_id, profile]));
+    const byFolderId = new Map();
+    for (const profile of profiles) {
+      const matches = byFolderId.get(profile.putio_folder_id) ?? [];
+      matches.push(profile);
+      byFolderId.set(profile.putio_folder_id, matches);
+    }
     const remoteTransfers = await putio.listTransfers();
     const remoteIds = new Set();
     const remoteHashes = new Set();
@@ -233,21 +244,37 @@ export class TransferService {
     for (const remote of remoteTransfers) {
       if (remote.id != null) remoteIds.add(remote.id);
       if (remote.hash) remoteHashes.add(String(remote.hash).trim().toLowerCase());
-      const profile = byFolderId.get(remote.saveParentId);
-      if (!profile) continue;
-      const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
-      if (existing?.removed_at) continue;
-      const categoryProfile = this.findProfileByCategory(existing?.category);
+      const remoteRow = remote.id ? this.store.findRemoteTransferByPutioId(remote.id) : undefined;
+      const associations = remoteRow
+        ? this.store.listTransfersForRemote(remoteRow.id)
+        : [];
+
+      if (associations.length > 0) {
+        for (const existing of associations) {
+          const updated = this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
+            profile_id: existing.profile_id,
+            hash: existing.hash,
+            category: existing.category,
+            download_dir: existing.download_dir,
+            lifecycle: existing.lifecycle,
+            download_speed: existing.download_speed,
+            eta: existing.eta,
+            source: existing.source ?? remote.magnetUri ?? '',
+            source_type: existing.source_type ?? 'remote',
+            reactivate: !existing.removed_at,
+          }));
+          if (!existing.removed_at) rows.push(updated);
+        }
+        continue;
+      }
+
+      const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
+      if (folderProfiles.length !== 1) continue;
+      const [profile] = folderProfiles;
       rows.push(this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
-        profile_id: categoryProfile?.id ?? existing?.profile_id ?? profile.id,
-        hash: existing?.hash,
-        category: existing?.category ?? '',
-        download_dir: existing?.download_dir ?? '',
-        lifecycle: existing?.lifecycle ?? 'remote',
-        download_speed: existing?.download_speed,
-        eta: existing?.eta,
-        source: existing?.source ?? remote.magnetUri ?? '',
-        source_type: existing?.source_type ?? 'remote',
+        profile_id: profile.id,
+        source: remote.magnetUri ?? '',
+        source_type: 'remote',
       })));
     }
     this.pruneRemoteTransfers(remoteIds, remoteHashes);
@@ -260,6 +287,7 @@ export class TransferService {
       if (transfer.lifecycle !== 'remote' || transfer.putio_transfer_id == null) continue;
       if (isTransferStillListed(transfer, remoteIds, remoteHashes)) continue;
       this.store.deleteTransfer(transfer.id);
+      this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
       logger.info('pruned remote transfer no longer on put.io', {
         id: transfer.id,
         putioTransferId: transfer.putio_transfer_id,
@@ -277,6 +305,7 @@ export class TransferService {
     for (const removed of this.store.listRemovedTransfers()) {
       if (!isTransferStillListed(removed, remoteIds, remoteHashes)) {
         this.store.deleteTransfer(removed.id);
+        this.store.deleteRemoteTransferIfOrphaned(removed.remote_id);
         logger.info('pruned tombstoned transfer no longer on put.io', {
           id: removed.id,
           hash: removed.hash,
@@ -286,6 +315,7 @@ export class TransferService {
   }
 
   async getTorrents(args = {}, profile) {
+    const currentProfile = this.resolveRpcProfile(profile);
     if (this.config.refreshOnRpc) {
       await this.refreshRemoteTransfers();
     }
@@ -296,29 +326,36 @@ export class TransferService {
 
     const fields = Array.isArray(args.fields) ? args.fields : [];
     const rows = requestedIds.length > 0
-      ? requestedIds.map((id) => this.store.findTransfer(id)).filter(Boolean)
-      : this.store.listActiveTransfers({ profileId: profile?.id });
+      ? requestedIds.map((id) => this.store.findTransfer(id, { profileId: currentProfile.id })).filter(Boolean)
+      : this.store.listActiveTransfers({ profileId: currentProfile.id });
 
     const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
     return { torrents };
   }
 
   async removeTorrents(args = {}, profile) {
+    const currentProfile = this.resolveRpcProfile(profile);
     const ids = Array.isArray(args.ids) ? args.ids : [];
     const deleteLocal = Boolean(args['delete-local-data'] ?? args.deleteLocalData);
 
     for (const id of ids) {
-      const transfer = this.store.findTransfer(id);
+      const transfer = this.store.findTransfer(id, { profileId: currentProfile.id });
       if (!transfer) continue;
-      if (profile?.id && transfer.profile_id !== profile.id) continue;
 
-      await this.removeRemoteTransfer(transfer);
+      const hasOtherAssociations = this.store.hasOtherActiveAssociations(transfer);
+      const remoteDeleted = !hasOtherAssociations
+        || this.store.allActiveAssociationsProcessed(transfer.remote_id);
+      if (remoteDeleted) await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
         const transferProfile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
         const targetDir = path.join(transferProfile.download_at, transfer.category ?? '');
         await deleteLocalData(targetDir, transfer.name);
       }
-      this.store.deleteTransfer(transfer.id);
+      if (remoteDeleted && !hasOtherAssociations) {
+        this.store.deleteRemoteTransferRecord(transfer.remote_id);
+      } else {
+        this.store.deleteTransfer(transfer.id);
+      }
       logger.info('torrent removed', {
         id: transfer.id,
         hash: transfer.hash,
@@ -335,7 +372,11 @@ export class TransferService {
       throw new Error('Download bucket not found');
     }
 
-    if (deleteRemote) {
+    const hasOtherAssociations = this.store.hasOtherActiveAssociations(transfer);
+    const remoteDeleted = deleteRemote && (
+      !hasOtherAssociations || this.store.allActiveAssociationsProcessed(transfer.remote_id)
+    );
+    if (remoteDeleted) {
       await this.removeRemoteTransfer(transfer, { throwOnError: true });
     }
 
@@ -345,10 +386,12 @@ export class TransferService {
     if (deleteLocal) {
       await deleteLocalData(targetDir, transfer.name);
     }
-    // When the transfer is gone from put.io it can never be resurrected by a poll,
-    // so the row (and its files via cascade) is hard-deleted. When it is kept on
-    // put.io we must tombstone instead, or refreshRemoteTransfers would re-add it.
-    if (deleteRemote) {
+    // A profile association can be hard-deleted after requested remote cleanup.
+    // If put.io is intentionally kept, retain a tombstone so refresh cannot
+    // recreate the association from the remote transfer.
+    if (remoteDeleted && !hasOtherAssociations) {
+      this.store.deleteRemoteTransferRecord(transfer.remote_id);
+    } else if (deleteRemote) {
       this.store.deleteTransfer(transfer.id);
     } else {
       this.store.markTransferRemoved(transfer.id);
@@ -357,7 +400,7 @@ export class TransferService {
     logger.info('download bucket deleted from dashboard', {
       id: transfer.id,
       hash: transfer.hash,
-      deleteRemote,
+      deleteRemote: remoteDeleted,
       deleteLocal,
       fileCount,
     });
@@ -391,7 +434,11 @@ export class TransferService {
       return this.deleteDownloadBucket(transfer.id, { deleteRemote, deleteLocal });
     }
 
-    if (deleteRemote) {
+    const remoteDeleted = deleteRemote && (
+      !this.store.hasOtherActiveAssociations(transfer)
+      || this.store.allActiveAssociationsProcessed(transfer.remote_id)
+    );
+    if (remoteDeleted) {
       await this.removeRemoteFiles(files, { throwOnError: true });
     }
 
@@ -400,7 +447,7 @@ export class TransferService {
     // on put.io is tombstoned so the downloader leaves it alone instead of re-fetching.
     this.store.transaction(() => {
       for (const file of files) {
-        if (deleteRemote) {
+        if (remoteDeleted) {
           this.store.deleteTransferFile(file.id);
         } else {
           this.store.markTransferFileDeleted(file.id);
@@ -421,7 +468,7 @@ export class TransferService {
     logger.info('download files deleted from dashboard', {
       id: transfer.id,
       hash: transfer.hash,
-      deleteRemote,
+      deleteRemote: remoteDeleted,
       deleteLocal,
       fileCount: files.length,
     });
@@ -479,6 +526,10 @@ export class TransferService {
   }
 
   async removeRemoteTransfer(transfer, { throwOnError = false } = {}) {
+    if (
+      this.store.hasOtherActiveAssociations(transfer)
+      && !this.store.allActiveAssociationsProcessed(transfer.remote_id)
+    ) return [];
     const errors = [];
     const putio = this.getPutio();
     if (transfer.putio_file_id) {
