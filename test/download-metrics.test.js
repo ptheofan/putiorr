@@ -114,6 +114,31 @@ test('local download progress updates dashboard speed and ETA metrics', async ()
   }
 });
 
+test('put.io refresh exposes the transfer status message on the dashboard', async () => {
+  const harness = await createHarness([{
+    id: 70,
+    fileId: 80,
+    saveParentId: 42,
+    hash: 'putiostatushash',
+    name: 'Waiting Release',
+    status: 'DOWNLOADING',
+    statusMessage: 'Waiting for torrent details from the network...',
+    peers: 2,
+    availability: 11,
+    percentDone: 0,
+  }]);
+  try {
+    await harness.service.refreshRemoteTransfers();
+
+    const [download] = harness.service.listDownloads();
+    assert.equal(download.putioStatusMessage, 'Waiting for torrent details from the network...');
+    assert.equal(download.putioPeers, 2);
+    assert.equal(download.putioAvailability, 11);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('dashboard reports multi-file progress details', async () => {
   const harness = await createHarness();
   try {

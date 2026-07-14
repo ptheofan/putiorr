@@ -227,6 +227,9 @@ export class StateStore {
         download_dir TEXT NOT NULL DEFAULT '',
         lifecycle TEXT NOT NULL DEFAULT 'remote',
         putio_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+        putio_status_message TEXT NOT NULL DEFAULT '',
+        putio_peers INTEGER NOT NULL DEFAULT 0,
+        putio_availability INTEGER NOT NULL DEFAULT 0,
         percent_done INTEGER NOT NULL DEFAULT 0,
         completion_percent INTEGER NOT NULL DEFAULT 0,
         total_size INTEGER NOT NULL DEFAULT 0,
@@ -322,6 +325,9 @@ export class StateStore {
     this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
     this.ensureColumn('transfers', 'completion_percent', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('transfers', 'putio_status_message', "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn('transfers', 'putio_peers', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('transfers', 'putio_availability', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     this.migrateTransferAssociations();
     this.migrateMagnetTransferHashes();
@@ -739,11 +745,12 @@ export class StateStore {
         INSERT INTO transfers (
           profile_id, putio_transfer_id, putio_file_id, save_parent_id, hash, name, source,
           source_type, category, download_dir, lifecycle, putio_status,
-          percent_done, completion_percent, total_size, downloaded_ever, uploaded_ever,
+          putio_status_message, putio_peers, putio_availability, percent_done, completion_percent,
+          total_size, downloaded_ever, uploaded_ever,
           download_speed, upload_speed, eta, error, error_string,
           created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.profile_id ?? null,
         input.putio_transfer_id ?? null,
@@ -757,6 +764,9 @@ export class StateStore {
         input.download_dir ?? '',
         input.lifecycle ?? 'remote',
         input.putio_status ?? 'UNKNOWN',
+        input.putio_status_message ?? '',
+        input.putio_peers ?? 0,
+        input.putio_availability ?? 0,
         input.percent_done ?? 0,
         input.completion_percent ?? 0,
         input.total_size ?? input.size ?? 0,
@@ -780,6 +790,9 @@ export class StateStore {
         source: input.source ?? remote.source,
         source_type: input.source_type ?? remote.source_type,
         putio_status: input.putio_status ?? remote.putio_status,
+        putio_status_message: input.putio_status_message ?? remote.putio_status_message,
+        putio_peers: input.putio_peers ?? remote.putio_peers,
+        putio_availability: input.putio_availability ?? remote.putio_availability,
         percent_done: input.percent_done ?? remote.percent_done,
         completion_percent: input.completion_percent ?? remote.completion_percent,
         total_size: input.total_size ?? input.size ?? remote.total_size,
@@ -789,8 +802,9 @@ export class StateStore {
       this.db.prepare(`
         UPDATE transfers
         SET putio_transfer_id = ?, putio_file_id = ?, save_parent_id = ?, name = ?,
-            source = ?, source_type = ?, putio_status = ?, percent_done = ?,
-            completion_percent = ?, total_size = ?, uploaded_ever = ?, upload_speed = ?,
+            source = ?, source_type = ?, putio_status = ?, putio_status_message = ?,
+            putio_peers = ?, putio_availability = ?, percent_done = ?, completion_percent = ?,
+            total_size = ?, uploaded_ever = ?, upload_speed = ?,
             updated_at = ?
         WHERE id = ?
       `).run(
@@ -801,6 +815,9 @@ export class StateStore {
         merged.source,
         merged.source_type,
         merged.putio_status,
+        merged.putio_status_message,
+        merged.putio_peers,
+        merged.putio_availability,
         merged.percent_done,
         merged.completion_percent,
         merged.total_size,
@@ -873,6 +890,9 @@ export class StateStore {
       'save_parent_id',
       'name',
       'putio_status',
+      'putio_status_message',
+      'putio_peers',
+      'putio_availability',
       'percent_done',
       'completion_percent',
       'uploaded_ever',
@@ -926,6 +946,9 @@ export class StateStore {
         a.download_dir,
         a.lifecycle,
         r.putio_status,
+        r.putio_status_message,
+        r.putio_peers,
+        r.putio_availability,
         r.percent_done,
         r.completion_percent,
         COALESCE(a.total_size, r.total_size) AS total_size,
