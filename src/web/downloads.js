@@ -12,7 +12,6 @@ import {
 import {
   clampPercent,
   formatBytes,
-  formatPutioStatusDetails,
   formatSpeed,
   formatEta,
   statusLabel,
@@ -208,7 +207,7 @@ export function updateDownloadRow(row, download) {
   setText(startButton.querySelector('[data-role="start-label"]'), starting ? 'Starting' : 'Start');
   setProgressValue(row, 'putio-bar', 'putio-progress', putioProgress);
   setProgressValue(row, 'local-bar', 'local-progress', localProgress);
-  const putioStatusMessage = formatPutioStatusDetails(download);
+  const putioStatusMessage = putioStatusDetails(download);
   const putioStatus = row.querySelector('[data-role="putio-status-message"]');
   setText(putioStatus, putioStatusMessage);
   setHidden(putioStatus, !putioStatusMessage);
@@ -756,4 +755,14 @@ export function downloadStatusText(download) {
     return `${phase} · ${clampPercent(download.putioCompletion)}%`;
   }
   return `${phase} · ${clampPercent(download.putioProgress)}%`;
+}
+
+export function putioStatusDetails(download) {
+  const message = String(download.putioStatusMessage ?? '').trim();
+  if (message) return message;
+  if (download.lifecycle !== 'remote' || download.putioStatus !== 'DOWNLOADING') return '';
+
+  const peers = Math.max(0, Number(download.putioPeers ?? 0));
+  const peerText = peers > 0 ? `${peers} peer${peers === 1 ? '' : 's'}` : 'No peers';
+  return `${peerText} | availability: ${clampPercent(download.putioAvailability)}%`;
 }

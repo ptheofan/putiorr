@@ -781,9 +781,6 @@ export class TransferService {
         putioStatusMessage: row.putio_status_message,
         putioPeers: row.putio_peers,
         putioAvailability: row.putio_availability,
-        putioDownloaded: row.putio_downloaded,
-        putioUploaded: row.putio_uploaded,
-        putioTotalSize: row.putio_total_size,
         putioProgress: Math.max(0, Math.min(100, Number(row.percent_done ?? 0))),
         putioCompletion: Math.max(0, Math.min(100, Number(row.completion_percent ?? 0))),
         localProgress: Number(stats.total_size ?? 0) > 0

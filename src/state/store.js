@@ -796,7 +796,6 @@ export class StateStore {
         percent_done: input.percent_done ?? remote.percent_done,
         completion_percent: input.completion_percent ?? remote.completion_percent,
         total_size: input.total_size ?? input.size ?? remote.total_size,
-        downloaded_ever: input.downloaded_ever ?? remote.downloaded_ever,
         uploaded_ever: input.uploaded_ever ?? remote.uploaded_ever,
         upload_speed: input.upload_speed ?? remote.upload_speed,
       };
@@ -805,7 +804,7 @@ export class StateStore {
         SET putio_transfer_id = ?, putio_file_id = ?, save_parent_id = ?, name = ?,
             source = ?, source_type = ?, putio_status = ?, putio_status_message = ?,
             putio_peers = ?, putio_availability = ?, percent_done = ?, completion_percent = ?,
-            total_size = ?, downloaded_ever = ?, uploaded_ever = ?, upload_speed = ?,
+            total_size = ?, uploaded_ever = ?, upload_speed = ?,
             updated_at = ?
         WHERE id = ?
       `).run(
@@ -822,7 +821,6 @@ export class StateStore {
         merged.percent_done,
         merged.completion_percent,
         merged.total_size,
-        merged.downloaded_ever,
         merged.uploaded_ever,
         merged.upload_speed,
         timestamp,
@@ -953,9 +951,6 @@ export class StateStore {
         r.putio_availability,
         r.percent_done,
         r.completion_percent,
-        r.total_size AS putio_total_size,
-        r.downloaded_ever AS putio_downloaded,
-        r.uploaded_ever AS putio_uploaded,
         COALESCE(a.total_size, r.total_size) AS total_size,
         a.downloaded_ever,
         r.uploaded_ever,

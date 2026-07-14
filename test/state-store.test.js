@@ -76,7 +76,6 @@ test('createOrUpdateTransfer persists put.io status details across updates', () 
       putio_status_message: 'Waiting for torrent details from the network...',
       putio_peers: 0,
       putio_availability: 0,
-      downloaded_ever: 0,
     });
     assert.equal(created.putio_status_message, 'Waiting for torrent details from the network...');
 
@@ -86,13 +85,11 @@ test('createOrUpdateTransfer persists put.io status details across updates', () 
       putio_status_message: '',
       putio_peers: 2,
       putio_availability: 11,
-      downloaded_ever: 108_480_000,
     });
     assert.equal(updated.id, created.id);
     assert.equal(updated.putio_status_message, '');
     assert.equal(updated.putio_peers, 2);
     assert.equal(updated.putio_availability, 11);
-    assert.equal(updated.putio_downloaded, 108_480_000);
   } finally {
     store.close();
   }

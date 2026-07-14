@@ -125,9 +125,6 @@ test('put.io refresh exposes the transfer status message on the dashboard', asyn
     statusMessage: 'Waiting for torrent details from the network...',
     peers: 2,
     availability: 11,
-    downloaded: 108_480_000,
-    uploaded: 0,
-    size: 931_980_000,
     percentDone: 0,
   }]);
   try {
@@ -137,9 +134,6 @@ test('put.io refresh exposes the transfer status message on the dashboard', asyn
     assert.equal(download.putioStatusMessage, 'Waiting for torrent details from the network...');
     assert.equal(download.putioPeers, 2);
     assert.equal(download.putioAvailability, 11);
-    assert.equal(download.putioDownloaded, 108_480_000);
-    assert.equal(download.putioUploaded, 0);
-    assert.equal(download.putioTotalSize, 931_980_000);
   } finally {
     harness.store.close();
   }
