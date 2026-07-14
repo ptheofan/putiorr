@@ -95,6 +95,7 @@ export function createDownloadRow(download) {
       <div class="progress-group">
         ${progressLine('Put.io', 0, 'putio-bar', 'putio-progress')}
         ${progressLine('Local', 0, 'local-bar', 'local-progress', 'local')}
+        <div class="putio-status-message" data-role="putio-status-message" hidden></div>
       </div>
       <div class="download-actions">
         <div class="download-speed-metric">
@@ -206,6 +207,10 @@ export function updateDownloadRow(row, download) {
   setText(startButton.querySelector('[data-role="start-label"]'), starting ? 'Starting' : 'Start');
   setProgressValue(row, 'putio-bar', 'putio-progress', putioProgress);
   setProgressValue(row, 'local-bar', 'local-progress', localProgress);
+  const putioStatusMessage = String(download.putioStatusMessage ?? '').trim();
+  const putioStatus = row.querySelector('[data-role="putio-status-message"]');
+  setText(putioStatus, putioStatusMessage ? `Put.io status: ${putioStatusMessage}` : '');
+  setHidden(putioStatus, !putioStatusMessage);
   populateFilePanel(row, download, fileItems);
 }
 

@@ -79,6 +79,7 @@ function putioTransferToStoreInput(transfer, fallback = {}) {
     download_dir: fallback.download_dir,
     lifecycle,
     putio_status: transfer.status,
+    putio_status_message: transfer.statusMessage,
     percent_done: transfer.percentDone,
     completion_percent: transfer.completionPercent,
     total_size: transfer.size,
@@ -775,6 +776,7 @@ export class TransferService {
         downloadAt: profile ? path.join(profile.download_at, row.category ?? '') : '',
         lifecycle: row.lifecycle,
         putioStatus: row.putio_status,
+        putioStatusMessage: row.putio_status_message,
         putioProgress: Math.max(0, Math.min(100, Number(row.percent_done ?? 0))),
         putioCompletion: Math.max(0, Math.min(100, Number(row.completion_percent ?? 0))),
         localProgress: Number(stats.total_size ?? 0) > 0

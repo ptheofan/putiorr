@@ -65,6 +65,30 @@ test('createOrUpdateTransfer persists put.io completion_percent across updates',
   }
 });
 
+test('createOrUpdateTransfer persists put.io status messages across updates', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const created = store.createOrUpdateTransfer({
+      putio_transfer_id: 12,
+      hash: 'statusmessagehash',
+      name: 'Waiting Transfer',
+      putio_status: 'DOWNLOADING',
+      putio_status_message: 'Waiting for torrent details from the network...',
+    });
+    assert.equal(created.putio_status_message, 'Waiting for torrent details from the network...');
+
+    const updated = store.createOrUpdateTransfer({
+      putio_transfer_id: 12,
+      hash: 'statusmessagehash',
+      putio_status_message: 'No peers',
+    });
+    assert.equal(updated.id, created.id);
+    assert.equal(updated.putio_status_message, 'No peers');
+  } finally {
+    store.close();
+  }
+});
+
 test('profile rows migrate local_path to downloadAt', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
   const dbPath = path.join(root, 'state.sqlite');

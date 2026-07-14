@@ -277,6 +277,13 @@
   gap: 9px;
 }
 
+.putio-status-message {
+  margin-left: 54px;
+  color: var(--muted);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
 .download-footer {
   display: flex;
   align-items: center;
