@@ -55,14 +55,31 @@
   stroke-width: 1.5;
 }
 
+.topo-node-group {
+  cursor: default;
+  outline: none;
+}
+
 .topo-node--putio { fill: var(--accent-quiet); stroke: var(--accent); }
 .topo-node--putio-off { stroke: var(--amber); }
 .topo-node--rr { stroke: var(--accent); }
 .topo-node--rr-off { stroke: var(--amber); }
-.topo-node--dprofile { stroke: var(--line); }
 .topo-node--download { stroke: color-mix(in srgb, var(--accent) 60%, var(--line)); }
 .topo-node--download-active { stroke: var(--ok); }
 .topo-node--download-error { stroke: var(--danger); }
+
+.topo-profile-pill {
+  fill: var(--surface);
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.topo-profile-pill-text {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-anchor: middle;
+}
 
 .topo-eyebrow {
   fill: var(--muted);
@@ -93,3 +110,26 @@
 .topo-edge--muted { stroke: var(--line); opacity: 1; }
 .topo-edge--dprofile { stroke: var(--line); opacity: 1; }
 .topo-edge--download { stroke: color-mix(in srgb, var(--accent) 55%, var(--line)); opacity: 0.8; }
+
+.topo-svg [data-topology-related] {
+  transition: opacity 120ms ease;
+}
+
+.topo-svg.is-tracing [data-topology-related] {
+  opacity: 0.12;
+}
+
+.topo-svg.is-tracing [data-topology-related].is-highlighted {
+  opacity: 1;
+}
+
+.topo-node-group.is-highlighted .topo-node,
+.topo-node-group.is-highlighted .topo-profile-pill,
+.topo-node-group:focus-visible .topo-node,
+.topo-node-group:focus-visible .topo-profile-pill {
+  stroke-width: 2.5;
+}
+
+.topo-edge.is-highlighted {
+  stroke-width: 3;
+}
