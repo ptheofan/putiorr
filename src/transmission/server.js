@@ -398,7 +398,29 @@ export class TransmissionRpcServer {
       // human-readable string (with HTTP 200). Transmission clients such as
       // Sonarr/Radarr/Prowlarr surface `result`, so carrying the real message
       // here makes the actual reason visible instead of a generic "error".
-      logger.error('rpc request failed', { method: rpcRequest.method, error: error.message });
+      const requestUrl = req.url ?? '/';
+      const requestPath = new URL(requestUrl, `http://${req.headers.host ?? '127.0.0.1'}`).pathname;
+      logger.error('rpc request failed', {
+        method: rpcRequest.method,
+        requestMethod: req.method,
+        requestUrl,
+        requestPath,
+        matchedProfile: currentProfile
+          ? {
+              id: currentProfile.id,
+              name: currentProfile.name,
+              slug: currentProfile.slug,
+              rpcPath: currentProfile.rpc_path,
+            }
+          : null,
+        enabledProfiles: this.service.store.listProfiles().map((enabledProfile) => ({
+          id: enabledProfile.id,
+          name: enabledProfile.name,
+          slug: enabledProfile.slug,
+          rpcPath: enabledProfile.rpc_path,
+        })),
+        error: error.message,
+      });
       jsonResponse(res, 200, {
         ...(rpcRequest.tag !== undefined ? { tag: rpcRequest.tag } : {}),
         result: error.message || 'error',

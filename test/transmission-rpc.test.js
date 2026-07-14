@@ -1250,25 +1250,46 @@ test('unowned generic RPC endpoint rejects ambiguous torrent creation', async (t
 
   const first = await fetch(harness.url, { method: 'POST' });
   const sessionId = first.headers.get('x-transmission-session-id');
-  const addResponse = await fetch(harness.url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Transmission-Session-Id': sessionId,
-    },
-    body: JSON.stringify({
-      method: 'torrent-add',
-      arguments: {
-        filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
-        'download-dir': path.join(harness.config.targetDir, 'sonarr'),
+  const errorLines = [];
+  const originalConsoleError = console.error;
+  console.error = (line) => errorLines.push(line);
+  let addResponse;
+  try {
+    addResponse = await fetch(harness.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Transmission-Session-Id': sessionId,
       },
-    }),
-  });
+      body: JSON.stringify({
+        method: 'torrent-add',
+        arguments: {
+          filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+          'download-dir': path.join(harness.config.targetDir, 'sonarr'),
+        },
+      }),
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
 
   assert.equal(addResponse.status, 200);
   const body = await addResponse.json();
   assert.match(body.result, /RPC endpoint is ambiguous/);
   assert.equal(harness.store.findTransferByHash('ABCDEF'), undefined);
+  const errorLog = errorLines.map((line) => JSON.parse(line))
+    .find((entry) => entry.message === 'rpc request failed');
+  assert.equal(errorLog.meta.requestMethod, 'POST');
+  assert.equal(errorLog.meta.requestUrl, '/transmission/rpc');
+  assert.equal(errorLog.meta.requestPath, '/transmission/rpc');
+  assert.equal(errorLog.meta.matchedProfile, null);
+  assert.deepEqual(
+    errorLog.meta.enabledProfiles.map((profile) => ({ slug: profile.slug, rpcPath: profile.rpcPath })),
+    [
+      { slug: 'default', rpcPath: '/default/transmission/rpc' },
+      { slug: 'sonarr', rpcPath: '/sonarr/transmission/rpc' },
+    ],
+  );
 });
 
 test('put.io refresh preserves the RPC-selected profile association', async (t) => {
