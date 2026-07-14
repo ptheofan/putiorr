@@ -9,6 +9,14 @@ function firstDefined(...values) {
   return values.find((value) => value !== undefined);
 }
 
+function normalizedIdentity(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function firstCategorySegment(category) {
+  return String(category ?? '').split(/[\\/]/).filter(Boolean)[0] ?? '';
+}
+
 function generatedHash() {
   return crypto.randomBytes(20).toString('hex');
 }
@@ -130,28 +138,109 @@ export class TransferService {
     throw new Error('RPC endpoint is ambiguous; use the unique RPC path configured for this RR profile');
   }
 
-  findProfileByCategory(category) {
-    const [firstSegment] = String(category ?? '').split(/[\\/]/).filter(Boolean);
-    const normalized = firstSegment?.toLowerCase();
-    if (!normalized) return undefined;
-    return this.store.listProfiles().find((profile) => (
-      profile.slug?.toLowerCase() === normalized
-      || profile.type?.toLowerCase() === normalized
-      || profile.name?.toLowerCase() === normalized
-    ));
+  profileMatchesCategory(profile, category) {
+    const normalized = normalizedIdentity(firstCategorySegment(category));
+    if (!normalized) return false;
+    return [profile.slug, profile.type, profile.name]
+      .some((value) => normalizedIdentity(value) === normalized);
   }
 
-  resolveProfileForAdd(args = {}, profile) {
-    const currentProfile = this.resolveRpcProfile(profile);
+  findProfilesByCategory(category) {
+    return this.store.listProfiles().filter((profile) => this.profileMatchesCategory(profile, category));
+  }
+
+  findProfileByCategory(category) {
+    const matches = this.findProfilesByCategory(category);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  findProfileByUserAgent(userAgent) {
+    const client = normalizedIdentity(String(userAgent ?? '').split('/')[0]);
+    if (!client) return undefined;
+    const matches = this.store.listProfiles().filter((profile) => {
+      const identities = [profile.slug, profile.name];
+      if (profile.type !== 'custom') identities.push(profile.type);
+      return identities.some((value) => {
+        const identity = normalizedIdentity(value);
+        return identity && (client === identity || (identity.length >= 4 && client.startsWith(identity)));
+      });
+    });
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
+  validateCategoryLabels(args, category) {
+    const labels = Array.isArray(args.labels)
+      ? args.labels.map((label) => normalizedIdentity(label)).filter(Boolean)
+      : [];
+    const expected = normalizedIdentity(firstCategorySegment(category));
+    if (labels.length > 0 && expected && !labels.includes(expected)) {
+      throw new Error(`Labels ${labels.join(', ')} conflict with download-dir category ${category}`);
+    }
+  }
+
+  resolveProfileForAdd(args = {}, profile, clientProfile) {
     const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
-    const category = extractCategory(currentProfile.download_at, downloadDir);
-    const categoryProfile = this.findProfileByCategory(category);
-    if (categoryProfile && categoryProfile.id !== currentProfile.id) {
+    if (profile) {
+      const currentProfile = this.resolveRpcProfile(profile);
+      const category = extractCategory(currentProfile.download_at, downloadDir);
+      this.validateCategoryLabels(args, category);
+      const categoryMatches = this.findProfilesByCategory(category);
+      const categoryProfile = categoryMatches.length === 1 ? categoryMatches[0] : undefined;
+      if (categoryProfile && categoryProfile.id !== currentProfile.id) {
+        throw new Error(
+          `Category ${category} conflicts with RPC profile ${currentProfile.name}; use ${categoryProfile.rpc_path} for ${categoryProfile.name}`,
+        );
+      }
+      return currentProfile;
+    }
+
+    const matches = [];
+    for (const candidate of this.store.listProfiles()) {
+      try {
+        const category = extractCategory(candidate.download_at, downloadDir);
+        if (this.profileMatchesCategory(candidate, category)) matches.push({ profile: candidate, category });
+      } catch {
+        // The generic endpoint may serve profiles with different download roots.
+      }
+    }
+    const profileIds = new Set(matches.map((match) => match.profile.id));
+    if (profileIds.size > 1) {
+      throw new Error(`download-dir ${downloadDir} matches multiple enabled RR profiles`);
+    }
+
+    const match = matches[0];
+    if (match) {
+      this.validateCategoryLabels(args, match.category);
+      if (clientProfile && clientProfile.id !== match.profile.id) {
+        throw new Error(
+          `Category ${match.category} conflicts with ${clientProfile.name} identified by the RPC client`,
+        );
+      }
+      return match.profile;
+    }
+
+    // Prowlarr may replace its default category with a per-release mapped category.
+    if (clientProfile?.type === 'prowlarr') {
+      const category = extractCategory(clientProfile.download_at, downloadDir);
+      this.validateCategoryLabels(args, category);
+      return clientProfile;
+    }
+
+    const category = (() => {
+      try {
+        return extractCategory(this.config.targetDir, downloadDir);
+      } catch {
+        return '';
+      }
+    })();
+    if (clientProfile) {
       throw new Error(
-        `Category ${category} conflicts with RPC profile ${currentProfile.name}; use ${categoryProfile.rpc_path} for ${categoryProfile.name}`,
+        `download-dir category ${category || '(none)'} does not match RPC client ${clientProfile.name}`,
       );
     }
-    return currentProfile;
+    throw new Error(
+      `No enabled RR profile matches download-dir category ${category || '(none)'}`,
+    );
   }
 
   requireProfile(profile) {
@@ -168,8 +257,10 @@ export class TransferService {
     return this.store.updateProfile(current.id, { putio_folder_id: folderId });
   }
 
-  async addTorrent(args = {}, profile) {
-    const currentProfile = await this.ensureProfileFolder(this.resolveProfileForAdd(args, profile));
+  async addTorrent(args = {}, profile, clientProfile) {
+    const currentProfile = await this.ensureProfileFolder(
+      this.resolveProfileForAdd(args, profile, clientProfile),
+    );
     const filename = firstDefined(args.filename, args.url);
     const magnetLink = firstDefined(args.magnetLink, args['magnet-link']);
     const metainfo = args.metainfo;

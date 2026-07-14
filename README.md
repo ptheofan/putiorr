@@ -291,12 +291,12 @@ Each profile maps one *arr app to:
 - a local download folder
 - a Transmission RPC endpoint path
 
-An explicit RPC endpoint is the authoritative client identity for operations
-that create, change, or remove a download. The generic `/transmission/rpc`
-endpoint accepts read-only `session-get` and `torrent-get` discovery across
-profiles, but rejects an ambiguous download operation. Category and
-download-directory values only choose the staging subfolder and never reroute
-a request to another profile.
+Existing *arr clients may keep Transmission's default `/transmission/rpc`
+endpoint. On that shared endpoint, putiorr links `torrent-add` to the profile
+whose unique category appears in `download-dir` and verifies the matching label
+when the client sends one. The app User-Agent scopes later listing and removal
+operations to that persisted profile association. A profile-specific endpoint,
+when configured, remains authoritative and rejects a conflicting category.
 
 Recommended profiles:
 
@@ -307,9 +307,10 @@ Recommended profiles:
 | Lidarr | `putiorr` | `/putiorr` | `/lidarr/transmission/rpc` |
 | Readarr | `putiorr` | `/putiorr` | `/readarr/transmission/rpc` |
 
-**URL Base is an advanced Transmission setting.** On the Sonarr, Radarr,
-Lidarr, or Prowlarr Download Clients page, enable **Show Advanced** before
-editing the client to reveal it.
+No URL Base change is required for one profile per *arr app with unique
+categories. URL Base is an advanced setting that can optionally select the
+profile-specific endpoint; this is required when multiple profiles represent
+the same app identity, such as two Sonarr instances.
 
 The *arr download client category creates the final staging subfolder. For
 example:

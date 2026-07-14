@@ -361,7 +361,10 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const rpcProfile = this.service.store.findProfileByRpcPath(requestPath);
+    const profiles = this.service.store.listProfiles();
+    const rpcProfile = requestPath === '/transmission/rpc' && profiles.length > 1
+      ? undefined
+      : this.service.store.findProfileByRpcPath(requestPath);
     if (rpcProfile || requestPath === '/transmission/rpc') {
       await this.handleRpc(req, res, rpcProfile);
       return;
@@ -385,6 +388,9 @@ export class TransmissionRpcServer {
     }
 
     const currentProfile = profile ? this.service.requireProfile(profile) : undefined;
+    const clientProfile = currentProfile
+      ? undefined
+      : this.service.findProfileByUserAgent(req.headers['user-agent']);
 
     let rpcRequest;
     if (req.method === 'GET') {
@@ -399,7 +405,12 @@ export class TransmissionRpcServer {
 
     let result;
     try {
-      result = await this.dispatch(rpcRequest.method, rpcRequest.arguments ?? {}, currentProfile);
+      result = await this.dispatch(
+        rpcRequest.method,
+        rpcRequest.arguments ?? {},
+        currentProfile,
+        clientProfile,
+      );
     } catch (error) {
       // Transmission RPC reports failures in the `result` field as a
       // human-readable string (with HTTP 200). Transmission clients such as
@@ -414,12 +425,12 @@ export class TransmissionRpcServer {
         requestPath,
         requestHeaders: requestHeadersForLog(req.headers),
         requestPayload: rpcRequest,
-        matchedProfile: currentProfile
+        matchedProfile: (currentProfile ?? clientProfile)
           ? {
-              id: currentProfile.id,
-              name: currentProfile.name,
-              slug: currentProfile.slug,
-              rpcPath: currentProfile.rpc_path,
+              id: (currentProfile ?? clientProfile).id,
+              name: (currentProfile ?? clientProfile).name,
+              slug: (currentProfile ?? clientProfile).slug,
+              rpcPath: (currentProfile ?? clientProfile).rpc_path,
             }
           : null,
         enabledProfiles: this.service.store.listProfiles().map((enabledProfile) => ({
@@ -1005,10 +1016,11 @@ export class TransmissionRpcServer {
       && timingSafeEqualString(password, this.config.rpcPassword);
   }
 
-  async dispatch(method, args, profile) {
+  async dispatch(method, args, profile, clientProfile) {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
+        profile = profile ?? clientProfile;
         profile = profile ? this.service.requireProfile(profile) : undefined;
         return {
           'download-dir': profile?.download_at ?? this.config.targetDir,
@@ -1017,14 +1029,14 @@ export class TransmissionRpcServer {
           version: '2.94',
         };
       case 'torrent-add':
-        return this.service.addTorrent(args, profile);
+        return this.service.addTorrent(args, profile, clientProfile);
       case 'torrent-get':
-        return this.service.getTorrents(args, profile);
+        return this.service.getTorrents(args, profile ?? clientProfile);
       case 'torrent-set':
       case 'queue-move-top':
         return {};
       case 'torrent-remove':
-        return this.service.removeTorrents(args, profile);
+        return this.service.removeTorrents(args, profile ?? clientProfile);
       default:
         logger.debug('unsupported rpc method', { method });
         return {};
@@ -1158,10 +1170,6 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (output.rpc_path && (output.rpc_path.startsWith('/api/') || output.rpc_path === '/')) {
     throw new Error('RPC path cannot conflict with the web UI or API');
   }
-  if (output.rpc_path && !output.rpc_path.endsWith('/rpc')) {
-    throw new Error('RPC path must end with /rpc; use the preceding path as the *arr URL Base');
-  }
-
   return output;
 }
 
