@@ -291,6 +291,13 @@ Each profile maps one *arr app to:
 - a local download folder
 - a Transmission RPC endpoint path
 
+Existing *arr clients may keep Transmission's default `/transmission/rpc`
+endpoint. On that shared endpoint, putiorr links `torrent-add` to the profile
+whose unique category appears in `download-dir` and verifies the matching label
+when the client sends one. The app User-Agent scopes later listing and removal
+operations to that persisted profile association. A profile-specific endpoint,
+when configured, remains authoritative and rejects a conflicting category.
+
 Recommended profiles:
 
 | App | put.io folder | Download folder | RPC endpoint |
@@ -299,6 +306,11 @@ Recommended profiles:
 | Sonarr | `putiorr` | `/putiorr` | `/sonarr/transmission/rpc` |
 | Lidarr | `putiorr` | `/putiorr` | `/lidarr/transmission/rpc` |
 | Readarr | `putiorr` | `/putiorr` | `/readarr/transmission/rpc` |
+
+No URL Base change is required for one profile per *arr app with unique
+categories. URL Base is an advanced setting that can optionally select the
+profile-specific endpoint; this is required when multiple profiles represent
+the same app identity, such as two Sonarr instances.
 
 The *arr download client category creates the final staging subfolder. For
 example:
@@ -310,7 +322,10 @@ Lidarr category: lidarr -> /putiorr/lidarr
 ```
 
 That gives each app a separate staging folder while still using one shared SSD
-mount.
+mount. Profiles may also share the same put.io folder. If two profiles request
+the same put.io transfer, putiorr keeps one remote transfer and independent
+profile associations/local staging copies; removing one does not remove the
+other.
 
 ## Configure Radarr
 

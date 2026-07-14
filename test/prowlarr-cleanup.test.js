@@ -257,7 +257,7 @@ test('poll removes an already processed prowlarr download that still has local f
   }
 });
 
-test('processed auto-remove uses category profile when the stored profile is wrong', async () => {
+test('processed auto-remove uses the stored RPC profile, not category inference', async () => {
   const harness = await createHarness();
   try {
     const prowlarr = harness.store.createProfile({
@@ -294,9 +294,9 @@ test('processed auto-remove uses category profile when the stored profile is wro
 
     await manager.removeProcessedAutoRemoveTransfers();
 
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
-    assert.deepEqual(harness.putio.deletedFiles, [20]);
-    assert.deepEqual(harness.putio.deletedTransfers, [10]);
+    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.deepEqual(harness.putio.deletedTransfers, []);
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
     assert.equal(prowlarr.auto_remove_completed, true);
   } finally {

@@ -54,6 +54,16 @@
               The app's download-client category creates the final import
               subfolder under that target.
             </p>
+            <p>
+              Every enabled profile keeps a unique RPC endpoint, but existing
+              apps may continue using the shared <code>/transmission/rpc</code>
+              endpoint. On that shared endpoint, the category in
+              <code>download-dir</code> selects the profile for a new transfer;
+              labels are checked when supplied, and the app User-Agent scopes
+              later listing and removal operations. If two profiles request the
+              same put.io transfer, putiorr keeps one remote transfer with
+              separate profile associations and staging copies.
+            </p>
             <div class="doc-table-wrap">
               <table class="doc-table">
                 <thead>

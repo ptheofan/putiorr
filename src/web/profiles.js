@@ -100,11 +100,12 @@ export const WIZARD_HELP = {
   wizardRpcPath: {
     title: 'RPC endpoint path',
     paragraphs: [
-      'This is the path putiorr exposes for Transmission RPC. In the *arr download client, use everything before /rpc as URL Base.',
-      'Keep each app on a unique endpoint path. That is what lets putiorr know which app profile and category should handle the request.',
+      'This is the unique path putiorr reserves for this profile. Existing *arr clients may keep the default /transmission URL Base; putiorr then links new downloads by their category folder.',
+      'When a client uses this profile-specific endpoint, the request path selects the profile directly.',
     ],
     tips: [
-      'For Sonarr, /sonarr/transmission/rpc means URL Base is /sonarr/transmission.',
+      'No *arr change is required when its Category matches this profile name, such as radarr or sonarr.',
+      'To use the profile-specific endpoint instead, choose a path ending in /rpc and set the app URL Base to the preceding path.',
       'Do not point this at an app API path. This must be a Transmission RPC path served by putiorr.',
     ],
     valueLabel: 'Full RPC endpoint',
@@ -389,7 +390,6 @@ export async function saveProfileFromWizard({
     setWizardMessage('Profile name, put.io folder, download folder, and RPC endpoint are required.', 'error');
     return undefined;
   }
-
   if (manageButton) el.saveProfileButton.disabled = true;
   try {
     const savedProfile = id
@@ -540,7 +540,7 @@ export function getClientSettingsText() {
     'Password: blank unless configured',
     `Category: ${settings.category}`,
     `Directory: ${settings.directory}`,
-    `URL Base: ${settings.urlBase}`,
+    `URL Base: ${settings.urlBase} (enable Show Advanced to reveal this field)`,
     `Full RPC endpoint: ${settings.fullEndpoint}`,
   ].join('\n');
 }

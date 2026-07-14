@@ -260,9 +260,14 @@ export class DownloadManager {
       if (hasLocalData) continue;
 
       if (this.service.getPutioToken()) {
-        await this.service.removeRemoteTransfer(transfer);
+        await this.service.deleteDownloadBucket(transfer.id, {
+          deleteRemote: true,
+          deleteLocal: false,
+        });
+      } else {
+        this.store.deleteTransfer(transfer.id);
+        this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
       }
-      this.store.deleteTransfer(transfer.id);
       logger.info('processed transfer pruned after local data disappeared', {
         transferId: transfer.id,
         name: transfer.name,
@@ -282,17 +287,7 @@ export class DownloadManager {
   }
 
   autoRemoveProfileForTransfer(transfer) {
-    const storedProfile = this.store.findProfileById(transfer.profile_id);
-    const categoryProfile = this.service.findProfileByCategory?.(transfer.category);
-    if (categoryProfile && storedProfile && categoryProfile.id !== storedProfile.id) {
-      logger.warn('completed transfer auto-remove resolved by category instead of stored profile', {
-        transferId: transfer.id,
-        storedProfile: storedProfile.slug,
-        category: transfer.category,
-        resolvedProfile: categoryProfile.slug,
-      });
-    }
-    return categoryProfile ?? storedProfile ?? this.service.getDefaultProfile();
+    return this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
   }
 
   async hasLocalTransferData(profile, transfer) {
@@ -749,7 +744,11 @@ export class DownloadManager {
       return;
     }
 
-    if (this.config.cleanupRemoteFiles && transfer.putio_file_id) {
+    if (
+      this.config.cleanupRemoteFiles
+      && transfer.putio_file_id
+      && this.store.allActiveAssociationsProcessed(transfer.remote_id)
+    ) {
       try {
         await this.service.getPutio().deleteFile(transfer.putio_file_id);
       } catch (error) {

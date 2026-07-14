@@ -67,6 +67,13 @@ function timingSafeEqualString(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
+function requestHeadersForLog(headers) {
+  const sensitive = new Set(['authorization', 'cookie', 'proxy-authorization', 'x-api-key', 'x-auth-token']);
+  return Object.fromEntries(
+    Object.entries(headers).map(([name, value]) => [name, sensitive.has(name) ? '[REDACTED]' : value]),
+  );
+}
+
 function websocketAccept(key) {
   return crypto
     .createHash('sha1')
@@ -354,7 +361,8 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const rpcProfile = requestPath === '/transmission/rpc'
+    const profiles = this.service.store.listProfiles();
+    const rpcProfile = requestPath === '/transmission/rpc' && profiles.length > 1
       ? undefined
       : this.service.store.findProfileByRpcPath(requestPath);
     if (rpcProfile || requestPath === '/transmission/rpc') {
@@ -380,6 +388,9 @@ export class TransmissionRpcServer {
     }
 
     const currentProfile = profile ? this.service.requireProfile(profile) : undefined;
+    const clientProfile = currentProfile
+      ? undefined
+      : this.service.findProfileByUserAgent(req.headers['user-agent']);
 
     let rpcRequest;
     if (req.method === 'GET') {
@@ -394,13 +405,42 @@ export class TransmissionRpcServer {
 
     let result;
     try {
-      result = await this.dispatch(rpcRequest.method, rpcRequest.arguments ?? {}, currentProfile);
+      result = await this.dispatch(
+        rpcRequest.method,
+        rpcRequest.arguments ?? {},
+        currentProfile,
+        clientProfile,
+      );
     } catch (error) {
       // Transmission RPC reports failures in the `result` field as a
       // human-readable string (with HTTP 200). Transmission clients such as
       // Sonarr/Radarr/Prowlarr surface `result`, so carrying the real message
       // here makes the actual reason visible instead of a generic "error".
-      logger.error('rpc request failed', { method: rpcRequest.method, error: error.message });
+      const requestUrl = req.url ?? '/';
+      const requestPath = new URL(requestUrl, `http://${req.headers.host ?? '127.0.0.1'}`).pathname;
+      logger.error('rpc request failed', {
+        method: rpcRequest.method,
+        requestMethod: req.method,
+        requestUrl,
+        requestPath,
+        requestHeaders: requestHeadersForLog(req.headers),
+        requestPayload: rpcRequest,
+        matchedProfile: (currentProfile ?? clientProfile)
+          ? {
+              id: (currentProfile ?? clientProfile).id,
+              name: (currentProfile ?? clientProfile).name,
+              slug: (currentProfile ?? clientProfile).slug,
+              rpcPath: (currentProfile ?? clientProfile).rpc_path,
+            }
+          : null,
+        enabledProfiles: this.service.store.listProfiles().map((enabledProfile) => ({
+          id: enabledProfile.id,
+          name: enabledProfile.name,
+          slug: enabledProfile.slug,
+          rpcPath: enabledProfile.rpc_path,
+        })),
+        error: error.message,
+      });
       jsonResponse(res, 200, {
         ...(rpcRequest.tag !== undefined ? { tag: rpcRequest.tag } : {}),
         result: error.message || 'error',
@@ -976,27 +1016,27 @@ export class TransmissionRpcServer {
       && timingSafeEqualString(password, this.config.rpcPassword);
   }
 
-  async dispatch(method, args, profile) {
+  async dispatch(method, args, profile, clientProfile) {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
-        profile ??= this.service.getDefaultProfile();
-        this.service.requireProfile(profile);
+        profile = profile ?? clientProfile;
+        profile = profile ? this.service.requireProfile(profile) : undefined;
         return {
-          'download-dir': profile.download_at,
+          'download-dir': profile?.download_at ?? this.config.targetDir,
           'rpc-version': 15,
           'rpc-version-minimum': 1,
           version: '2.94',
         };
       case 'torrent-add':
-        return this.service.addTorrent(args, profile);
+        return this.service.addTorrent(args, profile, clientProfile);
       case 'torrent-get':
-        return this.service.getTorrents(args, profile);
+        return this.service.getTorrents(args, profile ?? clientProfile);
       case 'torrent-set':
       case 'queue-move-top':
         return {};
       case 'torrent-remove':
-        return this.service.removeTorrents(args, profile);
+        return this.service.removeTorrents(args, profile ?? clientProfile);
       default:
         logger.debug('unsupported rpc method', { method });
         return {};
@@ -1130,7 +1170,6 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (output.rpc_path && (output.rpc_path.startsWith('/api/') || output.rpc_path === '/')) {
     throw new Error('RPC path cannot conflict with the web UI or API');
   }
-
   return output;
 }
 

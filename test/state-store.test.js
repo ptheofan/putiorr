@@ -141,6 +141,35 @@ test('prowlarr profiles default to removing completed local downloads', async ()
   }
 });
 
+test('profiles with linked downloads cannot be deleted', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = store.createProfile({
+      name: 'Sonarr',
+      type: 'sonarr',
+      slug: 'sonarr',
+      putio_folder_name: 'putiorr',
+      downloadAt: '/downloads',
+      rpc_path: '/sonarr/transmission/rpc',
+      enabled: true,
+    });
+    store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 10,
+      hash: 'linkedhash',
+      name: 'Linked.Release',
+    });
+
+    assert.throws(
+      () => store.deleteProfile(profile.id),
+      /cannot be deleted while downloads still reference it/,
+    );
+    assert.equal(store.findProfileById(profile.id).id, profile.id);
+  } finally {
+    store.close();
+  }
+});
+
 test('migration enables auto-remove for existing prowlarr profiles once', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
   const dbPath = path.join(root, 'state.sqlite');
@@ -288,12 +317,31 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
       );
     `);
     legacy.prepare(`
+      INSERT INTO profiles (
+        name, type, slug, putio_folder_name, putio_folder_id,
+        download_at, rpc_path, enabled, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'Sonarr',
+      'sonarr',
+      'sonarr',
+      'putiorr',
+      42,
+      '/downloads',
+      '/sonarr/transmission/rpc',
+      1,
+      'now',
+      'now',
+    );
+    legacy.prepare(`
       INSERT INTO transfers (
-        putio_transfer_id, putio_file_id, hash, name, source,
+        profile_id, putio_transfer_id, putio_file_id, hash, name, source,
         source_type, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
+      1,
       123,
       456,
       'putiohash',
@@ -303,6 +351,13 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
       'now',
       'now',
     );
+    legacy.prepare(`
+      INSERT INTO transfer_files (
+        transfer_id, putio_file_id, relative_path, size, downloaded_bytes,
+        status, attempts, error_string, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(1, 789, 'Episode.mkv', 5, 2, 'pending', 0, '', 'now', 'now');
   } finally {
     legacy.close();
   }
@@ -314,6 +369,9 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
       store.findTransferById(1).hash,
       'abcdef1234567890abcdef1234567890abcdef12',
     );
+    assert.equal(store.findTransferById(1).profile_id, 1);
+    assert.equal(store.findTransferById(1).remote_id, 1);
+    assert.deepEqual(store.listFilesForTransfer(1).map((file) => file.putio_file_id), [789]);
   } finally {
     store.close();
   }
