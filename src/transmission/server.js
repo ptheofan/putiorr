@@ -1009,9 +1009,9 @@ export class TransmissionRpcServer {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
-        profile = this.service.resolveRpcProfile(profile);
+        profile = profile ? this.service.requireProfile(profile) : undefined;
         return {
-          'download-dir': profile.download_at,
+          'download-dir': profile?.download_at ?? this.config.targetDir,
           'rpc-version': 15,
           'rpc-version-minimum': 1,
           version: '2.94',

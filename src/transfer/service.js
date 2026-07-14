@@ -315,7 +315,7 @@ export class TransferService {
   }
 
   async getTorrents(args = {}, profile) {
-    const currentProfile = this.resolveRpcProfile(profile);
+    const currentProfile = profile ? this.requireProfile(profile) : undefined;
     if (this.config.refreshOnRpc) {
       await this.refreshRemoteTransfers();
     }
@@ -326,8 +326,8 @@ export class TransferService {
 
     const fields = Array.isArray(args.fields) ? args.fields : [];
     const rows = requestedIds.length > 0
-      ? requestedIds.map((id) => this.store.findTransfer(id, { profileId: currentProfile.id })).filter(Boolean)
-      : this.store.listActiveTransfers({ profileId: currentProfile.id });
+      ? requestedIds.map((id) => this.store.findTransfer(id, { profileId: currentProfile?.id })).filter(Boolean)
+      : this.store.listActiveTransfers({ profileId: currentProfile?.id });
 
     const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
     return { torrents };

@@ -1229,6 +1229,72 @@ test('RPC listing is scoped to the profile selected by the request path', async 
   }]);
 });
 
+test('unowned generic RPC endpoint allows session and torrent discovery across profiles', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const defaultProfile = harness.store.findProfileBySlug('default');
+  harness.store.updateProfile(defaultProfile.id, { rpc_path: '/default/transmission/rpc' });
+  const sonarr = harness.store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'sonarr',
+    downloadAt: path.join(harness.config.targetDir, 'sonarr'),
+    rpc_path: '/sonarr/transmission/rpc',
+    enabled: true,
+  });
+  harness.store.createOrUpdateTransfer({
+    profile_id: defaultProfile.id,
+    putio_transfer_id: 101,
+    putio_file_id: 201,
+    hash: 'defaulthash',
+    name: 'Default.Release',
+    category: 'default',
+    download_dir: path.join(harness.config.targetDir, 'default'),
+    lifecycle: 'downloading',
+  });
+  harness.store.createOrUpdateTransfer({
+    profile_id: sonarr.id,
+    putio_transfer_id: 102,
+    putio_file_id: 202,
+    hash: 'sonarrhash',
+    name: 'Sonarr.Release',
+    category: 'sonarr',
+    download_dir: path.join(harness.config.targetDir, 'sonarr'),
+    lifecycle: 'downloading',
+  });
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+
+  const sessionResponse = await fetch(harness.url, {
+    method: 'POST',
+    headers: { 'X-Transmission-Session-Id': sessionId },
+    body: JSON.stringify({ method: 'session-get' }),
+  });
+  const sessionBody = await sessionResponse.json();
+  assert.equal(sessionBody.result, 'success');
+  assert.equal(sessionBody.arguments['download-dir'], harness.config.targetDir);
+
+  const getResponse = await fetch(harness.url, {
+    method: 'POST',
+    headers: { 'X-Transmission-Session-Id': sessionId },
+    body: JSON.stringify({
+      method: 'torrent-get',
+      arguments: { fields: ['hashString', 'labels'] },
+    }),
+  });
+  const getBody = await getResponse.json();
+  assert.equal(getBody.result, 'success');
+  assert.deepEqual(getBody.arguments.torrents, [
+    { id: 1, hashString: 'defaulthash', labels: ['default'] },
+    { id: 2, hashString: 'sonarrhash', labels: ['sonarr'] },
+  ]);
+});
+
 test('unowned generic RPC endpoint rejects ambiguous torrent creation', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

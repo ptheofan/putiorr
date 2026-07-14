@@ -291,11 +291,12 @@ Each profile maps one *arr app to:
 - a local download folder
 - a Transmission RPC endpoint path
 
-Every enabled profile must have its own RPC endpoint. That request path is the
-authoritative client identity: category and download-directory values only
-choose the staging subfolder and never reroute a request to another profile.
-An unassigned generic endpoint rejects client operations when multiple profiles
-are enabled because ownership would be ambiguous.
+An explicit RPC endpoint is the authoritative client identity for operations
+that create, change, or remove a download. The generic `/transmission/rpc`
+endpoint accepts read-only `session-get` and `torrent-get` discovery across
+profiles, but rejects an ambiguous download operation. Category and
+download-directory values only choose the staging subfolder and never reroute
+a request to another profile.
 
 Recommended profiles:
 
