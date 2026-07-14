@@ -8,7 +8,9 @@ import { downloadProfileDisplayName, defaultDownloadProfileId } from './download
 export function topologyDownloadsForProfile(profile) {
   const name = profileDisplayName(profile);
   return state.downloads.filter(
-    (download) => download.profileName === name || download.profileName === profile.name,
+    (download) => profile.id != null && download.profileId != null
+      ? String(download.profileId) === String(profile.id)
+      : download.profileName === name || download.profileName === profile.name,
   );
 }
 
@@ -27,7 +29,15 @@ export function downloadTopologyEyebrow(download) {
   return `Download · ${download.lifecycle}`;
 }
 
-export function topologyNode(x, y, w, h, eyebrow, title, sub, variant) {
+function topologyKey(prefix, value) {
+  return `${prefix}-${String(value ?? 'default').replace(/[^a-z0-9_-]/gi, '-')}`;
+}
+
+function topologyRelations(...groups) {
+  return [...new Set(groups.flat().filter(Boolean))].join(' ');
+}
+
+export function topologyNode(x, y, w, h, eyebrow, title, sub, variant, key, related) {
   // Character estimates tuned per font size (title is 14px bold, eyebrow/sub are
   // ~10-11px) so labels truncate before the edge; the clipPath then hard-guarantees
   // nothing can ever paint outside the node box.
@@ -38,7 +48,9 @@ export function topologyNode(x, y, w, h, eyebrow, title, sub, variant) {
   const subText = sub
     ? `<text x="${x + 14}" y="${y + 48}" class="topo-sub">${escapeSvgText(truncateLabel(sub, smallCap))}</text>`
     : '';
-  return `<g>
+  const accessibleLabel = topologyRelations(eyebrow, title, sub);
+  return `<g class="topo-node-group" tabindex="0" data-topology-key="${key}" data-topology-related="${related}">
+    <title>${escapeSvgText(accessibleLabel)}</title>
     <clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"></rect></clipPath>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11" class="topo-node topo-node--${variant}"></rect>
     <g clip-path="url(#${clipId})">
@@ -49,9 +61,46 @@ export function topologyNode(x, y, w, h, eyebrow, title, sub, variant) {
   </g>`;
 }
 
-export function topologyEdge(x1, y1, x2, y2, cls = '') {
+function topologyProfilePill(x, cy, w, h, title, key, related) {
+  const cap = Math.max(6, Math.floor((w - 24) / 7));
+  return `<g class="topo-node-group" tabindex="0" data-topology-key="${key}" data-topology-related="${related}">
+    <title>${escapeSvgText(`Download profile: ${title}`)}</title>
+    <rect x="${x}" y="${cy - h / 2}" width="${w}" height="${h}" rx="${h / 2}" class="topo-profile-pill"></rect>
+    <text x="${x + w / 2}" y="${cy + 4}" class="topo-profile-pill-text">${escapeSvgText(truncateLabel(title, cap))}</text>
+  </g>`;
+}
+
+export function topologyEdge(x1, y1, x2, y2, cls = '', related = '') {
   const dx = Math.max(28, (x2 - x1) * 0.5);
-  return `<path d="M${x1} ${y1} C${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}" class="topo-edge ${cls}"></path>`;
+  return `<path d="M${x1} ${y1} C${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}" class="topo-edge ${cls}" data-topology-related="${related}"></path>`;
+}
+
+function traceTopologyRoute(canvas, node) {
+  const svg = canvas.querySelector('.topo-svg');
+  const key = node?.dataset.topologyKey;
+  if (!svg || !key) return;
+  svg.classList.add('is-tracing');
+  for (const item of svg.querySelectorAll('[data-topology-related]')) {
+    item.classList.toggle('is-highlighted', item.dataset.topologyRelated.split(' ').includes(key));
+  }
+}
+
+function clearTopologyTrace(canvas) {
+  const svg = canvas.querySelector('.topo-svg');
+  if (!svg) return;
+  svg.classList.remove('is-tracing');
+  for (const item of svg.querySelectorAll('.is-highlighted')) item.classList.remove('is-highlighted');
+}
+
+function bindTopologyTracing(canvas) {
+  const nodeFromEvent = (event) => event.target.closest?.('[data-topology-key]');
+  canvas.onpointerover = (event) => traceTopologyRoute(canvas, nodeFromEvent(event));
+  canvas.onpointerout = (event) => {
+    const node = nodeFromEvent(event);
+    if (!node?.contains(event.relatedTarget)) clearTopologyTrace(canvas);
+  };
+  canvas.onfocusin = (event) => traceTopologyRoute(canvas, nodeFromEvent(event));
+  canvas.onfocusout = () => clearTopologyTrace(canvas);
 }
 
 export function renderTopology() {
@@ -68,47 +117,44 @@ export function renderTopology() {
   const DL_H = 54;
   const DL_GAP = 12;
   const BAND_GAP = 26;
-  const DP_GAP = 16;
   const PUTIO = { x: 24, w: 184 };
   const RR = { x: 280, w: 224 };
-  const DP = { x: 572, w: 248 };
+  const DP = { x: 630, w: 136, h: 30 };
   const DL = { x: 892, w: 256 };
 
   // RR profile bands, each tall enough for its own downloads (placed in the DL column).
   let cursor = 24;
   let hasDownloads = false;
-  const rrNodes = profiles.map((profile) => {
+  const putioKey = 'putio';
+  const rrNodes = profiles.map((profile, profileIndex) => {
     const downloads = topologyDownloadsForProfile(profile);
     if (downloads.length) hasDownloads = true;
     const height = Math.max(NODE_H, downloads.length * (DL_H + DL_GAP) - DL_GAP);
     const top = cursor;
     cursor += height + BAND_GAP;
     const dpId = profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId();
-    return { profile, downloads, top, cy: top + height / 2, dpKey: String(dpId ?? ''), dpName: downloadProfileDisplayName(dpId) };
+    const dpKey = String(dpId ?? 'default');
+    const rrKey = topologyKey('rr', profile.id ?? profileIndex);
+    const downloadNodes = downloads.map((download, downloadIndex) => {
+      const downloadKey = topologyKey('download', download.id ?? `${profileIndex}-${downloadIndex}`);
+      return {
+        download,
+        cy: top + downloadIndex * (DL_H + DL_GAP) + DL_H / 2,
+        key: downloadKey,
+        profileKey: topologyKey('download-profile', `${dpKey}-${downloadKey}`),
+      };
+    });
+    return {
+      profile,
+      cy: top + height / 2,
+      key: rrKey,
+      dpName: downloadProfileDisplayName(dpId),
+      downloadNodes,
+    };
   });
 
-  // One node per unique download profile, vertically centred on the profiles using it.
-  const dpMap = new Map();
-  for (const rr of rrNodes) {
-    if (!dpMap.has(rr.dpKey)) dpMap.set(rr.dpKey, { key: rr.dpKey, name: rr.dpName, users: [] });
-    dpMap.get(rr.dpKey).users.push(rr);
-  }
-  const dpNodes = [...dpMap.values()].map((dp) => ({
-    ...dp,
-    cy: dp.users.reduce((sum, user) => sum + user.cy, 0) / dp.users.length,
-  }));
-  dpNodes.sort((a, b) => a.cy - b.cy);
-  let prevBottom = -Infinity;
-  for (const dp of dpNodes) {
-    const top = Math.max(dp.cy - NODE_H / 2, prevBottom + DP_GAP);
-    dp.top = top;
-    dp.cy = top + NODE_H / 2;
-    prevBottom = top + NODE_H;
-  }
-
   const rrBottom = cursor - BAND_GAP + 24;
-  const dpBottom = dpNodes.length ? dpNodes[dpNodes.length - 1].top + NODE_H + 24 : 0;
-  const totalHeight = Math.max(rrBottom, dpBottom, NODE_H + 48);
+  const totalHeight = Math.max(rrBottom, NODE_H + 48);
   const putioY = totalHeight / 2 - NODE_H / 2;
   const putioCy = putioY + NODE_H / 2;
   const putioRight = PUTIO.x + PUTIO.w;
@@ -116,15 +162,33 @@ export function renderTopology() {
   const edges = [];
   const nodes = [];
   const connected = Boolean(state.settings?.tokenConfigured);
+  const rrRelations = (rr) => topologyRelations(
+    putioKey,
+    rr.key,
+    rr.downloadNodes.flatMap((download) => [download.profileKey, download.key]),
+  );
+  const downloadRelations = (rr, download) => topologyRelations(
+    putioKey,
+    rr.key,
+    download.profileKey,
+    download.key,
+  );
+  const allRelations = topologyRelations(putioKey, rrNodes.map(rrRelations));
 
   for (const rr of rrNodes) {
-    edges.push(topologyEdge(putioRight, putioCy, RR.x, rr.cy, connected ? '' : 'topo-edge--muted'));
-    const dp = dpNodes.find((node) => node.key === rr.dpKey);
-    if (dp) edges.push(topologyEdge(RR.x + RR.w, rr.cy, DP.x, dp.cy, 'topo-edge--dprofile'));
-    let dy = rr.top;
-    for (const download of rr.downloads) {
-      edges.push(topologyEdge(RR.x + RR.w, rr.cy, DL.x, dy + DL_H / 2, 'topo-edge--download'));
-      dy += DL_H + DL_GAP;
+    const related = rrRelations(rr);
+    edges.push(topologyEdge(putioRight, putioCy, RR.x, rr.cy, connected ? '' : 'topo-edge--muted', related));
+    for (const download of rr.downloadNodes) {
+      const route = downloadRelations(rr, download);
+      edges.push(topologyEdge(RR.x + RR.w, rr.cy, DP.x, download.cy, 'topo-edge--dprofile', route));
+      edges.push(topologyEdge(
+        DP.x + DP.w,
+        download.cy,
+        DL.x,
+        download.cy,
+        'topo-edge--download',
+        route,
+      ));
     }
   }
 
@@ -133,6 +197,7 @@ export function renderTopology() {
     PUTIO.x, putioY, PUTIO.w, NODE_H,
     'Put.io', account, connected ? 'Connected' : 'No token configured',
     connected ? 'putio' : 'putio-off',
+    putioKey, allRelations,
   ));
 
   for (const rr of rrNodes) {
@@ -142,29 +207,26 @@ export function renderTopology() {
       profileType(profile.type).label, profileDisplayName(profile),
       profile.enabled === false ? 'Disabled' : 'Enabled',
       profile.enabled === false ? 'rr-off' : 'rr',
+      rr.key, rrRelations(rr),
     ));
-    let dy = rr.top;
-    for (const download of rr.downloads) {
+    for (const downloadNode of rr.downloadNodes) {
+      const download = downloadNode.download;
       nodes.push(topologyNode(
-        DL.x, dy, DL.w, DL_H,
+        DL.x, downloadNode.cy - DL_H / 2, DL.w, DL_H,
         downloadTopologyEyebrow(download), download.name,
         `${clampPercent(download.combinedProgress)}% complete`,
         downloadTopologyVariant(download),
+        downloadNode.key,
+        downloadRelations(rr, downloadNode),
       ));
-      dy += DL_H + DL_GAP;
+      nodes.push(topologyProfilePill(
+        DP.x, downloadNode.cy, DP.w, DP.h,
+        rr.dpName, downloadNode.profileKey, downloadRelations(rr, downloadNode),
+      ));
     }
   }
 
-  for (const dp of dpNodes) {
-    const count = dp.users.length;
-    nodes.push(topologyNode(
-      DP.x, dp.top, DP.w, NODE_H,
-      'Download profile', dp.name,
-      count === 1 ? 'Used by 1 RR profile' : `Used by ${count} RR profiles`,
-      'dprofile',
-    ));
-  }
-
-  const width = (hasDownloads ? DL.x + DL.w : DP.x + DP.w) + 24;
+  const width = (hasDownloads ? DL.x + DL.w : RR.x + RR.w) + 24;
   canvas.innerHTML = `<svg viewBox="0 0 ${width} ${totalHeight}" class="topo-svg" role="img" aria-label="Topology of put.io connection, RR profiles, download profiles and downloads">${edges.join('')}${nodes.join('')}</svg>`;
+  bindTopologyTracing(canvas);
 }
