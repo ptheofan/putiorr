@@ -4,6 +4,8 @@ import { PUTIO_PHASE_LABELS } from './constants.js';
 import { profileType, profileDisplayName } from './profiles.js';
 import { downloadProfileDisplayName, defaultDownloadProfileId } from './download-profiles.js';
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 // --- Topology map: put.io -> RR profiles -> download profiles + downloads ---
 export function topologyDownloadsForProfile(profile) {
   const name = profileDisplayName(profile);
@@ -44,12 +46,12 @@ export function topologyNode(x, y, w, h, eyebrow, title, sub, variant, key, rela
   const inner = w - 28;
   const titleCap = Math.max(6, Math.floor(inner / 8.4));
   const smallCap = Math.max(6, Math.floor(inner / 6));
-  const clipId = `tc${Math.round(x)}-${Math.round(y)}`;
+  const clipId = topologyKey('clip', key);
   const subText = sub
     ? `<text x="${x + 14}" y="${y + 48}" class="topo-sub">${escapeSvgText(truncateLabel(sub, smallCap))}</text>`
     : '';
   const accessibleLabel = topologyRelations(eyebrow, title, sub);
-  return `<g class="topo-node-group" tabindex="0" data-topology-key="${key}" data-topology-related="${related}">
+  return `<g class="topo-node-group" tabindex="0" data-topology-id="node-${key}" data-topology-key="${key}" data-topology-related="${related}">
     <title>${escapeSvgText(accessibleLabel)}</title>
     <clipPath id="${clipId}"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11"></rect></clipPath>
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="11" class="topo-node topo-node--${variant}"></rect>
@@ -63,16 +65,106 @@ export function topologyNode(x, y, w, h, eyebrow, title, sub, variant, key, rela
 
 function topologyProfilePill(x, cy, w, h, title, key, related) {
   const cap = Math.max(6, Math.floor((w - 24) / 7));
-  return `<g class="topo-node-group" tabindex="0" data-topology-key="${key}" data-topology-related="${related}">
+  return `<g class="topo-node-group" tabindex="0" data-topology-id="node-${key}" data-topology-key="${key}" data-topology-related="${related}">
     <title>${escapeSvgText(`Download profile: ${title}`)}</title>
     <rect x="${x}" y="${cy - h / 2}" width="${w}" height="${h}" rx="${h / 2}" class="topo-profile-pill"></rect>
     <text x="${x + w / 2}" y="${cy + 4}" class="topo-profile-pill-text">${escapeSvgText(truncateLabel(title, cap))}</text>
   </g>`;
 }
 
-export function topologyEdge(x1, y1, x2, y2, cls = '', related = '') {
+export function topologyEdge(id, x1, y1, x2, y2, cls = '', related = '') {
   const dx = Math.max(28, (x2 - x1) * 0.5);
-  return `<path d="M${x1} ${y1} C${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}" class="topo-edge ${cls}" data-topology-related="${related}"></path>`;
+  return `<path d="M${x1} ${y1} C${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}" class="topo-edge ${cls}" data-topology-id="edge-${id}" data-topology-related="${related}"></path>`;
+}
+
+function syncTopologyElement(current, desired, preserveHighlight = false) {
+  const highlighted = preserveHighlight && current.classList.contains('is-highlighted');
+
+  for (const attribute of [...current.attributes]) {
+    if (!desired.hasAttribute(attribute.name)) current.removeAttribute(attribute.name);
+  }
+  for (const attribute of [...desired.attributes]) {
+    if (current.getAttribute(attribute.name) !== attribute.value) {
+      current.setAttribute(attribute.name, attribute.value);
+    }
+  }
+  if (highlighted) current.classList.add('is-highlighted');
+
+  let child = current.firstChild;
+  for (const desiredChild of [...desired.childNodes]) {
+    const sameKind = child
+      && child.nodeType === desiredChild.nodeType
+      && (child.nodeType !== Node.ELEMENT_NODE || child.nodeName === desiredChild.nodeName);
+    if (!sameKind) {
+      current.insertBefore(desiredChild.cloneNode(true), child);
+      continue;
+    }
+
+    const next = child.nextSibling;
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      syncTopologyElement(child, desiredChild);
+    } else if (child.nodeValue !== desiredChild.nodeValue) {
+      child.nodeValue = desiredChild.nodeValue;
+    }
+    child = next;
+  }
+  while (child) {
+    const next = child.nextSibling;
+    child.remove();
+    child = next;
+  }
+}
+
+function updateTopologySvg(canvas, width, height, markup) {
+  let svg = canvas.querySelector('.topo-svg');
+  if (!svg) {
+    svg = document.createElementNS(SVG_NS, 'svg');
+    svg.classList.add('topo-svg');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', 'Topology of put.io connection, RR profiles, download profiles and downloads');
+    canvas.replaceChildren(svg);
+  }
+
+  const viewBox = `0 0 ${width} ${height}`;
+  if (svg.getAttribute('viewBox') !== viewBox) svg.setAttribute('viewBox', viewBox);
+
+  const focusedId = svg.contains(document.activeElement)
+    ? document.activeElement.dataset.topologyId
+    : undefined;
+  const desiredSvg = document.createElementNS(SVG_NS, 'svg');
+  desiredSvg.innerHTML = markup;
+  const desiredElements = [...desiredSvg.children];
+  const existingById = new Map(
+    [...svg.children].map((element) => [element.dataset.topologyId, element]),
+  );
+  const desiredIds = new Set(desiredElements.map((element) => element.dataset.topologyId));
+  for (const [id, element] of existingById) {
+    if (!desiredIds.has(id)) element.remove();
+  }
+
+  let insertionPoint = svg.firstElementChild;
+  for (const desired of desiredElements) {
+    const id = desired.dataset.topologyId;
+    let current = existingById.get(id);
+    if (current && current.nodeName !== desired.nodeName) {
+      current.remove();
+      current = undefined;
+    }
+    if (current) {
+      syncTopologyElement(current, desired, true);
+    } else {
+      current = desired.cloneNode(true);
+    }
+    if (current !== insertionPoint) svg.insertBefore(current, insertionPoint);
+    insertionPoint = current.nextElementSibling;
+  }
+
+  const focused = focusedId
+    ? [...svg.children].find((element) => element.dataset.topologyId === focusedId)
+    : undefined;
+  if (focused && document.activeElement !== focused) {
+    focused.focus({ preventScroll: true });
+  }
 }
 
 function traceTopologyRoute(canvas, node) {
@@ -186,11 +278,20 @@ export function renderTopology() {
 
   for (const rr of rrNodes) {
     const related = rrRelations(rr);
-    edges.push(topologyEdge(putioRight, putioCy, RR.x, rr.cy, connected ? '' : 'topo-edge--muted', related));
+    edges.push(topologyEdge(
+      `putio-${rr.key}`,
+      putioRight, putioCy, RR.x, rr.cy,
+      connected ? '' : 'topo-edge--muted', related,
+    ));
     for (const download of rr.downloadNodes) {
       const route = downloadRelations(rr, download);
-      edges.push(topologyEdge(RR.x + RR.w, rr.cy, DP.x, download.cy, 'topo-edge--dprofile', route));
       edges.push(topologyEdge(
+        `${rr.key}-${download.profileKey}`,
+        RR.x + RR.w, rr.cy, DP.x, download.cy,
+        'topo-edge--dprofile', route,
+      ));
+      edges.push(topologyEdge(
+        `${download.profileKey}-${download.key}`,
         DP.x + DP.w,
         download.cy,
         DL.x,
@@ -236,7 +337,7 @@ export function renderTopology() {
   }
 
   const width = (hasDownloads ? DL.x + DL.w : RR.x + RR.w) + 24;
-  canvas.innerHTML = `<svg viewBox="0 0 ${width} ${totalHeight}" class="topo-svg" role="img" aria-label="Topology of put.io connection, RR profiles, download profiles and downloads">${edges.join('')}${nodes.join('')}</svg>`;
+  updateTopologySvg(canvas, width, totalHeight, `${edges.join('')}${nodes.join('')}`);
   traceTopologyKey(canvas, canvas.dataset.topologyTraceKey);
   bindTopologyTracing(canvas);
 }
