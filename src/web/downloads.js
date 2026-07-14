@@ -12,6 +12,7 @@ import {
 import {
   clampPercent,
   formatBytes,
+  formatPutioStatusDetails,
   formatSpeed,
   formatEta,
   statusLabel,
@@ -207,9 +208,9 @@ export function updateDownloadRow(row, download) {
   setText(startButton.querySelector('[data-role="start-label"]'), starting ? 'Starting' : 'Start');
   setProgressValue(row, 'putio-bar', 'putio-progress', putioProgress);
   setProgressValue(row, 'local-bar', 'local-progress', localProgress);
-  const putioStatusMessage = String(download.putioStatusMessage ?? '').trim();
+  const putioStatusMessage = formatPutioStatusDetails(download);
   const putioStatus = row.querySelector('[data-role="putio-status-message"]');
-  setText(putioStatus, putioStatusMessage ? `Put.io status: ${putioStatusMessage}` : '');
+  setText(putioStatus, putioStatusMessage);
   setHidden(putioStatus, !putioStatusMessage);
   populateFilePanel(row, download, fileItems);
 }

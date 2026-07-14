@@ -138,6 +138,17 @@ export function formatBytes(value) {
   return `${Math.round(bytes)} B`;
 }
 
+export function formatPutioStatusDetails(download) {
+  const message = String(download.putioStatusMessage ?? '').trim();
+  if (message) return message;
+  if (download.lifecycle !== 'remote' || download.putioStatus !== 'DOWNLOADING') return '';
+
+  const peers = Math.max(0, Number(download.putioPeers ?? 0));
+  const peerText = peers > 0 ? `${peers} peer${peers === 1 ? '' : 's'}` : 'No peers';
+  const totalSize = Number(download.putioTotalSize ?? 0);
+  return `${peerText} | downloaded: ${formatBytes(download.putioDownloaded)} of ${formatBytes(totalSize)} | uploaded: ${formatBytes(download.putioUploaded)} of ${formatBytes(totalSize)} | availability: ${clampPercent(download.putioAvailability)}%`;
+}
+
 export function formatWholeBytes(value) {
   const bytes = Number(value ?? 0);
   if (bytes <= 0) return '0 B';

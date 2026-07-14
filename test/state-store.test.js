@@ -65,7 +65,7 @@ test('createOrUpdateTransfer persists put.io completion_percent across updates',
   }
 });
 
-test('createOrUpdateTransfer persists put.io status messages across updates', () => {
+test('createOrUpdateTransfer persists put.io status details across updates', () => {
   const store = new StateStore(':memory:');
   try {
     const created = store.createOrUpdateTransfer({
@@ -74,16 +74,25 @@ test('createOrUpdateTransfer persists put.io status messages across updates', ()
       name: 'Waiting Transfer',
       putio_status: 'DOWNLOADING',
       putio_status_message: 'Waiting for torrent details from the network...',
+      putio_peers: 0,
+      putio_availability: 0,
+      downloaded_ever: 0,
     });
     assert.equal(created.putio_status_message, 'Waiting for torrent details from the network...');
 
     const updated = store.createOrUpdateTransfer({
       putio_transfer_id: 12,
       hash: 'statusmessagehash',
-      putio_status_message: 'No peers',
+      putio_status_message: '',
+      putio_peers: 2,
+      putio_availability: 11,
+      downloaded_ever: 108_480_000,
     });
     assert.equal(updated.id, created.id);
-    assert.equal(updated.putio_status_message, 'No peers');
+    assert.equal(updated.putio_status_message, '');
+    assert.equal(updated.putio_peers, 2);
+    assert.equal(updated.putio_availability, 11);
+    assert.equal(updated.putio_downloaded, 108_480_000);
   } finally {
     store.close();
   }

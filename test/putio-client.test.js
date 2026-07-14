@@ -129,9 +129,13 @@ test('normalizeTransfer keeps Put.io status details', () => {
     id: 22,
     status: 'DOWNLOADING',
     status_message: 'Waiting for torrent details from the network...',
+    peers: 2,
+    availability: 11,
   });
 
   assert.equal(transfer.statusMessage, 'Waiting for torrent details from the network...');
+  assert.equal(transfer.peers, 2);
+  assert.equal(transfer.availability, 11);
 });
 
 test('PutioClient handles folder creation and transfer edge cases', async () => {
