@@ -306,6 +306,10 @@ Recommended profiles:
 | Lidarr | `putiorr` | `/putiorr` | `/lidarr/transmission/rpc` |
 | Readarr | `putiorr` | `/putiorr` | `/readarr/transmission/rpc` |
 
+**URL Base is an advanced Transmission setting.** On the Sonarr, Radarr,
+Lidarr, or Prowlarr Download Clients page, enable **Show Advanced** before
+editing the client to reveal it.
+
 The *arr download client category creates the final staging subfolder. For
 example:
 

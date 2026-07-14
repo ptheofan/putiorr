@@ -104,6 +104,7 @@ export const WIZARD_HELP = {
       'Keep each app on a unique endpoint path. That is what lets putiorr know which app profile and category should handle the request.',
     ],
     tips: [
+      'In Sonarr, Radarr, Lidarr, and Prowlarr, enable Show Advanced on the Download Clients page to reveal URL Base.',
       'For Sonarr, /sonarr/transmission/rpc means URL Base is /sonarr/transmission.',
       'Do not point this at an app API path. This must be a Transmission RPC path served by putiorr.',
     ],
@@ -544,7 +545,7 @@ export function getClientSettingsText() {
     'Password: blank unless configured',
     `Category: ${settings.category}`,
     `Directory: ${settings.directory}`,
-    `URL Base: ${settings.urlBase}`,
+    `URL Base: ${settings.urlBase} (enable Show Advanced to reveal this field)`,
     `Full RPC endpoint: ${settings.fullEndpoint}`,
   ].join('\n');
 }
