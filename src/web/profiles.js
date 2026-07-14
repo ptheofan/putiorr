@@ -389,6 +389,10 @@ export async function saveProfileFromWizard({
     setWizardMessage('Profile name, put.io folder, download folder, and RPC endpoint are required.', 'error');
     return undefined;
   }
+  if (!payload.rpc_path.endsWith('/rpc')) {
+    setWizardMessage('RPC endpoint must end with /rpc. Use the preceding path as the *arr URL Base.', 'error');
+    return undefined;
+  }
 
   if (manageButton) el.saveProfileButton.disabled = true;
   try {

@@ -1149,6 +1149,9 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (output.rpc_path && (output.rpc_path.startsWith('/api/') || output.rpc_path === '/')) {
     throw new Error('RPC path cannot conflict with the web UI or API');
   }
+  if (output.rpc_path && !output.rpc_path.endsWith('/rpc')) {
+    throw new Error('RPC path must end with /rpc; use the preceding path as the *arr URL Base');
+  }
 
   return output;
 }

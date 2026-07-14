@@ -1544,6 +1544,24 @@ test('web API exposes settings and profile CRUD', async (t) => {
     slowSpeedMinSizeBytes: 1048576,
   });
 
+  const invalidProfile = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Invalid Sonarr',
+      type: 'sonarr',
+      slug: 'invalid-sonarr',
+      putio_folder_name: 'sonarr',
+      downloadAt: path.join(harness.config.targetDir, 'sonarr'),
+      rpc_path: '/transmission/rpc/sonarr',
+    }),
+  });
+  assert.equal(invalidProfile.status, 400);
+  assert.equal(
+    (await invalidProfile.json()).error,
+    'RPC path must end with /rpc; use the preceding path as the *arr URL Base',
+  );
+
   const downloadProfiles = await fetch(harness.url.replace('/transmission/rpc', '/api/download-profiles'));
   assert.equal(downloadProfiles.status, 200);
   const [defaultDownloadProfile] = await downloadProfiles.json();
