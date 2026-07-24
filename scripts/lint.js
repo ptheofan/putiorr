@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const roots = ['src', 'test', 'scripts'];
+const roots = ['extension', 'src', 'test', 'scripts'];
 const ignoredDirectories = new Set(['node_modules', '.git']);
 
 function collectJavaScriptFiles(directory) {
