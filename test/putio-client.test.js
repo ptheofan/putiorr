@@ -129,7 +129,7 @@ test('normalizeTransfer keeps Put.io status details', () => {
     id: 22,
     status: 'DOWNLOADING',
     status_message: 'Waiting for torrent details from the network...',
-    peers: 2,
+    peers_sending_to_us: 2,
     availability: 11,
   });
 
@@ -180,4 +180,31 @@ test('PutioClient handles folder creation and transfer edge cases', async () => 
 
   assert.equal(normalizeTransfer(undefined), undefined);
   assert.equal(normalizeTransfer({ downloaded: '', estimatedTime: undefined }).estimatedTime, -1);
+});
+
+test('normalizeTransfer reads the put.io peer and speed field names', () => {
+  const transfer = normalizeTransfer({
+    id: 20,
+    name: 'Example',
+    status: 'DOWNLOADING',
+    peers_connected: 9,
+    peers_sending_to_us: 3,
+    peers_getting_from_us: 2,
+    down_speed: 1048576,
+    up_speed: 4096,
+    availability: 99,
+  });
+
+  assert.equal(transfer.peers, 3);
+  assert.equal(transfer.downloadSpeed, 1048576);
+  assert.equal(transfer.uploadSpeed, 4096);
+  assert.equal(transfer.availability, 99);
+});
+
+test('normalizeTransfer defaults put.io peer and speed fields to zero when absent', () => {
+  const transfer = normalizeTransfer({ id: 21, name: 'Example' });
+
+  assert.equal(transfer.peers, 0);
+  assert.equal(transfer.downloadSpeed, 0);
+  assert.equal(transfer.uploadSpeed, 0);
 });
