@@ -87,6 +87,26 @@ Rules map page domains to profiles:
 - Storage: rules and settings in `chrome.storage.sync`; credentials in
   `chrome.storage.local`.
 
+## Completed-transfer cleanup
+
+Browser grabs have no *arr download client to import them, so they follow the
+prowlarr-profile behavior: when the local download completes, the transfer is
+removed from the putiorr list and from put.io, and the downloaded files are
+kept on disk.
+
+This needs no new mechanism — cleanup is already driven by the per-profile
+`auto_remove_completed` flag (`src/download/manager.js:31`); prowlarr profiles
+merely default it to on (`src/state/store.js:131-139`). Therefore:
+
+- Profiles used as browser-grab targets (the default profile and site-rule
+  targets) are expected to be dedicated profiles with
+  `auto_remove_completed` enabled.
+- Documentation (README section and `extension/README.md`) instructs the user
+  to create browser profiles with this flag on.
+- If `/api/grab` targets a profile without the flag, the grab still succeeds;
+  putiorr logs a warning that the completed transfer will stay in the list
+  until removed manually.
+
 ## Error handling
 
 Every grab ends in a Chrome notification:
