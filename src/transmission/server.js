@@ -697,6 +697,44 @@ export class TransmissionRpcServer {
         return;
       }
 
+      if (method === 'POST' && requestPath === '/api/grab') {
+        const body = await readJsonBody(req);
+        const profile = this.service.store.findProfileById(Number(body.profileId));
+        if (!profile) {
+          jsonResponse(res, 404, { error: 'Profile not found' }, this.sessionId);
+          return;
+        }
+        const magnet = String(body.magnet ?? '').trim();
+        const torrentBase64 = String(body.torrentBase64 ?? '').trim();
+        if (!torrentBase64 && !magnet.startsWith('magnet:')) {
+          jsonResponse(res, 400, { error: 'grab requires a magnet link or torrentBase64 metainfo' }, this.sessionId);
+          return;
+        }
+        if (!profile.auto_remove_completed) {
+          logger.warn('grab profile keeps completed transfers in the list; enable auto-remove on the profile for browser grabs', {
+            profile: profile.slug,
+          });
+        }
+        logger.info('grab from browser', {
+          profile: profile.slug,
+          sourceType: torrentBase64 ? 'torrent' : 'magnet',
+          sourceUrl: body.sourceUrl,
+        });
+        const args = torrentBase64
+          ? { metainfo: torrentBase64, filename: body.filename }
+          : { filename: magnet };
+        const result = await this.service.addTorrent(args, profile);
+        this.scheduleWebSocketDownloadsBroadcast('api:grab');
+        jsonResponse(res, 200, {
+          ok: true,
+          transfer: {
+            id: result['torrent-added'].id,
+            name: result['torrent-added'].name,
+          },
+        }, this.sessionId);
+        return;
+      }
+
       jsonResponse(res, 404, { error: 'Not Found' }, this.sessionId);
     } catch (error) {
       logger.warn('api request failed', { path: requestPath, error: error.message });
