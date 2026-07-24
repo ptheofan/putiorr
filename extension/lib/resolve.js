@@ -22,6 +22,23 @@ function normalizeProfileId(value) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
 }
 
+// Profiles drive the context menu, so one malformed element must not take the
+// whole menu down: entries without a usable id are dropped, and the survivors
+// come back with a numeric id and a printable name.
+export function sanitizeProfiles(profiles) {
+  const sanitized = [];
+
+  for (const profile of Array.isArray(profiles) ? profiles : []) {
+    const id = normalizeProfileId(profile?.id);
+    if (!id) continue;
+
+    const name = String(profile?.name ?? '').trim();
+    sanitized.push({ id, name: name || `profile #${id}` });
+  }
+
+  return sanitized;
+}
+
 export function isMagnetLink(href) {
   return typeof href === 'string' && href.toLowerCase().startsWith('magnet:');
 }

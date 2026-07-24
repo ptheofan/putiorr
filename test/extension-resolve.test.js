@@ -5,6 +5,7 @@ import {
   isTorrentLink,
   matchSiteRuleProfileId,
   resolveProfileId,
+  sanitizeProfiles,
 } from '../extension/lib/resolve.js';
 
 test('isMagnetLink detects magnet URIs only', () => {
@@ -96,4 +97,56 @@ test('resolveProfileId coerces stored string ids and rejects non-positive ids', 
   assert.equal(resolveProfileId({ explicitProfileId: 1.5, defaultProfileId: 1 }), 1);
   assert.equal(resolveProfileId({ defaultProfileId: 'abc' }), undefined);
   assert.equal(resolveProfileId({}), undefined);
+});
+
+test('sanitizeProfiles returns an empty list for anything that is not an array', () => {
+  assert.deepEqual(sanitizeProfiles(undefined), []);
+  assert.deepEqual(sanitizeProfiles(null), []);
+  assert.deepEqual(sanitizeProfiles('corrupt'), []);
+  assert.deepEqual(sanitizeProfiles(5), []);
+  assert.deepEqual(sanitizeProfiles({ id: 3, name: 'X' }), []);
+  assert.deepEqual(sanitizeProfiles([]), []);
+});
+
+test('sanitizeProfiles drops malformed elements without throwing', () => {
+  assert.deepEqual(sanitizeProfiles([null]), []);
+  assert.deepEqual(sanitizeProfiles([undefined, 5, 'x', []]), []);
+  assert.deepEqual(sanitizeProfiles([{ name: 'no id' }]), []);
+});
+
+test('sanitizeProfiles coerces stored string ids to numbers', () => {
+  // Storage round-trips can turn ids into strings; handleGrab compares ids with
+  // === when labelling a notification, so the coercion has to happen here.
+  assert.deepEqual(sanitizeProfiles([{ id: '3', name: 'X' }]), [{ id: 3, name: 'X' }]);
+});
+
+test('sanitizeProfiles falls back to a generated name when the stored name is unusable', () => {
+  assert.deepEqual(sanitizeProfiles([{ id: 3 }]), [{ id: 3, name: 'profile #3' }]);
+  assert.deepEqual(sanitizeProfiles([{ id: 3, name: '' }]), [{ id: 3, name: 'profile #3' }]);
+  assert.deepEqual(sanitizeProfiles([{ id: 3, name: '   ' }]), [{ id: 3, name: 'profile #3' }]);
+  assert.deepEqual(sanitizeProfiles([{ id: 3, name: null }]), [{ id: 3, name: 'profile #3' }]);
+  assert.deepEqual(sanitizeProfiles([{ id: 3, name: 7 }]), [{ id: 3, name: '7' }]);
+});
+
+test('sanitizeProfiles keeps valid entries alongside invalid ones', () => {
+  const profiles = [
+    { id: 0, name: 'zero' },
+    { id: -2, name: 'negative' },
+    { id: 1.5, name: 'fractional' },
+    { id: 'abc', name: 'not numeric' },
+    null,
+    { id: 4, name: 'Movies' },
+    { id: '7', name: 'TV' },
+  ];
+  assert.deepEqual(sanitizeProfiles(profiles), [
+    { id: 4, name: 'Movies' },
+    { id: 7, name: 'TV' },
+  ]);
+});
+
+test('sanitizeProfiles returns fresh objects rather than the stored references', () => {
+  const stored = [{ id: 3, name: 'X', extra: 'dropped' }];
+  const [sanitized] = sanitizeProfiles(stored);
+  assert.notEqual(sanitized, stored[0]);
+  assert.deepEqual(sanitized, { id: 3, name: 'X' });
 });

@@ -1,4 +1,4 @@
-import { isMagnetLink, resolveProfileId } from './lib/resolve.js';
+import { isMagnetLink, resolveProfileId, sanitizeProfiles } from './lib/resolve.js';
 
 const MENU_ROOT = 'putiorr-root';
 const MENU_CONFIGURE = 'putiorr-configure';
@@ -16,13 +16,20 @@ async function loadSettings() {
   const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
   const local = await chrome.storage.local.get({ username: '', password: '' });
   // storage.sync can hold data written by a different extension version, so the
-  // array shapes are normalized here; callers below index them without guards.
+  // shapes are normalized here; callers below index them without guards.
   return {
     ...sync,
     ...local,
-    profiles: Array.isArray(sync.profiles) ? sync.profiles : [],
+    profiles: sanitizeProfiles(sync.profiles),
     rules: Array.isArray(sync.rules) ? sync.rules : [],
   };
+}
+
+// btoa is Latin-1: it throws above U+00FF and silently mangles U+0080-U+00FF,
+// so credentials are encoded to UTF-8 bytes first to match what the server decodes.
+function encodeCredentials(username, password) {
+  const utf8 = new TextEncoder().encode(`${username}:${password}`);
+  return btoa(String.fromCharCode(...utf8));
 }
 
 function authHeaders(settings) {
@@ -30,7 +37,7 @@ function authHeaders(settings) {
   // is exempt from CORS via host_permissions, attacker web pages are not.
   const headers = { 'Content-Type': 'application/json', 'X-Putiorr-Grab': '1' };
   if (settings.username || settings.password) {
-    headers.Authorization = `Basic ${btoa(`${settings.username}:${settings.password}`)}`;
+    headers.Authorization = `Basic ${encodeCredentials(settings.username, settings.password)}`;
   }
   return headers;
 }
@@ -45,18 +52,31 @@ function notify(title, message) {
 }
 
 async function postGrab(settings, payload) {
+  // The request is built outside the try below so a bad URL or unencodable
+  // credentials surface as themselves instead of being reported as a dead server.
+  let endpoint;
+  try {
+    endpoint = new URL('/api/grab', settings.baseUrl);
+  } catch {
+    throw new Error(`putiorr URL is not valid: ${settings.baseUrl}`);
+  }
+  const request = {
+    method: 'POST',
+    headers: authHeaders(settings),
+    body: JSON.stringify(payload),
+  };
+
   let response;
   try {
-    response = await fetch(new URL('/api/grab', settings.baseUrl), {
-      method: 'POST',
-      headers: authHeaders(settings),
-      body: JSON.stringify(payload),
-    });
+    response = await fetch(endpoint, request);
   } catch {
     throw new Error(`putiorr is unreachable at ${settings.baseUrl}`);
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok || !body.ok) {
+    if (response.status === 401) {
+      throw new Error('putiorr rejected the credentials; check username and password in options');
+    }
     throw new Error(body.error || `putiorr responded with ${response.status}`);
   }
   return body;
@@ -102,7 +122,10 @@ async function handleGrab(payload) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Other installed extensions can message this worker; only our own content
+  // script may spend the user's put.io account.
+  if (sender?.id !== chrome.runtime.id) return undefined;
   if (message?.kind !== 'grab') return undefined;
   // The .catch matters: an unhandled rejection would close the message port
   // silently and a magnet click (already preventDefault-ed) would do nothing.
@@ -135,11 +158,27 @@ async function rebuildMenus() {
   }
 }
 
-chrome.runtime.onInstalled.addListener(rebuildMenus);
-chrome.runtime.onStartup.addListener(rebuildMenus);
+// Three triggers can fire close together, and rebuildMenus interleaves badly:
+// a second removeAll landing mid-rebuild leaves ghost entries behind. Chaining
+// every rebuild onto one promise keeps the runs strictly sequential.
+let menuQueue = Promise.resolve();
+function queueRebuild() {
+  menuQueue = menuQueue.then(rebuildMenus).catch((error) => console.error('menu rebuild failed', error));
+}
+
+chrome.runtime.onInstalled.addListener(queueRebuild);
+chrome.runtime.onStartup.addListener(queueRebuild);
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync' && changes.profiles) rebuildMenus();
+  if (area === 'sync' && changes.profiles) queueRebuild();
 });
+
+function menuErrorMessage(error) {
+  const message = error?.message ?? '';
+  // The content script is missing on tabs that were open when the extension
+  // loaded; Chrome's own wording for that is not actionable for a user.
+  if (message.includes('Receiving end does not exist')) return 'Reload the page, then try again';
+  return message;
+}
 
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   if (info.menuItemId === MENU_CONFIGURE) {
@@ -171,6 +210,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       profileId,
     });
   } catch (error) {
-    notify('putiorr grab failed', error.message);
+    notify('putiorr grab failed', menuErrorMessage(error));
   }
 });
