@@ -60,6 +60,14 @@ async function readJsonBody(req) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
 
+function isTorrentMetainfoBase64(value) {
+  const data = Buffer.from(value, 'base64');
+  // Buffer.from ignores invalid base64 characters, so round-trip to reject anything that is not
+  // base64, then require a bencoded dictionary so login pages never reach put.io as a torrent.
+  if (data.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')) return false;
+  return data.length > 0 && data[0] === 0x64;
+}
+
 function timingSafeEqualString(a, b) {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -236,6 +244,7 @@ export class TransmissionRpcServer {
     this.webSocketClients = new Set();
     this.webSocketDownloadsBroadcastTimer = undefined;
     this.webSocketRefreshTimer = undefined;
+    this.grabAutoRemoveWarned = new Set();
     this.server = http.createServer((req, res) => {
       this.handle(req, res).catch((error) => {
         logger.error('unhandled rpc error', { error: error.message, stack: error.stack });
@@ -698,40 +707,7 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'POST' && requestPath === '/api/grab') {
-        const body = await readJsonBody(req);
-        const profile = this.service.store.findProfileById(Number(body.profileId));
-        if (!profile) {
-          jsonResponse(res, 404, { error: 'Profile not found' }, this.sessionId);
-          return;
-        }
-        const magnet = String(body.magnet ?? '').trim();
-        const torrentBase64 = String(body.torrentBase64 ?? '').trim();
-        if (!torrentBase64 && !magnet.startsWith('magnet:')) {
-          jsonResponse(res, 400, { error: 'grab requires a magnet link or torrentBase64 metainfo' }, this.sessionId);
-          return;
-        }
-        if (!profile.auto_remove_completed) {
-          logger.warn('grab profile keeps completed transfers in the list; enable auto-remove on the profile for browser grabs', {
-            profile: profile.slug,
-          });
-        }
-        logger.info('grab from browser', {
-          profile: profile.slug,
-          sourceType: torrentBase64 ? 'torrent' : 'magnet',
-          sourceUrl: body.sourceUrl,
-        });
-        const args = torrentBase64
-          ? { metainfo: torrentBase64, filename: body.filename }
-          : { filename: magnet };
-        const result = await this.service.addTorrent(args, profile);
-        this.scheduleWebSocketDownloadsBroadcast('api:grab');
-        jsonResponse(res, 200, {
-          ok: true,
-          transfer: {
-            id: result['torrent-added'].id,
-            name: result['torrent-added'].name,
-          },
-        }, this.sessionId);
+        await this.handleGrab(req, res);
         return;
       }
 
@@ -1079,6 +1055,59 @@ export class TransmissionRpcServer {
         logger.debug('unsupported rpc method', { method });
         return {};
     }
+  }
+
+  async handleGrab(req, res) {
+    // A custom header cannot be set by a cross-site simple request, so browsers must preflight
+    // it; the server never answers preflights, which keeps attacker pages out of this endpoint.
+    if (!req.headers['x-putiorr-grab']) {
+      jsonResponse(res, 403, { error: 'grab requires the X-Putiorr-Grab header' }, this.sessionId);
+      return;
+    }
+    const body = await readJsonBody(req);
+    const profileId = Number(body.profileId);
+    if (!Number.isInteger(profileId) || profileId <= 0) {
+      jsonResponse(res, 400, { error: 'profileId is required' }, this.sessionId);
+      return;
+    }
+    const profile = this.service.store.findProfileById(profileId);
+    if (!profile) {
+      jsonResponse(res, 404, { error: 'Profile not found' }, this.sessionId);
+      return;
+    }
+    const magnet = String(body.magnet ?? '').trim().replace(/^magnet:/i, 'magnet:');
+    const torrentBase64 = String(body.torrentBase64 ?? '').trim();
+    if (!torrentBase64 && !magnet.startsWith('magnet:')) {
+      jsonResponse(res, 400, { error: 'grab requires a magnet link or torrentBase64 metainfo' }, this.sessionId);
+      return;
+    }
+    if (torrentBase64 && !isTorrentMetainfoBase64(torrentBase64)) {
+      jsonResponse(res, 400, { error: 'torrentBase64 is not a valid .torrent file' }, this.sessionId);
+      return;
+    }
+    if (!profile.auto_remove_completed && !this.grabAutoRemoveWarned.has(profile.id)) {
+      this.grabAutoRemoveWarned.add(profile.id);
+      logger.warn('grab profile keeps completed transfers in the list; enable auto-remove on the profile for browser grabs', {
+        profile: profile.slug,
+      });
+    }
+    logger.info('grab from browser', {
+      profile: profile.slug,
+      sourceType: torrentBase64 ? 'torrent' : 'magnet',
+      sourceUrl: body.sourceUrl,
+    });
+    const args = torrentBase64
+      ? { metainfo: torrentBase64, filename: body.filename }
+      : { filename: magnet };
+    const result = await this.service.addTorrent(args, profile);
+    this.scheduleWebSocketDownloadsBroadcast('api:grab');
+    jsonResponse(res, 200, {
+      ok: true,
+      transfer: {
+        id: result['torrent-added'].id,
+        name: result['torrent-added'].name,
+      },
+    }, this.sessionId);
   }
 
   async testClientSettings(input) {
