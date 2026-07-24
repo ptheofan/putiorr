@@ -15,7 +15,14 @@ const SYNC_DEFAULTS = {
 async function loadSettings() {
   const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
   const local = await chrome.storage.local.get({ username: '', password: '' });
-  return { ...sync, ...local };
+  // storage.sync can hold data written by a different extension version, so the
+  // array shapes are normalized here; callers below index them without guards.
+  return {
+    ...sync,
+    ...local,
+    profiles: Array.isArray(sync.profiles) ? sync.profiles : [],
+    rules: Array.isArray(sync.rules) ? sync.rules : [],
+  };
 }
 
 function authHeaders(settings) {
@@ -95,7 +102,7 @@ async function handleGrab(payload) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.kind !== 'grab') return undefined;
   // The .catch matters: an unhandled rejection would close the message port
   // silently and a magnet click (already preventDefault-ed) would do nothing.
@@ -143,16 +150,18 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const profileId = Number(String(info.menuItemId).slice(MENU_PREFIX.length));
   const linkUrl = info.linkUrl ?? '';
   const pageUrl = tab?.url ?? info.pageUrl ?? '';
-  if (isMagnetLink(linkUrl)) {
-    await handleGrab({ magnet: linkUrl, pageUrl, profileId });
-    return;
-  }
-  if (!tab?.id) {
-    notify('putiorr grab failed', 'No tab available to fetch the link');
-    return;
-  }
-  // Fetch the .torrent from the page context so tracker session cookies apply.
+  // Every grab path stays inside this try: an escaping rejection would be an
+  // unhandled promise in an event listener, leaving the click with no feedback.
   try {
+    if (isMagnetLink(linkUrl)) {
+      await handleGrab({ magnet: linkUrl, pageUrl, profileId });
+      return;
+    }
+    if (!tab?.id) {
+      notify('putiorr grab failed', 'No tab available to fetch the link');
+      return;
+    }
+    // Fetch the .torrent from the page context so tracker session cookies apply.
     const fetched = await chrome.tabs.sendMessage(tab.id, { kind: 'fetch-link', url: linkUrl });
     if (!fetched?.ok) throw new Error(fetched?.error ?? 'failed to fetch the link');
     await handleGrab({
