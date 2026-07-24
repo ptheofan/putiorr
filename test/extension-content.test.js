@@ -154,15 +154,23 @@ test('a magnet click is captured and forwarded without touching the network', as
 });
 
 test('a magnet whose payload ends in .torrent is still sent as a magnet', async () => {
-  // isTorrentLink would claim this URI; resolve.js documents that isMagnetLink
-  // has to be consulted first, and this pins that the content script does.
-  const harness = await loadContent();
+  // resolve.js documents that isMagnetLink has to be asked first, because
+  // isTorrentLink would otherwise claim a magnet URI whose payload ends in
+  // ".torrent". Only an *opaque* payload discriminates: a magnet written the
+  // usual `magnet:?xt=...` way has an empty URL pathname, so isTorrentLink
+  // says false for it whatever the query string holds, and a test built on
+  // one would pass under either ordering.
+  const href = 'magnet:xxx.torrent';
+  const resolve = await import(RESOLVE_URL.href);
+  assert.equal(resolve.isMagnetLink(href), true);
+  assert.equal(resolve.isTorrentLink(href), true, 'the input must be claimed by both predicates to discriminate');
 
-  harness.dispatch(harness.anchor('magnet:?xt=urn:btih:abc&dn=Example.torrent'));
+  const harness = await loadContent();
+  harness.dispatch(harness.anchor(href));
   await settle();
 
   assert.equal(harness.sent.length, 1);
-  assert.equal(harness.sent[0].magnet, 'magnet:?xt=urn:btih:abc&dn=Example.torrent');
+  assert.equal(harness.sent[0].magnet, href);
   assert.equal(harness.sent[0].torrentBase64, undefined, 'no page fetch should have been attempted');
 });
 
