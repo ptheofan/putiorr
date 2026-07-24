@@ -555,7 +555,11 @@ async function handleGrab(payload) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.kind !== 'grab') return undefined;
-  handleGrab(message).then(sendResponse);
+  // The .catch matters: an unhandled rejection would close the message port
+  // silently and a magnet click (already preventDefault-ed) would do nothing.
+  handleGrab(message)
+    .then(sendResponse)
+    .catch((error) => sendResponse({ ok: false, error: error.message }));
   return true;
 });
 
