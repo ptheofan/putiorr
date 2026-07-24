@@ -658,6 +658,30 @@ git add extension/manifest.json extension/icons extension/background.js
 git commit -m "Add extension manifest, icons, and service worker (#59)"
 ```
 
+- [ ] **Step 6: Harden the worker (added after code review)**
+
+Applied in follow-up commits — the committed `extension/background.js`
+supersedes the block in Step 3:
+- `loadSettings` sanitizes storage: `sanitizeProfiles` (new pure export in
+  `lib/resolve.js` — drops malformed elements, coerces ids to integers > 0,
+  falls back names) and an `Array.isArray` guard on rules.
+- Basic auth encodes credentials as UTF-8 before `btoa`
+  (`encodeCredentials`); the endpoint URL and headers are built outside the
+  network try/catch so encoding/URL errors are not misreported as
+  "unreachable" (invalid base URL gets its own message).
+- Context-menu rebuilds are serialized through a chained `menuQueue` promise
+  (`queueRebuild`) on all three triggers — interleaved rebuilds previously
+  left ghost entries.
+- The `onClicked` handler wraps all grab work in one try/catch;
+  "Receiving end does not exist" is translated to "Reload the page, then try
+  again"; 401 responses get a check-your-credentials message.
+- The `onMessage` listener rejects senders whose `sender.id` is not this
+  extension.
+- `test/extension-background.test.js` (stub `chrome` global, cache-busted
+  imports) pins the menu race, corrupt-storage paths, auth encoding, sender
+  check, and error wording; `test/extension-resolve.test.js` covers
+  `sanitizeProfiles`.
+
 ---
 
 ### Task 4: Content script — click capture and page-context fetch
