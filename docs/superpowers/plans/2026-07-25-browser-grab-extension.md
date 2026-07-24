@@ -399,6 +399,24 @@ git add extension/lib/resolve.js test/extension-resolve.test.js
 git commit -m "Add pure link-detection and profile-resolution helpers for the extension (#59)"
 ```
 
+- [ ] **Step 6: Harden the helpers (added after code review)**
+
+Applied on top of the code above, in a separate commit — the committed
+`extension/lib/resolve.js` supersedes the block in Step 3:
+- `matchSiteRuleProfileId` guards with `Array.isArray` on rules and
+  `rule?.domains` (corrupted `chrome.storage.sync` data must not throw — a
+  throw becomes a silent magnet-click no-op in the service worker), and a
+  malformed rule does not stop later valid rules from matching.
+- A `normalizeDomain` helper (URL-parser based) is applied to both rule
+  domains and the incoming hostname: IDN→punycode, scheme/path/port and
+  leading/trailing dots stripped, unparseable values skipped.
+- `isMagnetLink` is case-insensitive; `isTorrentLink` documents that callers
+  must check `isMagnetLink` first.
+- `resolveProfileId` coerces candidates numerically and accepts only
+  integers > 0.
+- `scripts/lint.js` roots now include `extension/`.
+- Tests cover all of the above (7 tests in `test/extension-resolve.test.js`).
+
 ---
 
 ### Task 3: Extension scaffold — manifest, icons, service worker
