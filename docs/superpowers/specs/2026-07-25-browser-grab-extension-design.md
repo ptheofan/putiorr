@@ -44,8 +44,16 @@ One new route in the existing `handleApi` switch in
     (`src/transfer/service.js:267-286`).
   - Success: `{ ok: true, transfer: { id, name } }`.
   - Failure: appropriate 4xx/5xx with `{ error: "message" }`.
-- Auth: none needed beyond the existing gate — `handle()` applies Basic auth to
-  every route before dispatch (`src/transmission/server.js:352`).
+- Auth: the existing gate — `handle()` applies Basic auth to every route
+  before dispatch (`src/transmission/server.js:352`).
+- CSRF defense (Basic auth does not provide it — browsers replay cached
+  credentials cross-site): the endpoint requires an `X-Putiorr-Grab` header
+  and returns 403 without it. A custom header forces a CORS preflight the
+  server never answers, so attacker web pages are blocked; the extension
+  sends the header explicitly and is exempt from CORS via host permissions.
+- `torrentBase64` is validated at the boundary (base64 round-trip + bencode
+  dict first byte) so an expired-tracker-session HTML page is rejected with a
+  clear 400 instead of being uploaded to put.io.
 - Profile discovery: the existing `GET /api/profiles`.
 
 ## Extension components (`extension/`)

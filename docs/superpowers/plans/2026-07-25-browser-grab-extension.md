@@ -268,6 +268,15 @@ git add test/api-grab.test.js src/transmission/server.js
 git commit -m "Add POST /api/grab endpoint for browser grabs (#59)"
 ```
 
+- [ ] **Step 7: Harden the endpoint (added after code review)**
+
+Applied on top of the code above, in a separate commit:
+- The handler moves to an `async handleGrab(req, res)` method; the `handleApi` branch just delegates.
+- Anti-CSRF: requests without an `X-Putiorr-Grab` header get 403 (a custom header forces a CORS preflight attacker pages can't complete; the extension sends it and is CORS-exempt via host permissions).
+- `torrentBase64` must round-trip as base64 and decode to a bencode dict (first byte `d`), else 400 — rejects HTML login pages from expired tracker sessions.
+- Missing/invalid `profileId` → 400 `profileId is required`; magnet scheme check is case-insensitive; the auto-remove warning fires once per profile per process.
+- Tests send the header, close the store in `t.after` (repo convention), and cover: no header (403), invalid base64 (400), missing profileId (400), disabled profile (400), torrentBase64 precedence over magnet.
+
 ---
 
 ### Task 2: Pure extension logic (`extension/lib/resolve.js`)
@@ -468,7 +477,9 @@ async function loadSettings() {
 }
 
 function authHeaders(settings) {
-  const headers = { 'Content-Type': 'application/json' };
+  // X-Putiorr-Grab is the anti-CSRF token /api/grab requires; the extension
+  // is exempt from CORS via host_permissions, attacker web pages are not.
+  const headers = { 'Content-Type': 'application/json', 'X-Putiorr-Grab': '1' };
   if (settings.username || settings.password) {
     headers.Authorization = `Basic ${btoa(`${settings.username}:${settings.password}`)}`;
   }
