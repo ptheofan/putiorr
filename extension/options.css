@@ -1,0 +1,339 @@
+/* ==========================================================================
+   putiorr grab — options page styling.
+
+   The tokens, panel and form rules below are copied from the dashboard's
+   stylesheets so the extension looks like the putiorr it configures:
+     src/web/styles/01-tokens.css  — the violet/ink token set
+     src/web/styles/02-base.css    — page reset and shell
+     src/web/styles/03-panels.css  — card surfaces
+     src/web/styles/04-forms.css   — labels, inputs, selects, buttons
+     src/web/styles/09-theme-dark.css — the dark surface overrides
+   A copy rather than a reference: an extension page cannot load anything out
+   of src/web at runtime, and only the rules this page uses are kept. The
+   dashboard picks its theme with a class the user toggles; the extension has
+   no such control, so the same dark token values hang off prefers-color-scheme
+   instead. The dashboard's Web Awesome elements are deliberately left behind —
+   they are a runtime dependency this page has no reason to carry.
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+  --bg: #f6f6fb;
+  --panel: #ffffff;
+  --panel-2: #f1f0fa;
+  --surface: #f6f5fc;
+  --surface-2: #eceaf6;
+  --text: #1a1a2e;
+  --muted: #6b6b85;
+  --line: #e4e2f0;
+  --accent: #7c3aed;
+  --accent-strong: #6d28d9;
+  --accent-hover: #6d28d9;
+  --accent-quiet: #f1ebfe;
+  --amber: #b7791f;
+  --danger: #b42318;
+  --ok: #16803f;
+  --field: #ffffff;
+  --focus-ring: rgba(124, 58, 237, 0.22);
+  --shadow: 0 18px 50px rgba(23, 35, 38, 0.08);
+
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #0a0a12;
+    --panel: #14141f;
+    --panel-2: #1e1e2e;
+    --surface: #1a1a28;
+    --surface-2: #24243a;
+    --text: #f3f3f8;
+    --muted: #9a9ab2;
+    --line: #2b2b3d;
+    --accent-strong: #a78bfa;
+    --accent-hover: #8b5cf6;
+    --accent-quiet: #241a40;
+    --amber: #fbbf24;
+    --danger: #f47373;
+    --ok: #34d399;
+    --field: #1a1a28;
+    --focus-ring: rgba(124, 58, 237, 0.4);
+    --shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+.shell {
+  width: min(52rem, 100%);
+  margin: 0 auto;
+  padding: 32px 20px 48px;
+  display: grid;
+  gap: 20px;
+}
+
+/* Header ------------------------------------------------------------------ */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.hero-icon {
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(124, 58, 237, 0.28);
+  border-radius: 14px;
+  background: var(--accent-quiet);
+}
+
+.topbar-text {
+  min-width: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.25;
+}
+
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Cards ------------------------------------------------------------------- */
+
+.card {
+  display: grid;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.callout {
+  border-color: rgba(183, 121, 31, 0.35);
+  background: var(--panel);
+  border-left: 4px solid var(--amber);
+}
+
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+/* Fields ------------------------------------------------------------------ */
+
+.field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.field-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+input,
+select {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  background: var(--field);
+  color: var(--text);
+}
+
+input::placeholder {
+  color: var(--muted);
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--focus-ring);
+  border-color: var(--accent);
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.check-row input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+/* Buttons ----------------------------------------------------------------- */
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.save-row {
+  justify-content: flex-end;
+}
+
+.button {
+  min-height: 38px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.button:hover {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.button.primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: #ffffff;
+}
+
+/* Status ------------------------------------------------------------------ */
+
+#status {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+#status.error {
+  color: var(--danger);
+}
+
+/* Profiles and legacy rules ----------------------------------------------- */
+
+.profile-list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
+  gap: 12px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+}
+
+.profile-row-name {
+  font-size: 13px;
+  font-weight: 750;
+  overflow-wrap: anywhere;
+}
+
+.profile-row-sites {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.profile-row-sites.is-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.empty-note {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.legacy-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legacy-rule {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: 12px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}

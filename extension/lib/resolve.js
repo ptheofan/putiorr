@@ -1,24 +1,11 @@
 // Pure helpers shared by the content script and the service worker.
 // No chrome.* APIs here so node's test runner can import this file.
+// This module is web-accessible (the content script can only import resources
+// that are), so it holds nothing beyond what that script and the worker need.
 
-// Site rules come from chrome.storage.sync, which can hold data written by a
-// different extension version, so every shape read below is treated as
-// untrusted: a throw here would become a silent no-op on a magnet click.
-
-// Exported so the options page can show the user the domain that will actually
-// be stored: this function quietly rewrites a lot (scheme and path stripped,
-// unicode punycoded, leading dots dropped) and returns '' for the unparseable.
-export function normalizeDomain(value) {
-  const raw = String(value ?? '').trim().toLowerCase().replace(/^\.+/, '');
-  if (!raw) return '';
-
-  const candidate = raw.includes('://') ? raw : `http://${raw}`;
-  try {
-    return new URL(candidate).hostname.replace(/\.$/, '');
-  } catch {
-    return '';
-  }
-}
+// The cached profile list comes from chrome.storage.sync, which can hold data
+// written by a different extension version, so every shape read below is
+// treated as untrusted: a throw here would become a silent no-op on a click.
 
 function normalizeProfileId(value) {
   const numeric = Number(value);
@@ -56,30 +43,4 @@ export function isTorrentLink(href) {
   } catch {
     return false;
   }
-}
-
-export function matchSiteRuleProfileId(rules, hostname) {
-  const host = normalizeDomain(hostname);
-  if (!host) return undefined;
-
-  for (const rule of Array.isArray(rules) ? rules : []) {
-    const domains = Array.isArray(rule?.domains) ? rule.domains : [];
-    for (const domain of domains) {
-      const normalized = normalizeDomain(domain);
-      if (!normalized) continue;
-      if (host === normalized || host.endsWith(`.${normalized}`)) return rule.profileId;
-    }
-  }
-
-  return undefined;
-}
-
-export function resolveProfileId({ explicitProfileId, rules, hostname, defaultProfileId }) {
-  const explicit = normalizeProfileId(explicitProfileId);
-  if (explicit) return explicit;
-
-  const fromRule = normalizeProfileId(matchSiteRuleProfileId(rules, hostname));
-  if (fromRule) return fromRule;
-
-  return normalizeProfileId(defaultProfileId);
 }

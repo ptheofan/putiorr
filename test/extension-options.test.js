@@ -2,18 +2,31 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { encodeCredentials } from '../extension/lib/auth.js';
-import { matchSiteRuleProfileId } from '../extension/lib/resolve.js';
-import { SYNC_DEFAULTS, parseRuleDomains, validateBaseUrl } from '../extension/lib/settings.js';
+import { SYNC_DEFAULTS, validateBaseUrl } from '../extension/lib/settings.js';
 
 // options.js is a page script: it wires up listeners at import time and exports
-// nothing. The pure halves (URL and domain validation, credential encoding) are
-// tested directly; the wiring is exercised through a small stub DOM in the
-// style of test/extension-content.test.js, with a cache-busted import per test
-// so each one gets fresh module state.
+// nothing. The pure halves (URL validation, credential encoding) are tested
+// directly; the wiring is exercised through a small stub DOM in the style of
+// test/extension-content.test.js, with a cache-busted import per test so each
+// one gets fresh module state.
 
 const OPTIONS_URL = new URL('../extension/options.js', import.meta.url);
 const OPTIONS_HTML = new URL('../extension/options.html', import.meta.url);
-const FIELD_IDS = ['baseUrl', 'username', 'password', 'status', 'defaultProfile', 'autoCapture', 'rules', 'loadProfiles', 'addRule', 'save'];
+const OPTIONS_CSS = new URL('../extension/options.css', import.meta.url);
+const FIELD_IDS = [
+  'baseUrl',
+  'username',
+  'password',
+  'status',
+  'defaultProfile',
+  'autoCapture',
+  'profileList',
+  'legacyNotice',
+  'legacyRules',
+  'dismissLegacy',
+  'loadProfiles',
+  'save',
+];
 
 let optionsLoad = 0;
 
@@ -81,83 +94,6 @@ test('validateBaseUrl drops a fully qualified name\'s root dot like a rule domai
   assert.deepEqual(validateBaseUrl('https://nas./'), { ok: true, baseUrl: 'https://nas' });
   assert.deepEqual(validateBaseUrl('http://nas.example.:9091'), { ok: true, baseUrl: 'http://nas.example:9091' });
   assert.deepEqual(validateBaseUrl('http://[::1]:9091'), { ok: true, baseUrl: 'http://[::1]:9091' });
-});
-
-test('parseRuleDomains returns the domains that will actually be stored', () => {
-  assert.deepEqual(parseRuleDomains('https://x.example/dl, bücher.example'), {
-    domains: ['x.example', 'xn--bcher-kva.example'],
-    errors: [],
-    warnings: [],
-  });
-  assert.deepEqual(parseRuleDomains('  X.Example:8080 , .z.example. ').domains, ['x.example', 'z.example']);
-  assert.deepEqual(parseRuleDomains('x.example, x.example, X.EXAMPLE').domains, ['x.example']);
-  assert.deepEqual(parseRuleDomains('').domains, []);
-  assert.deepEqual(parseRuleDomains(undefined).domains, []);
-  assert.deepEqual(parseRuleDomains(' , ,').domains, []);
-});
-
-test('parseRuleDomains rejects a wildcard and names the rule that replaces it', () => {
-  const wildcard = parseRuleDomains('*.x.example');
-  assert.deepEqual(wildcard.domains, []);
-  assert.deepEqual(wildcard.errors, [
-    'Write "x.example" instead of "*.x.example": a rule domain already matches its subdomains',
-  ]);
-  assert.match(parseRuleDomains('*x.example').errors[0], /Write "x\.example"/);
-  assert.match(parseRuleDomains('*').errors[0], /is not a domain/);
-});
-
-test('parseRuleDomains warns about a single label instead of matching a whole TLD in silence', () => {
-  const result = parseRuleDomains('com, example');
-  assert.deepEqual(result.domains, ['com', 'example']);
-  assert.deepEqual(result.errors, []);
-  assert.deepEqual(result.warnings, [
-    '"com" also matches every site ending in ".com"',
-    '"example" also matches every site ending in ".example"',
-  ]);
-});
-
-test('parseRuleDomains refuses domains that could never match a hostname', () => {
-  // normalizeDomain happily returns these: the URL host parser has no opinion on
-  // "*", empty labels or a leading "-", so without a shape check they would save
-  // clean and then silently match nothing for the rest of the profile's life.
-  for (const entry of ['x.*.example', 'x..example', 'x.example*', '-.example', 'x.example-', '.']) {
-    const result = parseRuleDomains(entry);
-    assert.deepEqual(result.domains, [], entry);
-    assert.equal(result.errors.length, 1, entry);
-    assert.match(result.errors[0], new RegExp(entry.replace(/[.*\-\\]/g, '\\$&')), entry);
-  }
-});
-
-test('parseRuleDomains accepts the underscore hostnames home LANs actually use', () => {
-  // Invalid in public DNS, but Chrome's URL parser keeps the underscore, so a
-  // page served from "media_server.lan" really does match a rule spelled that
-  // way: refusing it here would be a false rejection on exactly putiorr's
-  // audience. The two halves are asserted together so they cannot drift.
-  const result = parseRuleDomains('media_server.lan, _svc.x.example');
-  assert.deepEqual(result, { domains: ['media_server.lan', '_svc.x.example'], errors: [], warnings: [] });
-
-  const rules = [{ domains: result.domains, profileId: 3 }];
-  assert.equal(matchSiteRuleProfileId(rules, 'media_server.lan'), 3);
-  assert.equal(matchSiteRuleProfileId(rules, 'files.media_server.lan'), 3);
-  assert.equal(matchSiteRuleProfileId(rules, new URL('http://media_server.lan:9091/dl').hostname), 3);
-  assert.equal(matchSiteRuleProfileId(rules, 'media_server.example'), undefined);
-
-  // A leading or trailing "-" stays refused: those cannot appear in a hostname.
-  assert.equal(parseRuleDomains('media_server-.lan').domains.length, 0);
-});
-
-test('parseRuleDomains keeps IP literals, which are legitimate rule domains', () => {
-  assert.deepEqual(parseRuleDomains('192.168.1.9').domains, ['192.168.1.9']);
-  assert.deepEqual(parseRuleDomains('[::1]'), { domains: ['[::1]'], errors: [], warnings: [] });
-  // A bracketed literal has no labels, so the single-label warning must not fire.
-  assert.deepEqual(parseRuleDomains('[::ffff:127.0.0.1]').warnings, []);
-});
-
-test('parseRuleDomains reports a domain it cannot normalize rather than dropping it', () => {
-  // normalizeDomain returns '' here, which the plan's version silently skipped.
-  const result = parseRuleDomains('//, x.example');
-  assert.deepEqual(result.domains, ['x.example']);
-  assert.deepEqual(result.errors, ['"//" is not a domain putiorr can match']);
 });
 
 test('encodeCredentials encodes UTF-8 bytes rather than Latin-1 code units', () => {
@@ -244,6 +180,13 @@ function createHarness({ sync = {}, local = {}, fetch: fetchStub } = {}) {
   const stored = { sync: { ...sync }, local: { ...local } };
   const writes = [];
 
+  // chrome.storage.get answers only the keys it was asked for, defaults
+  // included. Handing back everything stored would hide a page that forgot to
+  // ask for a key — which is exactly how the retired `rules` key is read now.
+  const read = (area) => async (defaults) => Object.fromEntries(
+    Object.entries(defaults).map(([key, value]) => [key, stored[area][key] ?? value]),
+  );
+
   globalThis.document = {
     getElementById: (id) => fields[id],
     createElement,
@@ -251,14 +194,18 @@ function createHarness({ sync = {}, local = {}, fetch: fetchStub } = {}) {
   globalThis.chrome = {
     storage: {
       sync: {
-        get: async (defaults) => ({ ...defaults, ...stored.sync }),
+        get: read('sync'),
         set: async (values) => {
           writes.push({ area: 'sync', values });
           Object.assign(stored.sync, values);
         },
+        remove: async (key) => {
+          writes.push({ area: 'sync', removed: key });
+          delete stored.sync[key];
+        },
       },
       local: {
-        get: async (defaults) => ({ ...defaults, ...stored.local }),
+        get: read('local'),
         set: async (values) => {
           writes.push({ area: 'local', values });
           Object.assign(stored.local, values);
@@ -270,20 +217,20 @@ function createHarness({ sync = {}, local = {}, fetch: fetchStub } = {}) {
     throw new TypeError('fetch failed');
   });
 
-  const ruleRows = () => fields.rules.children;
-  const cellInput = (row, index) => row.children[index].children[0];
+  const rowText = (row) => row.children.map((cell) => cell.textContent);
 
   return {
     fields,
     stored,
     writes,
-    ruleRows,
-    domainsOf: (index) => cellInput(ruleRows()[index], 0).value,
-    setDomains: (index, value) => { cellInput(ruleRows()[index], 0).value = value; },
-    selectOf: (index) => cellInput(ruleRows()[index], 1),
-    removeButtonOf: (index) => cellInput(ruleRows()[index], 2),
     status: () => fields.status.textContent,
-    lastSync: () => writes.filter((write) => write.area === 'sync').at(-1)?.values,
+    lastSync: () => writes.filter((write) => write.area === 'sync' && write.values).at(-1)?.values,
+    // Each rendered profile row is [name, sites]; the empty state is a single
+    // node with no cells of its own.
+    profileRows: () => fields.profileList.children.map(rowText),
+    profileListText: () => fields.profileList.children.map((node) => node.textContent).join('\n'),
+    legacyShown: () => fields.legacyNotice.hidden === false,
+    legacyRules: () => fields.legacyRules.children.map((node) => node.textContent),
   };
 }
 
@@ -309,13 +256,12 @@ test('options.html loads the script as a module so it can import lib/', () => {
   assert.match(html, /<script type="module" src="options\.js"><\/script>/);
 });
 
-test('stored settings are restored into the form, rules included', async () => {
+test('stored settings are restored into the form', async () => {
   const harness = await loadOptions({
     sync: {
       baseUrl: 'http://nas:9091',
       defaultProfileId: 4,
       autoCapture: false,
-      rules: [{ domains: ['x.example', 'z.example'], profileId: 7 }],
       profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }],
     },
     local: { username: 'user', password: 'secret' },
@@ -326,14 +272,15 @@ test('stored settings are restored into the form, rules included', async () => {
   assert.equal(harness.fields.password.value, 'secret');
   assert.equal(harness.fields.autoCapture.checked, false);
   assert.equal(harness.fields.defaultProfile.value, '4');
-  assert.equal(harness.ruleRows().length, 1);
-  assert.equal(harness.domainsOf(0), 'x.example, z.example');
-  assert.equal(harness.selectOf(0).value, '7');
   // The placeholder plus one option per profile, labelled by name only.
   assert.deepEqual(
     harness.fields.defaultProfile.children.map((option) => [option.value, option.textContent]),
     [['', 'No default profile'], ['4', 'Movies'], ['7', 'TV']],
   );
+  // Browser sites are not cached, so until profiles are fetched the page says
+  // so rather than implying the profiles route nothing.
+  assert.match(harness.profileListText(), /Test the connection to see/);
+  assert.equal(harness.legacyShown(), false);
 });
 
 test('corrupt stored settings still produce a usable form', async () => {
@@ -342,9 +289,9 @@ test('corrupt stored settings still produce a usable form', async () => {
   });
 
   assert.equal(harness.fields.baseUrl.value, '');
-  assert.equal(harness.ruleRows().length, 0);
   assert.equal(harness.fields.autoCapture.checked, true, 'a missing autoCapture must default to on');
   assert.equal(harness.fields.defaultProfile.value, '');
+  assert.equal(harness.legacyShown(), false, 'a rules key that is not a list has nothing to show');
 });
 
 test('a default profile that is no longer stored is reported instead of vanishing', async () => {
@@ -359,25 +306,24 @@ test('saving stores the normalized settings and shows the normalization back', a
     sync: {
       baseUrl: 'http://nas:9091',
       profiles: [{ id: 7, name: 'TV' }],
+      // A retired rules key must not be rewritten by a save that no longer owns it.
       rules: [{ domains: ['x.example'], profileId: 7 }],
     },
   });
 
   harness.fields.baseUrl.value = 'HTTP://NAS:9091/';
-  harness.setDomains(0, 'https://x.example/dl, bücher.example, x.example');
   harness.fields.save.click();
   await settle();
 
-  assert.equal(harness.status(), 'Saved\nNo default profile: only site rules and the right-click menu will grab');
+  assert.equal(harness.status(), 'Saved\nNo default profile: only sites configured in putiorr and the right-click menu will grab');
   assert.equal(harness.fields.baseUrl.value, 'http://nas:9091');
-  assert.equal(harness.domainsOf(0), 'x.example, xn--bcher-kva.example');
   assert.deepEqual(harness.lastSync(), {
     baseUrl: 'http://nas:9091',
     defaultProfileId: 0,
     autoCapture: true,
-    rules: [{ domains: ['x.example', 'xn--bcher-kva.example'], profileId: 7 }],
     profiles: [{ id: 7, name: 'TV' }],
   });
+  assert.deepEqual(harness.stored.sync.rules, [{ domains: ['x.example'], profileId: 7 }], 'only Dismiss removes the legacy key');
   // Credentials first: a lost password cannot be recovered from the screen.
   assert.deepEqual(harness.writes.map(({ area }) => area), ['local', 'sync']);
   assert.deepEqual(harness.writes[0].values, { username: '', password: '' });
@@ -393,73 +339,6 @@ test('an invalid base URL blocks the save rather than storing a truncated one', 
   assert.match(harness.status(), /root of the host/);
   assert.equal(harness.fields.status.className, 'error');
   assert.deepEqual(harness.writes, [], 'nothing may be stored while the URL is unusable');
-});
-
-test('a wildcard rule blocks the save and names its replacement', async () => {
-  const harness = await loadOptions({
-    sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }], rules: [{ domains: [], profileId: 7 }] },
-  });
-
-  harness.setDomains(0, '*.x.example');
-  harness.fields.save.click();
-  await settle();
-
-  assert.match(harness.status(), /Write "x\.example" instead/);
-  assert.deepEqual(harness.writes, []);
-  assert.equal(harness.domainsOf(0), '*.x.example', 'a refused value must stay on screen');
-});
-
-test('a single-label rule is saved with a warning rather than refused', async () => {
-  const harness = await loadOptions({
-    sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }], rules: [{ domains: [], profileId: 7 }] },
-  });
-
-  harness.setDomains(0, 'example');
-  harness.fields.save.click();
-  await settle();
-
-  assert.match(harness.status(), /also matches every site ending in "\.example"/);
-  assert.deepEqual(harness.lastSync().rules, [{ domains: ['example'], profileId: 7 }]);
-});
-
-test('a rule with domains but no profile blocks the save', async () => {
-  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] } });
-
-  harness.fields.addRule.click();
-  harness.setDomains(0, 'x.example');
-  harness.fields.save.click();
-  await settle();
-
-  assert.match(harness.status(), /Pick a profile for the site rule "x\.example"/);
-  assert.deepEqual(harness.writes, []);
-});
-
-test('an untouched added row is not an error and is not stored', async () => {
-  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] } });
-
-  harness.fields.addRule.click();
-  harness.fields.save.click();
-  await settle();
-
-  assert.match(harness.status(), /^Saved/);
-  assert.deepEqual(harness.lastSync().rules, []);
-});
-
-test('removing a row drops it from the saved rules', async () => {
-  const harness = await loadOptions({
-    sync: {
-      baseUrl: 'http://nas:9091',
-      profiles: [{ id: 7, name: 'TV' }],
-      rules: [{ domains: ['x.example'], profileId: 7 }, { domains: ['z.example'], profileId: 7 }],
-    },
-  });
-
-  harness.removeButtonOf(0).click();
-  harness.fields.save.click();
-  await settle();
-
-  assert.equal(harness.ruleRows().length, 1);
-  assert.deepEqual(harness.lastSync().rules, [{ domains: ['z.example'], profileId: 7 }]);
 });
 
 test('malformed profiles are sanitized before they reach storage', async () => {
@@ -505,6 +384,53 @@ test('test connection loads enabled profiles over UTF-8 basic auth', async () =>
     harness.fields.defaultProfile.children.map((option) => option.textContent),
     ['No default profile', 'Movies', 'TV'],
   );
+});
+
+test('loaded profiles are listed with the sites putiorr routes to them', async () => {
+  // The mapping lives on the putiorr profile now, so the only honest thing the
+  // options page can do is show what putiorr just said.
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [
+        { id: 4, name: 'Movies', enabled: 1, browser_domains: ['x.example', 'z.example'] },
+        // /api/profiles answers in both key styles; either one is the mapping.
+        { id: 7, name: 'TV', enabled: 1, browserDomains: ['tv.example'] },
+        { id: 8, name: 'Books', enabled: 1, browser_domains: [] },
+        { id: 9, name: 'Off', enabled: 0, browser_domains: ['off.example'] },
+      ],
+    }),
+  });
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  assert.deepEqual(harness.profileRows(), [
+    ['Movies', 'x.example, z.example'],
+    ['TV', 'tv.example'],
+    ['Books', 'no sites'],
+  ]);
+});
+
+test('a profile list with unusable site data is shown rather than dropped', async () => {
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [
+        { id: 4, name: 'Movies', enabled: 1, browser_domains: 'corrupt' },
+        { id: 7, name: 'TV', enabled: 1, browser_domains: [null, ' x.example ', ''] },
+      ],
+    }),
+  });
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  assert.deepEqual(harness.profileRows(), [['Movies', 'no sites'], ['TV', 'x.example']]);
 });
 
 test('test connection refuses to fetch an unusable URL', async () => {
@@ -553,13 +479,12 @@ test('an unreachable, stalled or non-putiorr server each read as themselves', as
   }
 });
 
-test('a reload that drops profiles reports the selections it clears', async () => {
+test('a reload that drops the default profile reports the selection it clears', async () => {
   const harness = await loadOptions({
     sync: {
       baseUrl: 'http://nas:9091',
       defaultProfileId: 4,
       profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }],
-      rules: [{ domains: ['x.example'], profileId: 7 }],
     },
     fetch: async () => ({ ok: true, status: 200, json: async () => [{ id: 9, name: 'Books', enabled: 1 }] }),
   });
@@ -568,9 +493,7 @@ test('a reload that drops profiles reports the selections it clears', async () =
   await settle();
 
   assert.match(harness.status(), /Profile #4 no longer exists/);
-  assert.match(harness.status(), /1 site rule\(s\) pointed at a profile that no longer exists/);
   assert.equal(harness.fields.defaultProfile.value, '');
-  assert.equal(harness.selectOf(0).value, '');
 });
 
 test('a putiorr with no enabled profiles says so instead of reporting success', async () => {
@@ -596,7 +519,6 @@ test('an empty profile list must not quietly wipe a working configuration', asyn
       baseUrl: 'http://nas:9091',
       defaultProfileId: 4,
       profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }],
-      rules: [{ domains: ['x.example'], profileId: 7 }],
     },
     fetch: async () => ({ ok: true, status: 200, json: async () => [] }),
   });
@@ -606,14 +528,12 @@ test('an empty profile list must not quietly wipe a working configuration', asyn
 
   assert.match(harness.status(), /no enabled profiles/);
   assert.equal(harness.fields.defaultProfile.value, '4', 'the default selection must survive');
-  assert.equal(harness.selectOf(0).value, '7', 'the rule selection must survive');
 
   harness.fields.save.click();
   await settle();
 
   assert.deepEqual(harness.lastSync().profiles, [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }]);
   assert.equal(harness.lastSync().defaultProfileId, 4);
-  assert.deepEqual(harness.lastSync().rules, [{ domains: ['x.example'], profileId: 7 }]);
 });
 
 test('a storage write that fails is reported rather than lost', async () => {
@@ -654,7 +574,7 @@ test('a failed credentials write names the credentials and claims nothing', asyn
 test('the keys written to storage.sync are exactly the ones the worker reads', async () => {
   // Both sides now share one SYNC_DEFAULTS, so this guards the remaining gap:
   // that save() writes every key the worker defaults, and no other.
-  const expected = ['autoCapture', 'baseUrl', 'defaultProfileId', 'profiles', 'rules'];
+  const expected = ['autoCapture', 'baseUrl', 'defaultProfileId', 'profiles'];
   assert.deepEqual(Object.keys(SYNC_DEFAULTS).sort(), expected);
 
   const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
@@ -671,9 +591,8 @@ test('the keys written to storage.sync are exactly the ones the worker reads', a
 });
 
 test('the save note names what is actually able to grab', async () => {
-  // "only site rules and the right-click menu will grab" is a lie with no
-  // profiles stored: the menu offers just "Configure…", and a rule cannot be
-  // saved without a profile to name.
+  // "the right-click menu will grab" is a lie with no profiles stored: the menu
+  // offers just "Configure…", so nothing at all can grab yet.
   const empty = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
   empty.fields.save.click();
   await settle();
@@ -682,7 +601,7 @@ test('the save note names what is actually able to grab', async () => {
   const loaded = await loadOptions({ sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] } });
   loaded.fields.save.click();
   await settle();
-  assert.equal(loaded.status(), 'Saved\nNo default profile: only site rules and the right-click menu will grab');
+  assert.equal(loaded.status(), 'Saved\nNo default profile: only sites configured in putiorr and the right-click menu will grab');
 
   loaded.fields.defaultProfile.value = '7';
   loaded.fields.save.click();
@@ -690,28 +609,57 @@ test('the save note names what is actually able to grab', async () => {
   assert.equal(loaded.status(), 'Saved');
 });
 
-test('with no profiles loaded every select says so and no rule can be saved', async () => {
+test('with no profiles loaded the default select says so', async () => {
+  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
+
+  assert.deepEqual(harness.fields.defaultProfile.children.map((option) => option.textContent), ['Load profiles first']);
+});
+
+test('old site rules are shown once, read-only, with what replaces them', async () => {
+  // Nothing is pushed to putiorr on the user's behalf: the rules are shown so
+  // the mapping can be recreated there, and then dropped for good.
+  const harness = await loadOptions({
+    sync: {
+      baseUrl: 'http://nas:9091',
+      profiles: [{ id: 7, name: 'TV' }],
+      rules: [
+        { domains: ['x.example', 'z.example'], profileId: 7 },
+        // A profile the cached list no longer knows still has to be readable.
+        { domains: ['y.example'], profileId: 4 },
+      ],
+    },
+  });
+
+  assert.equal(harness.legacyShown(), true);
+  assert.deepEqual(harness.legacyRules(), ['x.example, z.example → TV', 'y.example → #4']);
+
+  harness.fields.dismissLegacy.click();
+  await settle();
+
+  assert.equal(harness.legacyShown(), false);
+  assert.equal('rules' in harness.stored.sync, false, 'Dismiss must remove the key, not just hide it');
+  assert.deepEqual(harness.legacyRules(), []);
+});
+
+test('an empty rules array is not worth a notice', async () => {
+  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091', rules: [] } });
+
+  assert.equal(harness.legacyShown(), false);
+});
+
+test('a dismiss that cannot remove the key says so instead of hiding the notice', async () => {
   const harness = await loadOptions({
     sync: { baseUrl: 'http://nas:9091', rules: [{ domains: ['x.example'], profileId: 7 }] },
   });
+  chrome.storage.sync.remove = async () => {
+    throw new Error('storage is not available');
+  };
 
-  assert.deepEqual(harness.fields.defaultProfile.children.map((option) => option.textContent), ['Load profiles first']);
-  assert.deepEqual(harness.selectOf(0).children.map((option) => option.textContent), ['Load profiles first']);
-
-  harness.fields.save.click();
+  harness.fields.dismissLegacy.click();
   await settle();
 
-  assert.match(harness.status(), /Load profiles before saving the site rule "x\.example"/);
-  assert.deepEqual(harness.writes, []);
-});
-
-test('a rule added while profiles are loaded offers the pick placeholder', async () => {
-  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] } });
-
-  harness.fields.addRule.click();
-
-  assert.deepEqual(harness.selectOf(0).children.map((option) => option.textContent), ['Pick a profile', 'TV']);
-  assert.equal(harness.selectOf(0).value, '', 'a fresh row must not point at a profile by accident');
+  assert.match(harness.status(), /storage is not available/);
+  assert.equal(harness.legacyShown(), true, 'a notice hidden without the key would come back on reload');
 });
 
 test('the status line is scrolled into view so a refused save is visible', async () => {
@@ -729,4 +677,38 @@ test('the status line is scrolled into view so a refused save is visible', async
 
 test('options.html marks the status line as a live region', () => {
   assert.match(readFileSync(OPTIONS_HTML, 'utf8'), /<span id="status" aria-live="polite">/);
+});
+
+test('options.html carries every element the page wires up', () => {
+  // getElementById returning null would break the page at import time, before
+  // any of the stub-DOM tests above ever run against the real markup.
+  const html = readFileSync(OPTIONS_HTML, 'utf8');
+  for (const id of FIELD_IDS) assert.match(html, new RegExp(`id="${id}"`), id);
+  // The notice is markup that must start hidden: it is only for storage that
+  // still holds the retired key.
+  assert.match(html, /id="legacyNotice"[^>]*hidden/);
+  // The dashboard's Web Awesome elements are a runtime dependency the
+  // extension deliberately does not ship: plain controls only.
+  assert.doesNotMatch(html, /<wa-/);
+});
+
+test('the options page is styled by a stylesheet rather than inline rules', () => {
+  // Static markup only in options.html, and no style attribute anywhere: the
+  // page renders profile names and domains from the server.
+  const html = readFileSync(OPTIONS_HTML, 'utf8');
+  assert.match(html, /<link rel="stylesheet" href="options\.css">/);
+  assert.doesNotMatch(html, /<style|style="/);
+  assert.doesNotMatch(readFileSync(OPTIONS_URL, 'utf8'), /\.style\./);
+});
+
+test('the extension stylesheet carries its own tokens and both themes', () => {
+  // The extension cannot reach src/web at runtime, so the dashboard's tokens
+  // are copied in; without the dark half the page is a white sheet in a dark
+  // browser. The copy has to name where it came from or it silently rots.
+  const css = readFileSync(OPTIONS_CSS, 'utf8');
+  assert.match(css, /src\/web\/styles/);
+  assert.match(css, /@media \(prefers-color-scheme: dark\)/);
+  assert.match(css, /--accent:/);
+  // Web Awesome is a dashboard runtime dependency; the extension ships none.
+  assert.doesNotMatch(css, /wa-[a-z]+::part|<wa-/);
 });

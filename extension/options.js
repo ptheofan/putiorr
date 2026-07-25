@@ -1,25 +1,31 @@
 import { encodeCredentials } from './lib/auth.js';
 import { sanitizeProfiles } from './lib/resolve.js';
-import { SYNC_DEFAULTS, parseRuleDomains, validateBaseUrl } from './lib/settings.js';
+import { SYNC_DEFAULTS, validateBaseUrl } from './lib/settings.js';
 
 // This page is the only place the extension's settings can be repaired, so it
 // refuses to store a value it cannot use and reports every rewrite it makes.
-// Nothing here builds markup from data: profile names come from the server.
+// Which sites route to which profile is putiorr's setting now, so everything
+// about them here is read-only. Nothing builds markup from data: profile names
+// and domains come from the server.
 
 const PROFILES_TIMEOUT_MS = 15000;
 
 const el = (id) => document.getElementById(id);
 
+// The cached {id, name} list the worker's context menu is built from.
 let profiles = [];
-const ruleRows = [];
+// What the last successful load said about each profile's browser sites. Not
+// stored: it would be a second copy of putiorr's own setting, stale the moment
+// someone edits a profile there.
+let profileSites = [];
 
 function setStatus(message, ok = true) {
   const status = el('status');
   const lines = Array.isArray(message) ? message.filter(Boolean) : [message];
   status.textContent = lines.join('\n');
   status.className = ok ? '' : 'error';
-  // The status line sits at the top of the page and Save at the bottom: without
-  // this, a refused save looks like a button that does nothing at all.
+  // The status line sits with the connection card and Save at the bottom:
+  // without this, a refused save looks like a button that does nothing at all.
   status.scrollIntoView?.({ block: 'nearest' });
 }
 
@@ -30,95 +36,80 @@ function createOption(value, label) {
   return option;
 }
 
-// The placeholder is deliberate: without it a fresh row would silently point at
-// whichever profile happens to sort first.
-function fillProfileSelect(select, selectedId, placeholder) {
+// The placeholder is deliberate: without it a fresh selection would silently
+// point at whichever profile happens to sort first.
+function renderDefaultProfileSelect(selectedId) {
+  const select = el('defaultProfile');
+  // With no profiles loaded, "No default profile" reads as a choice the user
+  // declined to make rather than one they cannot make yet.
+  const placeholder = profiles.length ? 'No default profile' : 'Load profiles first';
   select.replaceChildren(createOption('', placeholder));
   for (const profile of profiles) select.append(createOption(String(profile.id), profile.name));
   select.value = profiles.some((profile) => profile.id === selectedId) ? String(selectedId) : '';
 }
 
-// With no profiles loaded, "No default profile" and "Pick a profile" both read
-// as a choice the user declined to make rather than one they cannot make yet.
-function placeholderFor(label) {
-  return profiles.length ? label : 'Load profiles first';
+// /api/profiles answers with both key styles; either one is the mapping, and a
+// row written by an older putiorr has neither.
+function browserSitesOf(row) {
+  const raw = Array.isArray(row?.browser_domains)
+    ? row.browser_domains
+    : Array.isArray(row?.browserDomains) ? row.browserDomains : [];
+  return raw.map((domain) => String(domain ?? '').trim()).filter(Boolean);
 }
 
-function renderProfileSelects(defaultProfileId) {
-  fillProfileSelect(el('defaultProfile'), defaultProfileId, placeholderFor('No default profile'));
-  for (const { select } of ruleRows) {
-    fillProfileSelect(select, Number(select.value) || 0, placeholderFor('Pick a profile'));
-  }
+function createRow(className, ...cells) {
+  const row = document.createElement('div');
+  row.className = className;
+  row.append(...cells);
+  return row;
 }
 
-function addRuleRow(rule = {}) {
-  const row = document.createElement('tr');
-
-  const domainsCell = document.createElement('td');
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'rule-domains';
-  input.placeholder = 'x.example, z.example';
-  input.value = (Array.isArray(rule.domains) ? rule.domains : []).join(', ');
-  domainsCell.append(input);
-
-  const profileCell = document.createElement('td');
-  const select = document.createElement('select');
-  select.className = 'rule-profile';
-  profileCell.append(select);
-
-  const removeCell = document.createElement('td');
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.textContent = 'Remove';
-  remove.addEventListener('click', () => {
-    row.remove();
-    const index = ruleRows.findIndex((entry) => entry.row === row);
-    if (index >= 0) ruleRows.splice(index, 1);
-  });
-  removeCell.append(remove);
-
-  row.append(domainsCell, profileCell, removeCell);
-  el('rules').append(row);
-
-  const entry = { row, input, select };
-  ruleRows.push(entry);
-  fillProfileSelect(select, Number(rule.profileId) || 0, placeholderFor('Pick a profile'));
-  return entry;
+function createCell(tagName, className, text) {
+  const cell = document.createElement(tagName);
+  cell.className = className;
+  cell.textContent = text;
+  return cell;
 }
 
-// Rules are collected rather than saved so the caller can refuse the whole save:
-// a half-stored rule set would send grabs to the wrong profile.
-function collectRules() {
-  const rules = [];
-  const errors = [];
-  const warnings = [];
-
-  for (const { input, select } of ruleRows) {
-    const parsed = parseRuleDomains(input.value);
-    const profileId = Number(select.value) || 0;
-    errors.push(...parsed.errors);
-    warnings.push(...parsed.warnings);
-
-    if (parsed.errors.length) continue;
-    // An untouched row added by mistake is not an error, it is just empty.
-    if (!parsed.domains.length && !profileId) continue;
-
-    if (!parsed.domains.length) {
-      errors.push('A site rule has a profile but no domains: add one or remove the row');
-      continue;
-    }
-    if (!profileId) {
-      errors.push(profiles.length
-        ? `Pick a profile for the site rule "${parsed.domains.join(', ')}"`
-        : `Load profiles before saving the site rule "${parsed.domains.join(', ')}"`);
-      continue;
-    }
-
-    rules.push({ domains: parsed.domains, profileId, input });
+function renderProfileSites() {
+  const list = el('profileList');
+  if (!profileSites.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-note';
+    empty.textContent = 'Test the connection to see which sites putiorr routes to which profile.';
+    list.replaceChildren(empty);
+    return;
   }
 
-  return { rules, errors, warnings };
+  list.replaceChildren(...profileSites.map(({ name, sites }) => createRow(
+    'profile-row',
+    createCell('span', 'profile-row-name', name),
+    createCell('span', sites.length ? 'profile-row-sites' : 'profile-row-sites is-empty', sites.length ? sites.join(', ') : 'no sites'),
+  )));
+}
+
+// Rules stored by an older version are shown once and then dropped. They are
+// never pushed to putiorr: only the user knows whether that mapping is still
+// what they want, and a profile there may not even exist any more.
+function renderLegacyRules(rules) {
+  el('legacyRules').replaceChildren(...rules.map((rule) => {
+    const domains = (Array.isArray(rule?.domains) ? rule.domains : [])
+      .map((domain) => String(domain ?? '').trim())
+      .filter(Boolean);
+    const profileId = Number(rule?.profileId) || 0;
+    const name = profiles.find((profile) => profile.id === profileId)?.name
+      ?? (profileId ? `#${profileId}` : 'no profile');
+    return createCell('li', 'legacy-rule', `${domains.join(', ') || 'no sites'} → ${name}`);
+  }));
+  el('legacyNotice').hidden = false;
+}
+
+// The notice is only hidden once the key is actually gone: hiding it on a
+// failed remove would bring it straight back on the next reload.
+async function dismissLegacyRules() {
+  await chrome.storage.sync.remove('rules');
+  el('legacyRules').replaceChildren();
+  el('legacyNotice').hidden = true;
 }
 
 async function save() {
@@ -128,17 +119,10 @@ async function save() {
     return;
   }
 
-  const collected = collectRules();
-  if (collected.errors.length) {
-    setStatus(collected.errors, false);
-    return;
-  }
-
-  // Write the stored form back into the fields: normalization here is otherwise
-  // invisible, and a rule that matches something other than what is on screen
-  // is the hardest kind of misconfiguration to notice.
+  // Write the stored form back into the field: normalization here is otherwise
+  // invisible, and a URL that is not what is on screen is the hardest kind of
+  // misconfiguration to notice.
   el('baseUrl').value = url.baseUrl;
-  for (const rule of collected.rules) rule.input.value = rule.domains.join(', ');
 
   const defaultProfileId = Number(el('defaultProfile').value) || 0;
 
@@ -161,7 +145,6 @@ async function save() {
       baseUrl: url.baseUrl,
       defaultProfileId,
       autoCapture: el('autoCapture').checked,
-      rules: collected.rules.map(({ domains, profileId }) => ({ domains, profileId })),
       // The service worker sanitizes what it reads, but storing a clean list keeps
       // a malformed profile out of the context menu in the first place.
       profiles: sanitizeProfiles(profiles),
@@ -171,13 +154,13 @@ async function save() {
     return;
   }
 
-  const notes = [...collected.warnings];
+  const notes = [];
   if (!profiles.length) {
-    // With no profiles stored the right-click menu offers only "Configure…" and
-    // no rule can name a profile, so nothing at all can grab yet.
+    // With no profiles stored the right-click menu offers only "Configure…",
+    // so nothing at all can grab yet.
     notes.push('No profiles loaded: nothing can grab until you load profiles and Save');
   } else if (!defaultProfileId) {
-    notes.push('No default profile: only site rules and the right-click menu will grab');
+    notes.push('No default profile: only sites configured in putiorr and the right-click menu will grab');
   }
   setStatus(['Saved', ...notes]);
 }
@@ -205,7 +188,9 @@ async function fetchProfiles(baseUrl, headers) {
 
   const body = await response.json().catch(() => undefined);
   if (!Array.isArray(body)) throw new Error(`${baseUrl} did not answer with a profile list; check the URL`);
-  return sanitizeProfiles(body.filter((profile) => profile?.enabled));
+  // The rows come back whole: the browser sites are shown from them, and only
+  // the cached {id, name} pairs are stored.
+  return body.filter((profile) => profile?.enabled);
 }
 
 async function loadProfilesFromPutiorr() {
@@ -222,13 +207,15 @@ async function loadProfilesFromPutiorr() {
   if (username || password) headers.Authorization = `Basic ${encodeCredentials(username, password)}`;
 
   setStatus('Contacting putiorr…');
-  let loaded;
+  let rows;
   try {
-    loaded = await fetchProfiles(url.baseUrl, headers);
+    rows = await fetchProfiles(url.baseUrl, headers);
   } catch (error) {
     setStatus(error.message, false);
     return;
   }
+
+  const loaded = sanitizeProfiles(rows);
 
   // An empty answer is never worth applying: it would clear the profile list and
   // every selection on the page, and the next Save would commit that loss under
@@ -239,30 +226,28 @@ async function loadProfilesFromPutiorr() {
     return;
   }
 
-  // Selections that the new list no longer contains are about to be cleared by
-  // the re-render, so they are counted while they are still on screen.
+  // The selection that the new list may no longer contain is about to be
+  // cleared by the re-render, so it is read while it is still on screen.
   const previousDefault = Number(el('defaultProfile').value) || 0;
-  const keeps = (id) => loaded.some((profile) => profile.id === id);
-  const lostRules = ruleRows.filter(({ select }) => {
-    const id = Number(select.value) || 0;
-    return id && !keeps(id);
-  }).length;
 
+  const sitesById = new Map(rows.map((row) => [Number(row?.id), browserSitesOf(row)]));
   profiles = loaded;
-  renderProfileSelects(previousDefault);
+  profileSites = loaded.map((profile) => ({ name: profile.name, sites: sitesById.get(profile.id) ?? [] }));
+  renderDefaultProfileSelect(previousDefault);
+  renderProfileSites();
 
   const notes = [];
-  if (previousDefault && !keeps(previousDefault)) {
+  if (previousDefault && !loaded.some((profile) => profile.id === previousDefault)) {
     notes.push(`Profile #${previousDefault} no longer exists: pick a new default`);
-  }
-  if (lostRules) {
-    notes.push(`${lostRules} site rule(s) pointed at a profile that no longer exists: pick a new one`);
   }
   setStatus([`Loaded ${loaded.length} profile(s) — press Save to use them`, ...notes]);
 }
 
 async function restore() {
   const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
+  // SYNC_DEFAULTS no longer lists the retired `rules` key, and storage.get only
+  // answers the keys it is asked for, so the legacy read is its own call.
+  const legacy = await chrome.storage.sync.get({ rules: [] });
   const local = await chrome.storage.local.get({ username: '', password: '' });
 
   // storage can hold data written by a different extension version, so every
@@ -273,10 +258,11 @@ async function restore() {
   el('password').value = String(local.password ?? '');
   el('autoCapture').checked = sync.autoCapture !== false;
 
-  for (const rule of Array.isArray(sync.rules) ? sync.rules : []) addRuleRow(rule);
-
   const defaultProfileId = Number(sync.defaultProfileId) || 0;
-  renderProfileSelects(defaultProfileId);
+  renderDefaultProfileSelect(defaultProfileId);
+  renderProfileSites();
+
+  if (Array.isArray(legacy.rules) && legacy.rules.length) renderLegacyRules(legacy.rules);
 
   if (defaultProfileId && !profiles.some((profile) => profile.id === defaultProfileId)) {
     setStatus(`Saved default profile #${defaultProfileId} is not in the stored list; load profiles again`, false);
@@ -288,7 +274,7 @@ async function restore() {
 const reporting = (action) => () => action().catch((error) => setStatus(error.message, false));
 
 el('loadProfiles').addEventListener('click', reporting(loadProfilesFromPutiorr));
-el('addRule').addEventListener('click', () => addRuleRow());
+el('dismissLegacy').addEventListener('click', reporting(dismissLegacyRules));
 el('save').addEventListener('click', reporting(save));
 // An unhandled rejection here would leave an empty form that looks like a first
 // run and would overwrite the stored settings on the next save.

@@ -1,5 +1,5 @@
 import { encodeCredentials } from './lib/auth.js';
-import { isMagnetLink, resolveProfileId, sanitizeProfiles } from './lib/resolve.js';
+import { isMagnetLink, sanitizeProfiles } from './lib/resolve.js';
 import { SYNC_DEFAULTS } from './lib/settings.js';
 
 const MENU_ROOT = 'putiorr-root';
@@ -24,7 +24,6 @@ async function loadSettings() {
     ...sync,
     ...local,
     profiles: sanitizeProfiles(sync.profiles),
-    rules: Array.isArray(sync.rules) ? sync.rules : [],
   };
 }
 
@@ -104,33 +103,41 @@ async function handleGrab(payload) {
     notify('putiorr grab failed', 'Set the putiorr URL in the extension options first — click here to open them', NOTIFY_CONFIGURE);
     return { ok: false, error: 'putiorr is not configured' };
   }
-  const hostname = (() => {
+  const pageHost = (() => {
     try {
       return new URL(payload.pageUrl).hostname;
     } catch {
       return '';
     }
   })();
-  const profileId = resolveProfileId({
-    explicitProfileId: payload.profileId,
-    rules: settings.rules,
-    hostname,
-    defaultProfileId: settings.defaultProfileId,
-  });
-  if (!profileId) {
-    notify('putiorr grab failed', 'No profile matches this site; set a default profile in options');
-    return { ok: false, error: 'no profile configured' };
-  }
-  const profileName = settings.profiles.find((profile) => profile.id === profileId)?.name ?? `profile #${profileId}`;
+  // Which profile a site belongs to is putiorr's answer to give: it holds the
+  // browser sites. The worker only says where the click came from, which
+  // profile the user picked by hand if any, and what its own default is.
+  const explicitId = payload.profileId;
+  const hasExplicitId = explicitId !== undefined && explicitId !== null && String(explicitId) !== '';
+  const defaultProfileId = Number(settings.defaultProfileId) || undefined;
   try {
     const result = await postGrab(settings, {
-      profileId,
+      // An explicit pick is passed through as it came: putiorr refuses a value
+      // that is not an id rather than quietly grabbing into some other profile.
+      profileId: hasExplicitId ? explicitId : undefined,
+      pageHost: pageHost || undefined,
+      // A default only applies when the user did not pick: sending it alongside
+      // an explicit id would suggest a fallback that putiorr must never take.
+      defaultProfileId: hasExplicitId ? undefined : defaultProfileId,
       magnet: payload.magnet,
       torrentBase64: payload.torrentBase64,
       filename: payload.filename,
       sourceUrl: payload.pageUrl,
     });
-    notify(`Sent to putiorr → ${profileName}`, result.transfer?.name ?? '');
+    // The response names the profile that actually answered. The cached name is
+    // only a fallback for a putiorr too old to send one, and only for an
+    // explicit pick: with a site match there is nothing local left to guess.
+    const cachedName = hasExplicitId
+      ? settings.profiles.find((profile) => profile.id === Number(explicitId))?.name ?? `profile #${explicitId}`
+      : '';
+    const profileName = result.profile?.name ?? cachedName;
+    notify(profileName ? `Sent to putiorr → ${profileName}` : 'Sent to putiorr', result.transfer?.name ?? '');
     return { ok: true };
   } catch (error) {
     notify('putiorr grab failed', error.message);

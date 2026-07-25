@@ -192,6 +192,155 @@ test('credentials are sent as UTF-8 basic auth rather than Latin-1', async () =>
   assert.equal(harness.notifications[0].title, 'Sent to putiorr → Movies');
 });
 
+test('a captured grab hands putiorr the page host and the configured default', async () => {
+  // The worker no longer knows which profile claims a site: putiorr does, and
+  // it needs the host plus the extension's own default to answer.
+  let body;
+  const harness = await loadWorker({
+    sync: {
+      baseUrl: 'http://putiorr.test',
+      defaultProfileId: 2,
+      profiles: [{ id: 2, name: 'Movies' }],
+      // A rules key left over from an older version must not route anything.
+      rules: [{ domains: ['tracker.x.example'], profileId: 99 }],
+    },
+    fetch: async (url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ ok: true, profile: { id: 2, name: 'Movies' }, transfer: { name: 'Example' } }) };
+    },
+  });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.deepEqual(body, {
+    pageHost: 'tracker.x.example',
+    defaultProfileId: 2,
+    magnet: 'magnet:?xt=urn:btih:abc',
+    sourceUrl: 'https://tracker.x.example/page',
+  });
+  assert.equal('profileId' in body, false, 'a captured click names no profile');
+});
+
+test('an explicit menu pick is sent as profileId and the default is left out', async () => {
+  let body;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async (url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: {} }) };
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.equal(body.profileId, 3);
+  assert.equal(body.pageHost, 'tracker.x.example');
+  assert.equal('defaultProfileId' in body, false, 'an explicit pick is not second-guessed by a default');
+});
+
+test('an unset default and an unparseable page URL are omitted rather than sent as junk', async () => {
+  let body;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async (url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ ok: true, transfer: {} }) };
+    },
+  });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'not a url' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.deepEqual(Object.keys(body).sort(), ['magnet', 'sourceUrl']);
+});
+
+test('the success notification names the profile putiorr actually used', async () => {
+  // The site match happens on the server, so the cached pick can be the wrong
+  // answer: only the response knows where the transfer landed.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 2, name: 'Movies' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 9, name: 'Books' }, transfer: { name: 'Example' } }),
+    }),
+  });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.equal(harness.notifications[0].title, 'Sent to putiorr → Books');
+  assert.equal(harness.notifications[0].message, 'Example');
+});
+
+test('a putiorr too old to name the profile still reports the grab as sent', async () => {
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 2, name: 'Movies' }] },
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, transfer: { name: 'Example' } }) }),
+  });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  // Naming the extension's default here would be a guess: with no explicit pick
+  // the server resolved this by site, and its answer is the only truth.
+  assert.equal(harness.notifications[0].title, 'Sent to putiorr');
+});
+
+test('a grab with nothing to route it is refused by putiorr, not by the worker', async () => {
+  // The worker cannot know whether the site matches a profile, so it asks and
+  // relays the answer instead of inventing a local "no profile" refusal.
+  let called = false;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async () => {
+      called = true;
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: 'no profile matches this site and no default profile is configured' }),
+      };
+    },
+  });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.equal(called, true, 'the grab must reach putiorr');
+  assert.deepEqual(response, { ok: false, error: 'no profile matches this site and no default profile is configured' });
+  assert.equal(harness.notifications[0].message, 'no profile matches this site and no default profile is configured');
+});
+
 test('credentials outside Latin-1 are encodable rather than fatal', async () => {
   let request;
   const harness = await loadWorker({
