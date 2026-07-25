@@ -105,6 +105,79 @@ test('prepareTransfer records existing partial file bytes for resume', async () 
   }
 });
 
+// Audit, structural findings: `complete` is sticky — a file row never left it,
+// and prepareTransfer only consulted the disk on insert. Re-adding a release
+// whose local files were deleted therefore finalised immediately and
+// downloaded nothing. (Listed under phase 5 item 16; it is the same code path
+// as this phase's stale-file reaping, so it is fixed here.)
+test('a file whose local copy is gone is downloaded again, not reported complete', async () => {
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],
+  });
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 10, lifecycle: 'remote' });
+    harness.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 901,
+      relative_path: 'movie.mkv',
+      size: 10,
+      downloaded_bytes: 10,
+      status: 'complete',
+    });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+
+    const [file] = harness.store.listFilesForDownload(transfer.id);
+    assert.equal(file.status, 'pending');
+    assert.equal(file.downloaded_bytes, 0);
+    assert.notEqual(harness.store.findDownloadById(transfer.id).lifecycle, 'processed');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('prepareTransfer forgets files put.io no longer has', async () => {
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],
+  });
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, { total_size: 10, lifecycle: 'remote' });
+    // A file put.io dropped — the release was replaced, or the user removed it
+    // there. Its row used to survive forever: pending, so a worker kept trying
+    // to fetch a file id that 404s, and counted against the download's own
+    // total for good measure.
+    harness.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 902,
+      relative_path: 'sample.mkv',
+      size: 4,
+      status: 'pending',
+    });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+
+    assert.deepEqual(
+      harness.store.listFilesForDownload(transfer.id).map((file) => file.putio_file_id),
+      [901],
+    );
+    assert.equal(harness.store.findDownloadById(transfer.id).total_size, 10);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('prepareTransferSafely removes a transfer whose files 404 on put.io and keeps local files', async () => {
   const removed = [];
   const putio = {

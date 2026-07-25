@@ -295,8 +295,10 @@ export class DownloadManager {
       error_string: '',
     });
     const downloadRoot = await resolveDownloadRoot(profile, updated);
+    const remoteFileIds = [];
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
+      remoteFileIds.push(remoteFile.id);
       const relativePath = normalizeRelativePath(remoteFile.relativePath ?? remoteFile.name);
       const size = Number(remoteFile.size ?? 0);
       totalSize += size;
@@ -310,6 +312,18 @@ export class DownloadManager {
         size,
         downloaded_bytes: exists ? size : partSize,
         status: exists ? 'complete' : 'pending',
+      });
+    }
+
+    // What put.io lists is the whole truth about this download's files. Rows
+    // for files it no longer has were never removed, so they stayed pending
+    // against a file id that 404s and kept the download from ever completing.
+    const reaped = this.store.deleteDownloadFilesNotIn(updated.id, remoteFileIds);
+    if (reaped > 0) {
+      logger.info('forgot download files put.io no longer lists', {
+        transferId: updated.id,
+        name: updated.name,
+        count: reaped,
       });
     }
 

@@ -1706,8 +1706,14 @@ export class StateStore {
     this.db.prepare(`
       UPDATE download_files
       SET download_id = ?, relative_path = ?, size = ?,
+          -- 'complete' used to be terminal here, so a file whose local copy
+          -- was deleted stayed complete forever and re-adding the release
+          -- finalised it without downloading anything. The caller checks the
+          -- disk, so its answer is the one that counts. 'deleted' is different:
+          -- it is a decision the user made about a file put.io still has, and
+          -- re-listing that file is not a reason to fetch it again.
           downloaded_bytes = CASE
-            WHEN status IN ('complete', 'deleted') THEN downloaded_bytes
+            WHEN status = 'deleted' THEN downloaded_bytes
             ELSE ?
           END,
           download_speed = CASE
@@ -1715,7 +1721,7 @@ export class StateStore {
             ELSE ?
           END,
           status = CASE
-            WHEN status IN ('complete', 'deleted') THEN status
+            WHEN status = 'deleted' THEN status
             ELSE ?
           END,
           updated_at = ?
@@ -1731,6 +1737,23 @@ export class StateStore {
       existing.id,
     );
     return this.findDownloadFileById(existing.id);
+  }
+
+  // The file rows of a download are exactly what put.io lists for it. A row
+  // for a file put.io no longer has is a job no worker can ever finish — it
+  // 404s on every attempt — and it counts against the download's own totals,
+  // so the download can never be complete either.
+  deleteDownloadFilesNotIn(downloadId, putioFileIds) {
+    const keep = (Array.isArray(putioFileIds) ? putioFileIds : []).filter((id) => id != null);
+    // Nothing to keep is never a reason to delete everything: prepareTransfer
+    // refuses a transfer put.io lists no files for rather than reaching here.
+    if (keep.length === 0) return 0;
+    const placeholders = keep.map(() => '?').join(', ');
+    const result = this.db.prepare(`
+      DELETE FROM download_files
+      WHERE download_id = ? AND putio_file_id NOT IN (${placeholders})
+    `).run(downloadId, ...keep);
+    return result.changes;
   }
 
   findDownloadFileById(id) {
