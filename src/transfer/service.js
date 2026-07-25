@@ -136,13 +136,21 @@ export class TransferService {
     return this.store.findProfileByRpcPath(rpcPath);
   }
 
+  // The *arr side of putiorr — every RPC endpoint and everything torrent-add
+  // resolves through — chooses only from these. A Putiorr Grab profile is
+  // reachable exclusively through /api/grab, which always names the profile it
+  // means, so nothing an *arr sends can select one: not the shared endpoint,
+  // not a download-dir category, not the client's own name. A grab profile
+  // whose slug, name or preset happens to read like an *arr category would
+  // otherwise either swallow that download into a folder nothing imports from,
+  // or refuse the add and point at an RPC path its wizard never shows.
+  listArrProfiles() {
+    return this.store.listProfiles().filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
+  }
+
   resolveRpcProfile(profile) {
     if (profile) return this.requireProfile(profile);
-    // A Putiorr Grab profile serves the browser extension, which always names
-    // the profile it means. It is not a candidate for an unaddressed RPC call:
-    // counting it made the shared endpoint ambiguous for single-profile *arr
-    // setups, and picking it would drop *arr downloads where nothing imports.
-    const profiles = this.store.listProfiles().filter((candidate) => candidate.type !== GRAB_PROFILE_TYPE);
+    const profiles = this.listArrProfiles();
     if (profiles.length === 1) return profiles[0];
     if (profiles.length === 0) throw new Error('No enabled RR profile is configured');
     throw new Error('RPC endpoint is ambiguous; use the unique RPC path configured for this RR profile');
@@ -156,7 +164,7 @@ export class TransferService {
   }
 
   findProfilesByCategory(category) {
-    return this.store.listProfiles().filter((profile) => this.profileMatchesCategory(profile, category));
+    return this.listArrProfiles().filter((profile) => this.profileMatchesCategory(profile, category));
   }
 
   findProfileByCategory(category) {
@@ -167,7 +175,7 @@ export class TransferService {
   findProfileByUserAgent(userAgent) {
     const client = normalizedIdentity(String(userAgent ?? '').split('/')[0]);
     if (!client) return undefined;
-    const matches = this.store.listProfiles().filter((profile) => {
+    const matches = this.listArrProfiles().filter((profile) => {
       const identities = [profile.slug, profile.name];
       if (profile.type !== 'custom') identities.push(profile.type);
       return identities.some((value) => {
@@ -205,7 +213,7 @@ export class TransferService {
     }
 
     const matches = [];
-    for (const candidate of this.store.listProfiles()) {
+    for (const candidate of this.listArrProfiles()) {
       try {
         const category = extractCategory(candidate.download_at, downloadDir);
         if (this.profileMatchesCategory(candidate, category)) matches.push({ profile: candidate, category });

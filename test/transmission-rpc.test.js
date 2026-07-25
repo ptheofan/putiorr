@@ -2308,3 +2308,78 @@ test('Save & test on a grab profile still refuses an unusable download folder', 
   assert.equal(response.status, 400);
   assert.match((await response.json()).error, /Shared download folder is not writable/);
 });
+
+test('an *arr add is never routed into a grab profile that shares its category', async (t) => {
+  // Nothing an *arr sends can name a grab profile, so a grab profile whose
+  // name happens to read like an *arr category must be invisible here. It used
+  // to hijack the category and refuse the add, pointing the user at an RPC
+  // path the grab wizard does not even show.
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const grab = createGrabProfile(harness, { name: 'Movies', slug: 'movies', rpc_path: '/grab/movies/rpc' });
+
+  const added = await sharedRpc(harness, 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+    'download-dir': path.join(harness.config.targetDir, 'movies'),
+  });
+
+  assert.equal(added.result, 'success');
+  const transfer = harness.store.findTransferById(added.arguments['torrent-added'].id);
+  assert.equal(transfer.profile_id, harness.store.findProfileBySlug('default').id);
+  assert.equal(harness.store.listActiveTransfers({ profileId: grab.id }).length, 0);
+
+  // The extension names the profile it means, so that path is unaffected.
+  const grabbed = await fetch(harness.url.replace('/transmission/rpc', '/api/grab'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Putiorr-Grab': '1' },
+    body: JSON.stringify({ profileId: grab.id, magnet: 'magnet:?xt=urn:btih:0123456789abcdef' }),
+  });
+  assert.equal(grabbed.status, 200);
+  assert.equal((await grabbed.json()).profile.name, 'Movies');
+  assert.equal(harness.store.listActiveTransfers({ profileId: grab.id }).length, 1);
+});
+
+test('the unaddressed add path skips grab profiles when it matches by category', async (t) => {
+  // Two *arr profiles leave the shared endpoint unbound, so the add is
+  // resolved purely by its download-dir. A grab profile matching that category
+  // would silently swallow an *arr download into a folder nothing imports.
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const grab = createGrabProfile(harness, { name: 'Grabsite', slug: 'grabsite', rpc_path: '/grab/grabsite/rpc' });
+  harness.store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/sonarr/transmission/rpc',
+    enabled: true,
+  });
+
+  const added = await sharedRpc(harness, 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+    'download-dir': path.join(harness.config.targetDir, 'grabsite'),
+  });
+
+  assert.match(added.result, /No enabled RR profile matches download-dir category grabsite/);
+  assert.equal(harness.store.listActiveTransfers({ profileId: grab.id }).length, 0);
+});
+
+test('a grab profile is never the profile an RPC client is identified as', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  createGrabProfile(harness, { name: 'Sonarr', slug: 'sonarr', rpc_path: '/grab/sonarr/rpc' });
+
+  assert.equal(harness.service.findProfileByUserAgent('Sonarr/5.0'), undefined);
+  assert.equal(harness.service.findProfilesByCategory('sonarr').length, 0);
+  assert.equal(harness.service.findProfileByCategory('sonarr'), undefined);
+});

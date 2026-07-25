@@ -437,8 +437,7 @@ export class TransmissionRpcServer {
     // to it, which is why the wizard hides its RPC settings. Counting it here
     // used to unbind this endpoint the moment a user added their first grab
     // profile, breaking torrent-remove on a setup that had been working.
-    const rpcProfiles = this.service.store.listProfiles()
-      .filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
+    const rpcProfiles = this.service.listArrProfiles();
     const rpcProfile = requestPath === '/transmission/rpc' && rpcProfiles.length > 1
       ? undefined
       : this.service.store.findProfileByRpcPath(requestPath);
