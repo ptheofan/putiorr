@@ -361,14 +361,33 @@ export class StateStore {
     this.ensureColumn('profiles', 'client_port', "TEXT NOT NULL DEFAULT '9091'");
     this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('profiles', 'browser_domains', 'TEXT');
-    this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
-    this.ensureColumn('transfers', 'completion_percent', 'INTEGER NOT NULL DEFAULT 0');
-    this.ensureColumn('transfers', 'putio_status_message', "TEXT NOT NULL DEFAULT ''");
-    this.ensureColumn('transfers', 'putio_peers', 'INTEGER NOT NULL DEFAULT 0');
-    this.ensureColumn('transfers', 'putio_availability', 'INTEGER NOT NULL DEFAULT 0');
-    this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
-    this.migrateTransferAssociations();
-    this.migrateMagnetTransferHashes();
+    // Everything below only exists on a database written by an older putiorr.
+    // A fresh database never creates these tables, and PRAGMA table_info on a
+    // table that is not there answers with an empty list rather than an error —
+    // so an ungated ensureColumn would ALTER a table that does not exist, and
+    // an ungated SELECT would throw on the first boot of a new install.
+    if (this.hasTable('transfers')) {
+      this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
+      this.ensureColumn('transfers', 'completion_percent', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('transfers', 'putio_status_message', "TEXT NOT NULL DEFAULT ''");
+      this.ensureColumn('transfers', 'putio_peers', 'INTEGER NOT NULL DEFAULT 0');
+      this.ensureColumn('transfers', 'putio_availability', 'INTEGER NOT NULL DEFAULT 0');
+    }
+    if (this.hasTable('transfer_files')) {
+      this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
+    }
+    if (this.hasTable('transfers') && this.hasTable('transfer_files')) {
+      this.migrateTransferAssociations();
+    }
+    if (this.hasTable('transfers')) {
+      this.migrateMagnetTransferHashes();
+    }
+  }
+
+  hasTable(name) {
+    return Boolean(this.db.prepare(
+      "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
+    ).get(name));
   }
 
   migrateTransferAssociations() {
