@@ -21,6 +21,9 @@ test('downloads UI exposes stable data-testid hooks for frontend tests', () => {
     'delete-from-putio',
     'delete-local-files',
     'delete-confirm-submit',
+    'schema-migration-notice',
+    'schema-migration-summary',
+    'schema-migration-warning',
     'orphaned-downloads',
     'orphaned-download',
     'orphaned-download-profile',
@@ -56,4 +59,13 @@ test('the needs-attention section renders the reason, the local path and a profi
   assert.match(downloadsJs, /assign\.disabled = !orphan\.assignable;/);
   // Hidden entirely when there is nothing to fix.
   assert.match(downloadsJs, /setHidden\(el\.orphanedDownloads, orphans\.length === 0\)/);
+});
+
+test('the downloads view renders the schema migration report it is served', () => {
+  const downloadsJs = readFileSync(new URL('../src/web/downloads.js', import.meta.url), 'utf8');
+
+  // GET /api/settings carries schemaMigrations; without a consumer it is a
+  // field nobody ever sees.
+  assert.match(downloadsJs, /state\.settings\?\.schemaMigrations/);
+  assert.match(downloadsJs, /export function renderDownloads\(\) \{\s*renderSchemaMigrations\(\);/);
 });

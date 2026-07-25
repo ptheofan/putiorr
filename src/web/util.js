@@ -256,3 +256,44 @@ export function truncateLabel(value, max) {
   const text = String(value ?? '');
   return text.length > max ? `${text.slice(0, Math.max(1, max - 1))}…` : text;
 }
+
+// What the last schema upgrade did. The quarantine cards below cover the rows
+// that need a decision; this covers the rest, which is otherwise only in the
+// log — and the log is not where a NAS user looks.
+export function pluralize(count, noun) {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+export function schemaMigrationSummary(migrations) {
+  const parts = [];
+  const downloads = migrations?.downloads;
+  const profiles = migrations?.profiles;
+  if (downloads?.migrated) parts.push(`migrated ${pluralize(downloads.migrated, 'download')}`);
+  if (downloads?.adoptedBySoleProfile) {
+    parts.push(`assigned ${pluralize(downloads.adoptedBySoleProfile, 'download')} to the only profile`);
+  }
+  const quarantined = (downloads?.ownerless?.length ?? 0)
+    + (downloads?.noPutioId?.length ?? 0)
+    + (downloads?.extraAssociations?.length ?? 0);
+  if (quarantined) parts.push(`quarantined ${pluralize(quarantined, 'download')}`);
+  if (profiles?.downloadProfilesAssigned) {
+    parts.push(`gave ${pluralize(profiles.downloadProfilesAssigned, 'profile')} the default download profile`);
+  }
+  if (profiles?.grabRpcPathsCleared) {
+    parts.push(`retired ${pluralize(profiles.grabRpcPathsCleared, 'Putiorr Grab RPC endpoint')}`);
+  }
+  if (parts.length === 0) return '';
+  return `The last database upgrade ${parts.join(', ')}. Files on disk were not touched.`;
+}
+
+export function schemaMigrationWarning(migrations) {
+  const stranded = migrations?.downloads?.strandedLegacyRows;
+  if (stranded) {
+    return `${pluralize(stranded, 'download')} could not be read by the upgrade and are not visible here.`
+      + ' Restore a backup taken before the upgrade, or re-add them.';
+  }
+  const legacyRows = migrations?.legacyTablesPresent;
+  if (legacyRows === undefined) return '';
+  return `An older putiorr has written ${pluralize(legacyRows, 'download')} into storage this version`
+    + ' cannot read. Restore the .pre-downloads-*.bak taken before the upgrade, or re-add them.';
+}

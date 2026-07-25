@@ -35,6 +35,8 @@ import {
   setProfileFact,
   escapeSvgText,
   truncateLabel,
+  schemaMigrationSummary,
+  schemaMigrationWarning,
 } from '../src/web/util.js';
 
 // util.js takes every element it touches as an argument and reads only a
@@ -423,4 +425,59 @@ test('escapeSvgText and truncateLabel keep topology labels safe and short', () =
   assert.equal(truncateLabel('Sonarr Anime 4K', 10), 'Sonarr An…');
   assert.equal(truncateLabel('Sonarr', 6), 'Sonarr');
   assert.equal(truncateLabel(undefined, 5), '');
+});
+
+// The upgrade's fallout has to reach the dashboard, not just the log: a NAS
+// user never reads the log, and "nothing happened" and "seven downloads were
+// quarantined" look identical without it.
+test('the schema migration summary names what the upgrade actually did', () => {
+  assert.equal(schemaMigrationSummary(undefined), '');
+  assert.equal(schemaMigrationSummary({}), '');
+  // A clean upgrade of a database with nothing unusual in it says nothing.
+  assert.equal(schemaMigrationSummary({
+    downloads: { migrated: 0, adoptedBySoleProfile: 0, ownerless: [], noPutioId: [], extraAssociations: [] },
+    profiles: { downloadProfilesAssigned: 0, grabRpcPathsCleared: 0 },
+  }), '');
+
+  assert.equal(
+    schemaMigrationSummary({ downloads: { migrated: 1, ownerless: [], noPutioId: [], extraAssociations: [] } }),
+    'The last database upgrade migrated 1 download. Files on disk were not touched.',
+  );
+
+  const busy = schemaMigrationSummary({
+    downloads: {
+      migrated: 42,
+      adoptedBySoleProfile: 3,
+      ownerless: [{}, {}],
+      noPutioId: [{}],
+      extraAssociations: [{}],
+    },
+    profiles: { downloadProfilesAssigned: 2, grabRpcPathsCleared: 1 },
+  });
+  assert.match(busy, /migrated 42 downloads/);
+  assert.match(busy, /assigned 3 downloads to the only profile/);
+  assert.match(busy, /quarantined 4 downloads/);
+  assert.match(busy, /gave 2 profiles the default download profile/);
+  assert.match(busy, /retired 1 Putiorr Grab RPC endpoint\./);
+  assert.match(busy, /Files on disk were not touched\./);
+});
+
+test('the schema migration warning covers both ways downloads go missing', () => {
+  assert.equal(schemaMigrationWarning(undefined), '');
+  assert.equal(schemaMigrationWarning({ downloads: { migrated: 3 } }), '');
+
+  // Rows the upgrade could not reach at all.
+  assert.match(
+    schemaMigrationWarning({ downloads: { strandedLegacyRows: 2 } }),
+    /2 downloads could not be read by the upgrade and are not visible here/,
+  );
+
+  // Rows an older putiorr wrote after the upgrade, which is the downgrade
+  // path: zero rows in a table nobody reads is a legal answer, so silence here
+  // is indistinguishable from a healthy install.
+  assert.match(
+    schemaMigrationWarning({ legacyTablesPresent: 1 }),
+    /An older putiorr has written 1 download into storage this version cannot read/,
+  );
+  assert.match(schemaMigrationWarning({ legacyTablesPresent: 0 }), /pre-downloads-\*\.bak/);
 });

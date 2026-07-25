@@ -473,7 +473,24 @@ export class StateStore {
     return {
       downloads: parse('downloads_schema_v1_report'),
       profiles: parse('profiles_schema_v2_report'),
+      // Computed live rather than recorded, because it describes what is in
+      // the database right now: legacy tables that reappeared after the
+      // migration mean an older putiorr has written downloads this version
+      // cannot see.
+      legacyTablesPresent: this.legacyRowsAfterMigration(),
     };
+  }
+
+  legacyRowsAfterMigration() {
+    if (this.getSetting('downloads_schema_v1') !== '1') return undefined;
+    if (!this.hasTable('transfers')) return undefined;
+    try {
+      return Number(this.db.prepare('SELECT COUNT(*) AS total FROM transfers').get().total);
+    } catch {
+      // A table of that name with a shape we cannot count is still a table
+      // that should not be there.
+      return 0;
+    }
   }
 
   hasTable(name) {

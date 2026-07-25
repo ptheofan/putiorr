@@ -596,3 +596,106 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* The upgrade report and the quarantine: two things a user has to notice
+   without being alarmed by a healthy install, so both stay quiet until they
+   have something to say and the quarantine reads as work to do rather than as
+   an error. */
+.schema-migration-notice {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.schema-migration-notice[hidden],
+.schema-migration-notice p[hidden] {
+  display: none;
+}
+
+.schema-migration-notice p {
+  margin: 0;
+}
+
+.schema-migration-warning {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.orphaned-downloads {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+
+.orphaned-downloads[hidden] {
+  display: none;
+}
+
+.orphaned-downloads .section-head {
+  margin-bottom: 14px;
+}
+
+.orphaned-download {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--danger);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+.orphaned-download .download-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.orphaned-download .download-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.orphaned-download .download-status {
+  color: var(--danger);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.orphaned-download .download-facts {
+  color: var(--muted);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+.orphaned-download .download-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.orphaned-download select {
+  min-width: 180px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.orphaned-download select:disabled,
+.orphaned-download button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

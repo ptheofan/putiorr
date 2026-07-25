@@ -20,6 +20,8 @@ import {
   setDataValue,
   setHidden,
   placeChildAt,
+  schemaMigrationSummary,
+  schemaMigrationWarning,
 } from './util.js';
 import { renderTopology } from './topology.js';
 
@@ -48,6 +50,17 @@ const ORPHAN_REASON_LABELS = {
   'extra association': 'Its put.io transfer already belongs to another profile',
   'no put.io transfer id': 'No put.io transfer id',
 };
+
+export function renderSchemaMigrations() {
+  const migrations = state.settings?.schemaMigrations;
+  const summary = schemaMigrationSummary(migrations);
+  const warning = schemaMigrationWarning(migrations);
+  setHidden(el.schemaMigrationNotice, !summary && !warning);
+  setText(el.schemaMigrationSummary, summary);
+  setHidden(el.schemaMigrationSummary, !summary);
+  setText(el.schemaMigrationWarning, warning);
+  setHidden(el.schemaMigrationWarning, !warning);
+}
 
 export function renderOrphanedDownloads() {
   const orphans = Array.isArray(state.orphanedDownloads) ? state.orphanedDownloads : [];
@@ -131,6 +144,7 @@ export async function deleteOrphanedDownload(orphanId, { deleteRemote = false, d
 }
 
 export function renderDownloads() {
+  renderSchemaMigrations();
   renderOrphanedDownloads();
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();
