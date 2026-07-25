@@ -44,6 +44,21 @@ Implemented Transmission RPC methods:
 This is not a full Transmission replacement. It implements the pieces needed by
 the *arr completed-download workflow.
 
+## Browser Extension
+
+The [`extension/`](extension) directory holds a Chrome (Manifest V3) extension
+that captures `magnet:` links and `.torrent` downloads on any site and sends
+them to putiorr via `POST /api/grab`. The target profile comes from a per-site
+rule, from a configurable default, or from the right-click menu for a one-off
+override.
+
+`POST /api/grab` requires the `X-Putiorr-Grab` header and answers `403` without
+it, so a web page cannot trigger grabs cross-site. Point browser grabs at a
+dedicated profile with auto-remove completed enabled: nothing imports them, so
+the completed transfers should be cleaned up the way `prowlarr` grabs are.
+
+See [`extension/README.md`](extension/README.md) for setup and limitations.
+
 ## Quick Start With Docker Compose
 
 The repository includes a local stack in [`putiorr-compose`](putiorr-compose).
