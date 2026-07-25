@@ -3,6 +3,7 @@ import { api } from './api.js';
 import {
   PROFILE_TYPES,
   DEFAULT_PROFILE_TYPE,
+  GRAB_PROFILE_TYPE,
   DEFAULT_PUTIO_FOLDER,
   DEFAULT_DOWNLOAD_FOLDER,
   DEFAULT_CLIENT_HOST,
@@ -18,6 +19,7 @@ import {
   defaultRpcPathForType,
   joinPathParts,
   setText,
+  setHidden,
   setProfileFact,
 } from './util.js';
 import { setMessage } from './putio.js';
@@ -29,33 +31,73 @@ import {
 } from './download-profiles.js';
 import { renderTopology } from './topology.js';
 
+// The wizard intro and the two field-help lines under the App and Storage
+// steps are written for an *arr download client. A grab profile has no client
+// to copy settings into and no category folder, so both sets are swapped by
+// applyProfileTypeLayout() rather than left to contradict the panel.
+export const ARR_WIZARD_INTRO = 'Answer a few setup questions, then copy the matching *arr download-client values.';
+export const GRAB_WIZARD_INTRO = 'Answer a few setup questions, then point the putiorr browser extension at this profile.';
+export const ARR_APP_STEP_HELP = 'The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.';
+export const GRAB_APP_STEP_HELP = 'Putiorr Grab profiles serve the putiorr browser extension. No *arr app connects to them, so they have no RPC endpoint settings.';
+export const ARR_STORAGE_STEP_HELP = 'This path must also be mounted in the app container. The category creates the final app-specific folder inside it.';
+export const GRAB_STORAGE_STEP_HELP = 'Browser grabs land directly in this folder. No *arr app asks for a category, so nothing creates a subfolder here.';
+export const ARR_AUTO_REMOVE_LABEL = 'App will not signal import completion; remove from putiorr once files download locally';
+export const GRAB_AUTO_REMOVE_LABEL = 'Nothing imports a browser grab; remove from putiorr once files download locally';
+
 export const WIZARD_HELP = {
   wizardProfileType: {
     title: 'App preset',
-    paragraphs: [
-      'The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.',
-      'For apps such as Prowlarr that do not later signal import completion, the preset can remove completed local downloads from putiorr automatically.',
-      'Use Custom when another app will send Transmission RPC requests to putiorr, or when you want to name and route an endpoint yourself.',
-    ],
-    tips: [
-      'Changing the preset rewrites Display name and RPC endpoint path so they stay aligned.',
-      'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets use separate paths so their requests do not share one category by accident.',
-    ],
+    paragraphs: (profile) => isGrabProfile(profile)
+      ? [
+        'Putiorr Grab is the preset for the putiorr browser extension. The extension captures the magnet links and .torrent downloads you click in the browser and sends them to putiorr, which queues them on put.io and downloads them into this profile.',
+        'The sites listed on this profile route to it: a grab from one of them lands here even when the extension points at a different default profile. Only Putiorr Grab profiles are offered to the extension, and a grab aimed at any other preset is refused.',
+        'Install the extension from the Chrome Web Store once it is published. Until then, open chrome://extensions, turn on Developer mode, choose Load unpacked, and pick the extension/ folder from the putiorr repository.',
+        'Then open the extension options and set the putiorr URL and a default profile, so grabs from sites no profile claims still have somewhere to go.',
+      ]
+      : [
+        'The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.',
+        'For apps such as Prowlarr that do not later signal import completion, the preset can remove completed local downloads from putiorr automatically.',
+        'Use Custom when another app will send Transmission RPC requests to putiorr, or when you want to name and route an endpoint yourself.',
+      ],
+    tips: (profile) => isGrabProfile(profile)
+      ? [
+        'Auto-remove completed downloads is on by default here: nothing imports a browser grab, so putiorr drops the finished transfer while the files stay on disk.',
+        'The RPC endpoint step is hidden because no download client connects to this profile; putiorr reserves a path for it behind the scenes.',
+        'Reloading the unpacked extension after a putiorr update keeps its options page in step with the dashboard.',
+      ]
+      : [
+        'Changing the preset rewrites Display name and RPC endpoint path so they stay aligned.',
+        'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets use separate paths so their requests do not share one category by accident.',
+      ],
     valueLabel: 'Selected setup',
-    value: (profile, settings) => `${settings.appLabel}: category ${settings.category}, URL Base ${settings.urlBase}`,
+    value: (profile, settings) => isGrabProfile(profile)
+      ? `${settings.appLabel}: sites ${browserDomainsText(profile)}, downloads to ${settings.directory}`
+      : `${settings.appLabel}: category ${settings.category}, URL Base ${settings.urlBase}`,
   },
   wizardProfileName: {
     title: 'Display name',
-    paragraphs: [
-      'The display name is shown on the profile card and is also converted into the download-client Category.',
-      'For the usual setup, keep names simple: Sonarr becomes category sonarr, Radarr becomes category radarr, and so on.',
-    ],
-    tips: [
-      'If you create two profiles for the same app, use names that make different categories obvious, such as sonarr-4k and sonarr-anime.',
-      'Keep this value stable after a download is queued. Changing the category can make older completed downloads harder for the app to match.',
-    ],
-    valueLabel: 'Download-client Category',
-    value: (profile, settings) => settings.category,
+    paragraphs: (profile) => isGrabProfile(profile)
+      ? [
+        'The display name is shown on the profile card and in the browser extension, both in its profile list and in the right-click menu that sends a link to a specific profile.',
+        'It also names the endpoint putiorr reserves for this profile internally. Nothing outside putiorr uses that path, so the name is yours to choose.',
+      ]
+      : [
+        'The display name is shown on the profile card and is also converted into the download-client Category.',
+        'For the usual setup, keep names simple: Sonarr becomes category sonarr, Radarr becomes category radarr, and so on.',
+      ],
+    tips: (profile) => isGrabProfile(profile)
+      ? [
+        'Name grab profiles after what they collect, such as movies or music, because that is what the right-click menu will read.',
+        'Two profiles cannot share a name: the endpoints derived from them would collide and the save is refused.',
+      ]
+      : [
+        'If you create two profiles for the same app, use names that make different categories obvious, such as sonarr-4k and sonarr-anime.',
+        'Keep this value stable after a download is queued. Changing the category can make older completed downloads harder for the app to match.',
+      ],
+    valueLabel: (profile) => isGrabProfile(profile) ? 'Name in the extension' : 'Download-client Category',
+    value: (profile, settings) => isGrabProfile(profile)
+      ? profile.name || settings.appLabel
+      : settings.category,
   },
   wizardPutioFolder: {
     title: 'Put.io destination folder',
@@ -72,17 +114,29 @@ export const WIZARD_HELP = {
   },
   wizardDownloadAt: {
     title: 'Shared download folder',
-    paragraphs: [
-      'You can use a single folder for all *arr apps, for example /putiorr. When you do that, set the *arr download-client Category to the app category so imports land under /putiorr/sonarr, /putiorr/radarr, and similar app-specific folders.',
-      'This folder must be mounted in both putiorr and the *arr container. If the app cannot see this exact path, completed-download import fails even though putiorr finished copying the files.',
-    ],
-    tips: [
-      'Recommended shared setup: Directory is /putiorr and Category is sonarr, radarr, lidarr, or readarr.',
-      'If you use separate folders per app, set Directory to that app mount and still keep Category consistent with the profile.',
-      'If imports fail with a path-not-found error, compare the container volume mounts before changing this value.',
-    ],
-    valueLabel: 'Final category folder',
-    value: (profile, settings) => joinPathParts(settings.directory, settings.category),
+    paragraphs: (profile) => isGrabProfile(profile)
+      ? [
+        'Browser grabs are copied into this folder as they are named on put.io. There is no category subfolder here: that folder exists so an *arr app can find its own imports, and no app imports a browser grab.',
+        'The folder only has to be reachable by putiorr. Point it at whatever library or inbox you want browser downloads to appear in.',
+      ]
+      : [
+        'You can use a single folder for all *arr apps, for example /putiorr. When you do that, set the *arr download-client Category to the app category so imports land under /putiorr/sonarr, /putiorr/radarr, and similar app-specific folders.',
+        'This folder must be mounted in both putiorr and the *arr container. If the app cannot see this exact path, completed-download import fails even though putiorr finished copying the files.',
+      ],
+    tips: (profile) => isGrabProfile(profile)
+      ? [
+        'Give grab profiles their own folder when you want browser downloads kept apart from what the *arr apps import.',
+        'If putiorr runs in Docker, this path must be mounted into the putiorr container.',
+      ]
+      : [
+        'Recommended shared setup: Directory is /putiorr and Category is sonarr, radarr, lidarr, or readarr.',
+        'If you use separate folders per app, set Directory to that app mount and still keep Category consistent with the profile.',
+        'If imports fail with a path-not-found error, compare the container volume mounts before changing this value.',
+      ],
+    valueLabel: (profile) => isGrabProfile(profile) ? 'Grab download folder' : 'Final category folder',
+    value: (profile, settings) => isGrabProfile(profile)
+      ? settings.directory
+      : joinPathParts(settings.directory, settings.category),
   },
   wizardDownloadProfile: {
     title: 'Download profile',
@@ -152,16 +206,31 @@ export const WIZARD_HELP = {
   },
   wizardEnabled: {
     title: 'Enable this profile',
-    paragraphs: [
-      'Enabled profiles accept RPC requests from the matching endpoint path. Disable a profile when you want to keep its settings but stop new requests from using it.',
-      'Disabling a profile is useful while changing app configuration because it avoids accepting new downloads with a half-finished setup.',
-    ],
-    tips: [
-      'Existing queued downloads are not deleted just because this profile is disabled.',
-      'Re-enable the profile when the corresponding *arr download client is ready to test again.',
-    ],
+    paragraphs: (profile) => isGrabProfile(profile)
+      ? [
+        'Enabled profiles accept browser grabs. Disable one when you want to keep its sites and folders but stop the extension from sending anything to it.',
+        'A disabled profile is skipped even for the sites it claims, so those grabs fall through to the extension default profile.',
+      ]
+      : [
+        'Enabled profiles accept RPC requests from the matching endpoint path. Disable a profile when you want to keep its settings but stop new requests from using it.',
+        'Disabling a profile is useful while changing app configuration because it avoids accepting new downloads with a half-finished setup.',
+      ],
+    tips: (profile) => isGrabProfile(profile)
+      ? [
+        'Existing queued downloads are not deleted just because this profile is disabled.',
+        'The extension lists enabled profiles only, so a disabled one drops out of its profile list and its right-click menu until you switch it back on.',
+      ]
+      : [
+        'Existing queued downloads are not deleted just because this profile is disabled.',
+        'Re-enable the profile when the corresponding *arr download client is ready to test again.',
+      ],
     valueLabel: 'Profile state',
-    value: (profile) => profile.enabled ? 'Enabled: accepts new RPC requests' : 'Disabled: saved, but not used for new RPC requests',
+    value: (profile) => {
+      if (isGrabProfile(profile)) {
+        return profile.enabled ? 'Enabled: accepts browser grabs' : 'Disabled: saved, but browser grabs skip it';
+      }
+      return profile.enabled ? 'Enabled: accepts new RPC requests' : 'Disabled: saved, but not used for new RPC requests';
+    },
   },
   wizardAutoRemoveCompleted: {
     title: 'Auto-remove completed downloads',
@@ -171,7 +240,7 @@ export const WIZARD_HELP = {
     ],
     tips: [
       'Leave this off for Sonarr, Radarr, Lidarr, and Readarr because those apps remove imported downloads themselves.',
-      'The Prowlarr preset enables this by default.',
+      'The Prowlarr and Putiorr Grab presets enable this by default: nothing imports those downloads, so nobody would ever clear them.',
     ],
     valueLabel: 'Completion behavior',
     value: (profile) => profile.auto_remove_completed || profile.autoRemoveCompleted
@@ -186,6 +255,7 @@ export const WIZARD_HELP = {
     ],
     tips: [
       'Leave this empty to keep the profile out of browser grabs. Those grabs then use the default profile configured in the extension.',
+      'Only Putiorr Grab profiles claim sites. A site listed on an *arr profile is never consulted, which is why the field is shown for this preset alone.',
       'The first matching profile wins, so avoid listing the same site on two profiles.',
       'putiorr rewrites what you type: sites are lowercased, unicode becomes punycode, and any scheme, port, or path is dropped.',
     ],
@@ -248,6 +318,7 @@ export function renderProfiles() {
 
 export function createProfileCard(profile) {
   const type = profileType(profile.type);
+  const isGrab = isGrabProfile(profile);
   const displayName = profileDisplayName(profile, type);
   const card = document.createElement('article');
   card.className = 'profile-card';
@@ -297,6 +368,10 @@ export function createProfileCard(profile) {
   setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
   setProfileFact(card, 'download-profile', downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId));
   setProfileFact(card, 'browser-domains', browserDomainsText(profile));
+  // A grab profile has no download client to point at its RPC endpoint, and no
+  // other preset claims sites, so each card drops the fact that cannot apply.
+  toggleProfileFact(card, 'rpc', isGrab);
+  toggleProfileFact(card, 'browser-domains', !isGrab);
   const status = card.querySelector('[data-role="status"]');
   status.className = `profile-status status ${profile.enabled === false ? 'warn' : 'ok'}`;
   setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
@@ -306,7 +381,20 @@ export function createProfileCard(profile) {
   return card;
 }
 
+// The fact lives in a wrapper div with its own grid cell, so the row has to be
+// hidden rather than emptied; the global [hidden] rule collapses it.
+export function toggleProfileFact(card, role, hidden) {
+  const fact = card.querySelector(`[data-role="${role}"]`)?.closest('div');
+  if (fact) setHidden(fact, hidden);
+}
+
 export function profileSummary(profile) {
+  if (isGrabProfile(profile)) {
+    const domains = browserDomainsList(profile);
+    return domains.length
+      ? `Browser grabs from ${domains.join(', ')}.`
+      : 'Browser grabs sent here by the extension.';
+  }
   const payload = getClientSettingsFromProfile({
     ...profile,
     name: profileDisplayName(profile),
@@ -344,14 +432,13 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   el.profileWizardTitle.textContent = isExisting
     ? `Set up ${displayName}`
     : `Set up ${detail.label}`;
-  el.profileWizardIntro.textContent = 'Answer a few setup questions, then copy the matching *arr download-client values.';
   setWizardField(el.wizardProfileId, profile.id || '');
   setWizardField(el.wizardProfileType, type);
   setWizardField(el.wizardProfileName, displayName);
   setWizardField(el.wizardPutioFolder, profile.putio_folder_name || DEFAULT_PUTIO_FOLDER);
   setWizardField(el.wizardDownloadAt, profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder());
   renderDownloadProfileOptions(profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId());
-  setWizardField(el.wizardRpcPath, profile.rpc_path || defaultRpcPathForType(type));
+  setWizardField(el.wizardRpcPath, profile.rpc_path || rpcPathForType(type, displayName));
   setWizardField(el.wizardClientHost, profile.client_host ?? profile.clientHost ?? DEFAULT_CLIENT_HOST);
   setWizardField(el.wizardClientPort, profile.client_port ?? profile.clientPort ?? DEFAULT_CLIENT_PORT);
   setWizardChecked(el.wizardUseSsl, Boolean(profile.client_use_ssl ?? profile.clientUseSsl));
@@ -366,6 +453,9 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   el.saveProfileButton.textContent = 'Save & test';
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
   setWizardMessage('');
+  // The dialog element is reused across opens, so the layout of the profile
+  // closed last is still in place until this runs.
+  applyProfileTypeLayout(type);
   updateWizardPreview();
 
   el.profileWizard.open = true;
@@ -396,7 +486,7 @@ export function createDefaultProfile(type) {
     putio_folder_name: DEFAULT_PUTIO_FOLDER,
     downloadAt: defaultDownloadFolder(),
     download_profile_id: defaultDownloadProfileId(),
-    rpc_path: defaultRpcPathForType(type),
+    rpc_path: rpcPathForType(type, detail.label),
     auto_remove_completed: Boolean(detail.autoRemoveCompleted),
     enabled: true,
   };
@@ -412,10 +502,56 @@ export function syncWizardDefaultsForType() {
   const nextDetail = profileType(nextType);
 
   setWizardField(el.wizardProfileName, nextDetail.label);
-  setWizardField(el.wizardRpcPath, defaultRpcPathForType(nextType));
+  setWizardField(el.wizardRpcPath, rpcPathForType(nextType, nextDetail.label));
   setWizardChecked(el.wizardAutoRemoveCompleted, Boolean(nextDetail.autoRemoveCompleted));
   el.profileWizard.dataset.previousType = nextType;
+  applyProfileTypeLayout(nextType);
   updateWizardPreview();
+}
+
+// Which steps a preset needs: an *arr profile is reached over its RPC endpoint
+// and never through the browser, and a grab profile is the reverse. Both
+// directions run through here, so switching back restores what the other hid.
+export function applyProfileTypeLayout(type = fieldValue(el.wizardProfileType)) {
+  const isGrab = type === GRAB_PROFILE_TYPE;
+  setHidden(el.wizardRpcStep, isGrab);
+  setHidden(el.wizardBrowserStep, !isGrab);
+  setHidden(el.copyClientSettingsButton, isGrab);
+  setText(el.profileWizardIntro, isGrab ? GRAB_WIZARD_INTRO : ARR_WIZARD_INTRO);
+  setText(el.wizardAppStepHelp, isGrab ? GRAB_APP_STEP_HELP : ARR_APP_STEP_HELP);
+  setText(el.wizardStorageStepHelp, isGrab ? GRAB_STORAGE_STEP_HELP : ARR_STORAGE_STEP_HELP);
+  // The checkbox is slot content, so its label is the element's own text; a
+  // grab profile has no app to signal anything.
+  setText(el.wizardAutoRemoveCompleted, isGrab ? GRAB_AUTO_REMOVE_LABEL : ARR_AUTO_REMOVE_LABEL);
+  renumberWizardSteps();
+}
+
+// The step numbers count what the user can see, so a preset that hides a step
+// still reads 1..N instead of skipping the hidden one's number.
+export function renumberWizardSteps() {
+  const steps = [...el.profileWizardSteps.querySelectorAll('.wizard-step')].filter((step) => !step.hidden);
+  steps.forEach((step, index) => {
+    const label = step.querySelector('.step-label');
+    if (label) setText(label, `${index + 1}. ${label.dataset.stepTitle}`);
+  });
+}
+
+// Grab profiles have no RPC endpoint field, but the store still requires a
+// unique path, so one is derived from the display name and never shown.
+export function grabRpcPathForName(name) {
+  return `/grab/${slugify(name)}/rpc`;
+}
+
+export function rpcPathForType(type, name) {
+  return type === GRAB_PROFILE_TYPE ? grabRpcPathForName(name) : defaultRpcPathForType(type);
+}
+
+// The *arr presets realign their path when the preset changes; a grab path
+// follows the display name instead, and nothing else would refresh a field the
+// user cannot see.
+export function syncDerivedRpcPath() {
+  if (fieldValue(el.wizardProfileType) !== GRAB_PROFILE_TYPE) return;
+  setWizardField(el.wizardRpcPath, grabRpcPathForName(fieldValue(el.wizardProfileName)));
 }
 
 export function getWizardPayload() {
@@ -523,6 +659,7 @@ export async function deleteProfileById(id = el.wizardProfileId.value) {
 }
 
 export function updateWizardPreview() {
+  syncDerivedRpcPath();
   const profile = getWizardPayload();
   const settings = getClientSettingsFromProfile(profile);
   el.profileWizardTitle.textContent = `Set up ${profile.name || settings.appLabel}`;
@@ -535,7 +672,7 @@ export function setWizardHelpForField(fieldId = DEFAULT_HELP_FIELD, profile = ge
   el.profileWizard.dataset.activeHelpField = nextFieldId;
   setText(el.wizardHelpKicker, 'Field guide');
   setText(el.wizardHelpTitle, help.title);
-  setText(el.wizardHelpValueLabel, help.valueLabel || 'Current effect');
+  setText(el.wizardHelpValueLabel, resolveWizardHelpContent(help.valueLabel, profile, settings) || 'Current effect');
   setText(el.wizardHelpValue, resolveWizardHelpValue(help, profile, settings));
   renderWizardHelpParagraphs(resolveWizardHelpContent(help.paragraphs, profile, settings));
   renderWizardHelpList(resolveWizardHelpContent(help.tips, profile, settings));
@@ -711,6 +848,12 @@ export function setWizardMessage(message, tone = 'neutral') {
 
 export function profileType(type) {
   return PROFILE_TYPES[type] ?? PROFILE_TYPES.custom;
+}
+
+// Reads a stored profile or the wizard payload, which both spell the preset in
+// `type`; the help panel is handed whichever of the two is current.
+export function isGrabProfile(profile) {
+  return String(profile?.type ?? '') === GRAB_PROFILE_TYPE;
 }
 
 export function profileDisplayName(profile, detail = profileType(profile?.type)) {

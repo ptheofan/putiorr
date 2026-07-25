@@ -384,9 +384,14 @@
         <input id="wizardProfileId" type="hidden">
 
         <div class="wizard-layout">
-          <div class="wizard-questions">
-            <section class="wizard-step">
-              <div class="step-label">1. App</div>
+          <!-- The RPC endpoint and Browser grabs steps exclude each other: the
+               *arr presets show the first, Putiorr Grab the second. The numbers
+               below are the *arr sequence; applyProfileTypeLayout() renumbers
+               whatever is visible whenever the wizard opens or the preset
+               changes. -->
+          <div class="wizard-questions" id="profileWizardSteps">
+            <section class="wizard-step" id="wizardAppStep">
+              <div class="step-label" data-step-title="App">1. App</div>
               <div class="field-pair">
                 <wa-select id="wizardProfileType" label="App preset" value="sonarr">
                   <wa-option value="sonarr">Sonarr</wa-option>
@@ -394,25 +399,26 @@
                   <wa-option value="lidarr">Lidarr</wa-option>
                   <wa-option value="readarr">Readarr</wa-option>
                   <wa-option value="prowlarr">Prowlarr</wa-option>
+                  <wa-option value="grab">Putiorr Grab</wa-option>
                   <wa-option value="custom">Custom</wa-option>
                 </wa-select>
                 <wa-input id="wizardProfileName" label="Display name" type="text" autocomplete="off" placeholder="Sonarr"></wa-input>
               </div>
-              <p class="field-help">The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.</p>
+              <p class="field-help" id="wizardAppStepHelp">The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.</p>
             </section>
 
-            <section class="wizard-step">
-              <div class="step-label">2. Storage</div>
+            <section class="wizard-step" id="wizardStorageStep">
+              <div class="step-label" data-step-title="Storage">2. Storage</div>
               <div class="field-pair">
                 <wa-input id="wizardPutioFolder" label="Put.io destination folder" type="text" autocomplete="off" placeholder="putiorr"></wa-input>
                 <wa-input id="wizardDownloadAt" label="Shared download folder" type="text" autocomplete="off" placeholder="/putiorr"></wa-input>
               </div>
-              <p class="field-help">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
+              <p class="field-help" id="wizardStorageStepHelp">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
               <wa-select id="wizardDownloadProfile" label="Download profile"></wa-select>
             </section>
 
-            <section class="wizard-step">
-              <div class="step-label">3. RPC endpoint</div>
+            <section class="wizard-step" id="wizardRpcStep">
+              <div class="step-label" data-step-title="RPC endpoint">3. RPC endpoint</div>
               <wa-input id="wizardRpcPath" label="RPC endpoint path" type="text" autocomplete="off" placeholder="/sonarr/transmission/rpc"></wa-input>
               <div class="field-pair compact">
                 <wa-input id="wizardClientHost" label="Host from the *arr container" type="text" autocomplete="off" placeholder="putiorr"></wa-input>
@@ -420,15 +426,21 @@
               </div>
               <div class="check-grid">
                 <wa-checkbox id="wizardUseSsl">Use SSL for the download client</wa-checkbox>
-                <wa-checkbox id="wizardEnabled">Enable this profile</wa-checkbox>
-                <wa-checkbox id="wizardAutoRemoveCompleted" data-testid="profile-auto-remove-completed">App will not signal import completion; remove from putiorr once files download locally</wa-checkbox>
               </div>
             </section>
 
-            <section class="wizard-step">
-              <div class="step-label">4. Browser grabs</div>
+            <section class="wizard-step" id="wizardBrowserStep" hidden>
+              <div class="step-label" data-step-title="Browser grabs">3. Browser grabs</div>
               <wa-input id="wizardBrowserDomains" label="Browser sites" type="text" autocomplete="off" placeholder="x.example, z.example" data-testid="profile-browser-domains"></wa-input>
               <p class="field-help">Browser grabs from these sites use this profile; subdomains match automatically. Leave empty for none.</p>
+            </section>
+
+            <section class="wizard-step" id="wizardOptionsStep">
+              <div class="step-label" data-step-title="Options">4. Options</div>
+              <div class="check-grid">
+                <wa-checkbox id="wizardEnabled">Enable this profile</wa-checkbox>
+                <wa-checkbox id="wizardAutoRemoveCompleted" data-testid="profile-auto-remove-completed">App will not signal import completion; remove from putiorr once files download locally</wa-checkbox>
+              </div>
             </section>
           </div>
 
