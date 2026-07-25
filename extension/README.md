@@ -92,8 +92,9 @@ putiorr resolves this on every grab, in this order:
    sites** match the page's hostname exactly or as a suffix. Listing one site on
    two profiles is therefore not an error; the older profile simply wins.
 3. Otherwise the default profile configured in the extension options.
-4. Otherwise nothing: putiorr answers `400` and the notification reads "no
-   profile matches this site and no default profile is configured".
+4. Otherwise nothing: putiorr answers `400`, and the notification reads "No
+   profile matches this site and no default profile is set — click here to
+   open the options". Clicking it opens the extension options.
 
 A disabled profile does not claim its sites — routing to it is exactly what
 disabling turned off. An explicit right-click pick is still sent to it, and
