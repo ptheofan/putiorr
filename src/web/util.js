@@ -286,6 +286,31 @@ export function schemaMigrationSummary(migrations) {
   return `The last database upgrade ${parts.join(', ')}. Files on disk were not touched.`;
 }
 
+function joinNames(names) {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+// put.io transfers the last poll could not attribute to one RR profile. Every
+// profile defaults to the same put.io folder, so in the documented setup this
+// is every transfer putiorr did not create itself — and until now the only
+// evidence was that nothing happened.
+export function adoptionNoticeSummary(notices) {
+  const entries = Array.isArray(notices) ? notices.filter((notice) => notice?.transferCount) : [];
+  if (entries.length === 0) return '';
+  return entries.map((notice) => {
+    const folder = notice.folderName
+      ? `put.io folder “${notice.folderName}”`
+      : `put.io folder ${notice.putioFolderId ?? '(unknown)'}`;
+    const transfers = `${pluralize(notice.transferCount, 'put.io transfer')}`;
+    const profiles = Array.isArray(notice.profiles) ? notice.profiles : [];
+    return profiles.length > 1
+      ? `${transfers} in ${folder} cannot be adopted: ${joinNames(profiles)} all download into it.`
+        + ' Give each RR profile its own put.io folder.'
+      : `${transfers} in ${folder} are not downloaded: no RR profile uses that folder.`;
+  }).join(' ');
+}
+
 export function schemaMigrationWarning(migrations) {
   const stranded = migrations?.downloads?.strandedLegacyRows;
   if (stranded) {

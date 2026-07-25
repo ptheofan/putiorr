@@ -21,6 +21,8 @@ test('downloads UI exposes stable data-testid hooks for frontend tests', () => {
     'delete-from-putio',
     'delete-local-files',
     'delete-confirm-submit',
+    'adoption-notice',
+    'adoption-notice-text',
     'schema-migration-notice',
     'schema-migration-summary',
     'schema-migration-warning',
@@ -70,4 +72,14 @@ test('the downloads view renders the schema migration report it is served', () =
   // field nobody ever sees.
   assert.match(downloadsJs, /state\.settings\?\.schemaMigrations/);
   assert.match(downloadsJs, /export function renderDownloads\(\) \{\s*renderSchemaMigrations\(\);/);
+});
+
+// Audit finding 9: with every profile on one put.io folder, adoption never
+// happens. GET /api/settings carries the report; a payload nobody renders
+// leaves the user with a poll that quietly does nothing.
+test('the downloads view renders the adoption notice it is served', () => {
+  const downloadsJs = readFileSync(new URL('../src/web/downloads.js', import.meta.url), 'utf8');
+
+  assert.match(downloadsJs, /state\.settings\?\.adoptionNotices/);
+  assert.match(downloadsJs, /renderAdoptionNotices\(\);/);
 });

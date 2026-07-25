@@ -35,6 +35,7 @@ import {
   setProfileFact,
   escapeSvgText,
   truncateLabel,
+  adoptionNoticeSummary,
   schemaMigrationSummary,
   schemaMigrationWarning,
 } from '../src/web/util.js';
@@ -480,4 +481,33 @@ test('the schema migration warning covers both ways downloads go missing', () =>
     /An older putiorr has written 1 download into storage this version cannot read/,
   );
   assert.match(schemaMigrationWarning({ legacyTablesPresent: 0 }), /pre-downloads-\*\.bak/);
+});
+
+// Audit finding 9: in the configuration the README recommends, every profile
+// shares one put.io folder and nothing is ever adopted. The dashboard is where
+// that has to be visible — the alternative is transfers sitting on put.io
+// forever with no explanation anywhere the user looks.
+test('the adoption notice names the folder, the profiles and the cost', () => {
+  assert.equal(adoptionNoticeSummary(undefined), '');
+  assert.equal(adoptionNoticeSummary([]), '');
+
+  const shared = adoptionNoticeSummary([{
+    putioFolderId: 42,
+    folderName: 'putiorr',
+    profiles: ['Sonarr', 'Radarr'],
+    transferCount: 3,
+  }]);
+  assert.match(shared, /3 put\.io transfers/);
+  assert.match(shared, /putiorr/);
+  assert.match(shared, /Sonarr and Radarr/);
+  assert.match(shared, /own put\.io folder/);
+
+  const unwatched = adoptionNoticeSummary([{
+    putioFolderId: 99,
+    folderName: '',
+    profiles: [],
+    transferCount: 1,
+  }]);
+  assert.match(unwatched, /1 put\.io transfer/);
+  assert.match(unwatched, /no RR profile/);
 });

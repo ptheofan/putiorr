@@ -136,6 +136,8 @@ export const el = {
   schemaMigrationNotice: document.querySelector('#schemaMigrationNotice'),
   schemaMigrationSummary: document.querySelector('#schemaMigrationSummary'),
   schemaMigrationWarning: document.querySelector('#schemaMigrationWarning'),
+  adoptionNotice: document.querySelector('#adoptionNotice'),
+  adoptionNoticeText: document.querySelector('#adoptionNoticeText'),
   orphanedDownloads: document.querySelector('#orphanedDownloads'),
   orphanedDownloadsList: document.querySelector('#orphanedDownloadsList'),
   topologyCanvas: document.querySelector('#topologyCanvas'),

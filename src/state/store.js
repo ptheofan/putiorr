@@ -489,6 +489,29 @@ export class StateStore {
     };
   }
 
+  // put.io transfers the poll could not attribute to exactly one RR profile,
+  // as of the last poll. Recorded rather than only logged: in the configuration
+  // the README recommends — every profile pointing at the same put.io folder —
+  // adoption never happens, and a NAS user does not read the log to find out.
+  adoptionNotices() {
+    const raw = this.getSetting('adoption_notices');
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveAdoptionNotices(notices) {
+    if (!Array.isArray(notices) || notices.length === 0) {
+      this.deleteSetting('adoption_notices');
+      return;
+    }
+    this.setSetting('adoption_notices', JSON.stringify(notices));
+  }
+
   legacyRowsAfterMigration() {
     if (this.getSetting('downloads_schema_v1') !== '1') return undefined;
     if (!this.hasTable('transfers')) return undefined;

@@ -402,6 +402,75 @@ test('the layout sweep leaves a download it cannot move, and the poll keeps it',
   }
 });
 
+// Phase 4 of the ownership cleanup (#67), audit finding 9: adoption of a
+// transfer putiorr did not create maps the put.io folder to a profile, and is
+// skipped unless exactly one profile owns that folder. Every profile defaults
+// to the same `putiorr` folder, which the README recommends — so in the
+// documented setup nothing is ever adopted, and it used to say nothing at all.
+test('put.io transfers a shared folder cannot attribute are reported, not skipped in silence', async () => {
+  const harness = await createHarness();
+  try {
+    harness.store.createProfile({
+      name: 'Radarr',
+      type: 'radarr',
+      slug: 'radarr',
+      putio_folder_name: 'putiorr',
+      downloadAt: harness.config.targetDir,
+      rpc_path: '/radarr/transmission/rpc',
+      enabled: true,
+    });
+
+    harness.putio.remoteTransfers = [
+      { id: 80, fileId: 81, saveParentId: 42, hash: 'sharedfolderhash', name: 'Shared.Folder.Release', status: 'COMPLETED', percentDone: 100 },
+      { id: 82, fileId: 83, saveParentId: 99, hash: 'unwatchedhash', name: 'Unwatched.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await harness.service.refreshRemoteTransfers();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.deepEqual(harness.store.listActiveDownloads(), []);
+    const notices = harness.store.adoptionNotices();
+    const shared = notices.find((notice) => notice.putioFolderId === 42);
+    assert.deepEqual(shared.profiles, ['Custom', 'Radarr']);
+    assert.equal(shared.transferCount, 1);
+    assert.deepEqual(shared.transfers, [{ id: 80, name: 'Shared.Folder.Release' }]);
+    const unwatched = notices.find((notice) => notice.putioFolderId === 99);
+    assert.deepEqual(unwatched.profiles, []);
+    assert.equal(unwatched.transferCount, 1);
+
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'put.io transfers cannot be attributed to one RR profile');
+    assert.equal(logged.meta.folders.length, 2);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the adoption notice clears once nothing is left unattributed', async () => {
+  const harness = await createHarness();
+  try {
+    harness.store.saveAdoptionNotices([{ putioFolderId: 42, folderName: 'putiorr', profiles: [], transfers: [], transferCount: 3 }]);
+
+    harness.putio.remoteTransfers = [
+      { id: 84, fileId: 85, saveParentId: 42, hash: 'adoptablehash', name: 'Adoptable.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+    await harness.service.refreshRemoteTransfers();
+
+    // One profile owns folder 42, so the transfer is adopted and the notice
+    // has nothing left to report.
+    assert.equal(harness.store.findDownloadByPutioTransferId(84).name, 'Adoptable.Release');
+    assert.deepEqual(harness.store.adoptionNotices(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
 // Phase 1 of the ownership cleanup (#67): the poll is the only thing that moves
 // downloads forward, so anything that throws inside it stops every download on
 // the box. Both sweeps below used to propagate out of pollOnce on their first

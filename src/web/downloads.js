@@ -20,6 +20,7 @@ import {
   setDataValue,
   setHidden,
   placeChildAt,
+  adoptionNoticeSummary,
   schemaMigrationSummary,
   schemaMigrationWarning,
 } from './util.js';
@@ -60,6 +61,15 @@ export function renderSchemaMigrations() {
   setHidden(el.schemaMigrationSummary, !summary);
   setText(el.schemaMigrationWarning, warning);
   setHidden(el.schemaMigrationWarning, !warning);
+}
+
+// put.io transfers the last poll could not attribute to one RR profile. The
+// dashboard is the only place a user would notice that nothing is being
+// adopted; the poll's own answer was to move on without a word.
+export function renderAdoptionNotices() {
+  const summary = adoptionNoticeSummary(state.settings?.adoptionNotices);
+  setHidden(el.adoptionNotice, !summary);
+  setText(el.adoptionNoticeText, summary);
 }
 
 export function renderOrphanedDownloads() {
@@ -148,6 +158,7 @@ export async function deleteOrphanedDownload(orphanId, { deleteRemote = false, d
 
 export function renderDownloads() {
   renderSchemaMigrations();
+  renderAdoptionNotices();
   renderOrphanedDownloads();
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();

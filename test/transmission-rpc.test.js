@@ -1805,6 +1805,9 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(settingsBody.tokenConfigured, true);
   assert.equal(typeof settingsBody.defaultDownloadProfileId, 'number');
   assert.equal(settingsBody.downloadPolicy.slowSpeedThresholdBytesPerSecond, 0);
+  // The dashboard's adoption notice reads this; a fresh store has nothing to
+  // report, and the field still has to be there rather than undefined.
+  assert.deepEqual(settingsBody.adoptionNotices, []);
   assert.equal(settingsBody.putioOAuth.appId, '12345');
   assert.equal(settingsBody.putioOAuth.defaultAppId, '12345');
   assert.equal(settingsBody.putioOAuth.appIdOverridden, false);

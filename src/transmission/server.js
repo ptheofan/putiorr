@@ -889,6 +889,10 @@ export class TransmissionRpcServer {
       // What the last schema upgrade migrated and quarantined. The dashboard
       // renders the quarantine itself; this is the record of the run.
       schemaMigrations: this.service.store.schemaMigrationReports(),
+      // put.io transfers the last poll could not attribute to one RR profile.
+      // The dashboard renders it; without it, a shared put.io folder means
+      // nothing is ever adopted and nothing ever says so.
+      adoptionNotices: this.service.store.adoptionNotices(),
     };
   }
 

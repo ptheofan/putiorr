@@ -366,6 +366,7 @@ export class TransferService {
     const remoteIds = new Set();
     const remoteHashes = new Set();
     const rows = [];
+    const unattributed = new Map();
     for (const remote of remoteTransfers) {
       if (remote.id != null) remoteIds.add(remote.id);
       if (remote.hash) remoteHashes.add(String(remote.hash).trim().toLowerCase());
@@ -375,7 +376,7 @@ export class TransferService {
       // tick, until a restart. A bad row is skipped and named; the next tick
       // retries it.
       try {
-        this.refreshRemoteTransfer(remote, byFolderId, rows);
+        this.refreshRemoteTransfer(remote, byFolderId, rows, unattributed);
       } catch (error) {
         logger.warn('skipped put.io transfer that failed to refresh', {
           putioTransferId: remote.id,
@@ -387,14 +388,51 @@ export class TransferService {
         });
       }
     }
+    this.recordAdoptionNotices(unattributed);
     this.pruneRemoteTransfers(remoteIds, remoteHashes);
     this.pruneRemovedTransfers(remoteIds, remoteHashes);
     return rows;
   }
 
+  // Audit finding 9: adoption maps a put.io folder to a profile and gives up
+  // unless exactly one profile owns that folder. Every profile defaults to the
+  // same `putiorr` folder, which the README recommends, so in the documented
+  // setup nothing is ever adopted — and it used to give up without a word. The
+  // notice is rewritten from scratch on every poll, so it disappears by itself
+  // once the folders are separated or the transfers are gone.
+  recordAdoptionNotices(unattributed) {
+    const notices = [...unattributed.values()].map((entry) => ({
+      putioFolderId: entry.putioFolderId,
+      folderName: entry.folderName,
+      profiles: entry.profiles,
+      transferCount: entry.transfers.length,
+      // Enough to recognise which transfers are stuck without turning a
+      // settings row into a copy of the put.io transfer list.
+      transfers: entry.transfers.slice(0, 5),
+    }));
+    const previous = JSON.stringify(this.store.adoptionNotices());
+    this.store.saveAdoptionNotices(notices);
+    if (JSON.stringify(notices) === previous) return;
+
+    if (notices.length === 0) {
+      logger.info('every put.io transfer can be attributed to one RR profile again');
+      return;
+    }
+    logger.warn('put.io transfers cannot be attributed to one RR profile', {
+      consequence: 'they are not adopted, so putiorr will not download them',
+      fix: 'give each RR profile its own put.io folder, or remove the transfers from put.io',
+      folders: notices.map((notice) => ({
+        putioFolderId: notice.putioFolderId,
+        folderName: notice.folderName,
+        profiles: notice.profiles,
+        transferCount: notice.transferCount,
+      })),
+    });
+  }
+
   // One put.io transfer's worth of work, extracted so the caller can isolate a
   // failure to the row that caused it. Appends the refreshed rows to `rows`.
-  refreshRemoteTransfer(remote, byFolderId, rows) {
+  refreshRemoteTransfer(remote, byFolderId, rows, unattributed = new Map()) {
     const existing = remote.id ? this.store.findDownloadByPutioTransferId(remote.id) : undefined;
 
     if (existing) {
@@ -428,18 +466,36 @@ export class TransferService {
       return;
     }
 
-    // Adoption of a transfer putiorr did not create. profile_id is mandatory
-    // now, so this early return is load-bearing rather than cosmetic: a folder
-    // that maps to no profile, or to more than one, has no answer, and phase 4
-    // turns the silence into a log line and a dashboard notice.
+    // Adoption of a transfer putiorr did not create. profile_id is mandatory,
+    // so a folder that maps to no profile, or to more than one, has no answer
+    // — but "no answer" is a thing the user has to be told rather than a
+    // reason to move on quietly.
     const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
-    if (folderProfiles.length !== 1) return;
+    if (folderProfiles.length !== 1) {
+      this.recordUnattributedTransfer(remote, folderProfiles, unattributed);
+      return;
+    }
     const [profile] = folderProfiles;
     rows.push(this.store.upsertDownload(putioTransferToStoreInput(remote, {
       profile_id: profile.id,
       source: remote.magnetUri ?? '',
       source_type: 'remote',
     })));
+  }
+
+  // Grouped by folder rather than listed per transfer: the problem is the
+  // folder's mapping, and one line per stuck transfer on every poll is noise
+  // that buries it.
+  recordUnattributedTransfer(remote, folderProfiles, unattributed) {
+    const putioFolderId = remote.saveParentId ?? null;
+    const entry = unattributed.get(putioFolderId) ?? {
+      putioFolderId,
+      folderName: folderProfiles[0]?.putio_folder_name ?? '',
+      profiles: folderProfiles.map((profile) => profile.name),
+      transfers: [],
+    };
+    entry.transfers.push({ id: remote.id ?? null, name: remote.name ?? '' });
+    unattributed.set(putioFolderId, entry);
   }
 
   pruneRemoteTransfers(remoteIds, remoteHashes) {
