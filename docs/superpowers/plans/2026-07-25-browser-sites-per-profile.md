@@ -186,6 +186,29 @@ Notes: `listProfiles()` already filters to enabled profiles, which implements th
 - Legacy notice: on restore, if `sync.rules` is a non-empty array, render it read-only (domains → cached profile name or `#id`) with the message "Site rules now live in putiorr: set Browser sites on each profile there, then dismiss this." and a Dismiss button that `chrome.storage.sync.remove('rules')` and hides the notice. Save does NOT write `rules` anymore (drift-guard test updated to the new key set).
 - Update/prune options tests accordingly (rule-editor tests removed, read-only display + legacy notice + dismiss covered).
 
+- [ ] **Step 2b: Restyle with putiorr's design language (user request)**
+
+While rebuilding options.html, adopt the dashboard's look with plain CSS —
+no React, no build step (user chose this over a React rewrite):
+- New `extension/options.css` linked from options.html. COPY the needed
+  pieces from `src/web/styles/` (tokens from `01-tokens.css`, base/type
+  rules, form styling from `04-forms.css`, panel/card treatment from
+  `03-panels.css`) — the extension cannot reference `src/web` at runtime;
+  keep only the rules the page uses, note the source files in a comment.
+- Layout: a header with the extension icon + title; a "Connection" card
+  (URL, credentials, Test button + status); a "Profiles" card (read-only
+  fetched-profile list with their browser sites, styled as rows); a
+  "Behavior" card (default profile select, auto-capture toggle); the legacy
+  rules notice as a dismissible callout.
+- Styled selects/inputs/buttons per the dashboard's form styles; status/
+  error styling reuses the dashboard's semantic colors; support light and
+  dark via the same `prefers-color-scheme` approach the dashboard tokens
+  use.
+- No inline styles; all static markup in options.html, all dynamic content
+  still `textContent`-only. The stub-DOM tests keep passing (they assert
+  behavior, not styling) — update selectors only where the structure
+  legitimately changed.
+
 - [ ] **Step 3: Prune unused lib code**
 
 Remove from `extension/lib/settings.js`: `parseRuleDomains` and its helpers now unused (keep `validateBaseUrl`, `SYNC_DEFAULTS`, and anything the options page still imports). Remove from `extension/lib/resolve.js`: `matchSiteRuleProfileId`, `resolveProfileId`, `normalizeDomain` export IF nothing imports them anymore (verify with grep — `sanitizeProfiles`, `isMagnetLink`, `isTorrentLink` stay). Prune their tests. The deleted logic lives on in `src/transfer/browser-domains.js` with its own suite.
