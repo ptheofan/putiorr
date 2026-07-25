@@ -1070,3 +1070,67 @@ test('a quarantined row never records a relative local path', async () => {
     store.close();
   }
 });
+
+// Risk R4: an *arr stores the id torrent-add returned and polls torrent-get
+// with it forever. The collapse copies that id into downloads verbatim; a
+// quarantined row has to carry it too, or reassigning the row hands the *arr's
+// queue item a new id and its torrent-get stays empty forever — which is
+// exactly the outcome the quarantine exists to avoid. R4 only accepted losing
+// an id for rows that are dropped, and under the owner's ruling none are.
+test('reassignment restores the Transmission id the *arr apps still hold', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [
+      profileRow({ id: 1, slug: 'default', name: 'Default', rpc_path: '/transmission/rpc' }),
+      profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/transmission/rpc' }),
+    ],
+    transfers: [transferRow({ id: 31, profile_id: null, putio_transfer_id: 1031 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const [orphan] = store.listOrphanedDownloads();
+    assert.equal(orphan.legacy_download_id, 31);
+
+    const created = store.assignOrphanedDownload(orphan.id, 2);
+    assert.equal(created.id, 31, 'the id Sonarr is polling has to survive the repair');
+    assert.equal(created.profile_id, 2);
+    assert.equal(store.findDownloadById(31).putio_transfer_id, 1031);
+  } finally {
+    store.close();
+  }
+});
+
+test('reassignment falls back to a new id when the old one has been taken', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [
+      profileRow({ id: 1, slug: 'default', name: 'Default', rpc_path: '/transmission/rpc' }),
+      profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/transmission/rpc' }),
+    ],
+    transfers: [transferRow({ id: 3, profile_id: null, putio_transfer_id: 1003, downloaded_ever: 640 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const [orphan] = store.listOrphanedDownloads();
+    assert.equal(orphan.legacy_download_id, 3);
+    // Something else has taken id 3 in the meantime.
+    store.db.prepare(`
+      INSERT INTO downloads (id, profile_id, putio_transfer_id, name, created_at, updated_at)
+      VALUES (3, 1, 9999, 'Squatter', 'now', 'now')
+    `).run();
+
+    const created = store.assignOrphanedDownload(orphan.id, 2);
+    assert.notEqual(created.id, 3);
+    assert.equal(created.putio_transfer_id, 1003);
+    assert.equal(store.findDownloadById(3).name, 'Squatter');
+    // Progress made before the quarantine is not thrown away: a download that
+    // reappears at 0 bytes reads as a restart nobody asked for.
+    assert.equal(created.downloaded_ever, 640);
+  } finally {
+    store.close();
+  }
+});

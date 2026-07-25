@@ -85,6 +85,10 @@ const DOWNLOADS_DDL = `
     downloaded_ever INTEGER NOT NULL DEFAULT 0,
     putio_file_id INTEGER,
     save_parent_id INTEGER,
+    -- The id torrent-add handed the *arr apps. They poll torrent-get with it
+    -- forever, so reassigning a quarantined row has to give it back rather
+    -- than mint a new one (risk R4).
+    legacy_download_id INTEGER,
     legacy_download_dir TEXT NOT NULL DEFAULT '',
     quarantined_at TEXT NOT NULL,
     reason TEXT NOT NULL
@@ -662,9 +666,9 @@ export class StateStore {
       INSERT INTO orphaned_downloads (
         putio_transfer_id, hash, name, source, source_type, category, lifecycle,
         total_size, downloaded_ever, putio_file_id, save_parent_id,
-        legacy_download_dir, quarantined_at, reason
+        legacy_download_id, legacy_download_dir, quarantined_at, reason
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const report = {
@@ -823,6 +827,7 @@ export class StateStore {
       row.downloaded_ever ?? 0,
       row.putio_file_id ?? null,
       row.save_parent_id ?? null,
+      row.id ?? null,
       localPath,
       timestamp,
       reason,
@@ -1322,16 +1327,23 @@ export class StateStore {
     if (!existing) {
       if (input.profile_id == null) throw new Error('profile id is required');
       const hash = normalizeHash(input.hash);
+      // An explicit id is only ever supplied by the quarantine repair path,
+      // which is restoring the Transmission id an *arr is still polling with.
+      // AUTOINCREMENT never reuses a value below its high-water mark, so a
+      // restored id cannot collide with one handed out later.
+      const restoredId = input.id == null ? undefined : Number(input.id);
       const result = this.db.prepare(`
         INSERT INTO downloads (
+          ${restoredId === undefined ? '' : 'id, '}
           profile_id, putio_transfer_id, putio_file_id, save_parent_id, hash, name, source,
           source_type, category, lifecycle, putio_status, putio_status_message,
           putio_peers, putio_availability, percent_done, completion_percent,
           total_size, downloaded_ever, uploaded_ever, download_speed, upload_speed,
           eta, error, error_string, retry_count, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (${restoredId === undefined ? '' : '?, '}?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
+        ...(restoredId === undefined ? [] : [restoredId]),
         input.profile_id,
         putioTransferId,
         input.putio_file_id ?? null,
@@ -1699,7 +1711,15 @@ export class StateStore {
     }
 
     return this.transaction(() => {
+      // The id the *arr apps are still polling with, unless something has taken
+      // it since — a download created after the upgrade, or another quarantined
+      // row restored first. A new id is the fallback, not the default: it means
+      // that *arr's queue item stays invisible until it re-grabs.
+      const restoredId = row.legacy_download_id != null && !this.findDownloadById(row.legacy_download_id)
+        ? row.legacy_download_id
+        : undefined;
       const created = this.upsertDownload({
+        id: restoredId,
         profile_id: profile.id,
         putio_transfer_id: row.putio_transfer_id,
         putio_file_id: row.putio_file_id,
@@ -1713,6 +1733,9 @@ export class StateStore {
         // trusting a file list that has no rows behind it.
         lifecycle: 'remote',
         total_size: row.total_size,
+        // Kept so a repaired download does not reappear at zero bytes, which
+        // reads as a restart nobody asked for.
+        downloaded_ever: row.downloaded_ever,
       });
       this.deleteOrphanedDownload(id);
       return created;

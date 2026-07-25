@@ -224,7 +224,10 @@ stops working on upgrade, so each needs the fix spelled out.
     `profiles_schema_v2_report` settings keys and returned by
     `GET /api/settings` as `schemaMigrations`. Check the list against the *arr
     queues: an *arr holding the Transmission id of a quarantined download gets
-    an empty `torrent-get` until it is reassigned.
+    an empty `torrent-get` until it is reassigned. Reassigning gives the
+    download its original Transmission id back, so the *arr's queue item
+    recovers — unless something has taken that id in the meantime, in which case
+    the *arr re-grabs on its next RSS cycle.
 - **Putiorr Grab profiles lose their `/grab/<slug>/rpc` endpoint.** It only
   existed because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a
   live Transmission endpoint. The path now answers every request with a refusal.

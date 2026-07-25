@@ -706,6 +706,7 @@ function quarantineRow(store, overrides = {}) {
     downloaded_ever: 0,
     putio_file_id: null,
     save_parent_id: null,
+    legacy_download_id: null,
     legacy_download_dir: '',
     quarantined_at: 'now',
     reason: 'no owner',

@@ -778,6 +778,9 @@ export class TransferService {
       reason: row.reason,
       quarantinedAt: row.quarantined_at,
       localPath: row.legacy_download_dir,
+      // The id the *arr apps are still polling with, so the dashboard can say
+      // which queue item this repairs.
+      legacyDownloadId: row.legacy_download_id,
       totalSize: row.total_size,
       downloadedSize: row.downloaded_ever,
       // Rule 3: without a put.io transfer id there is no identity to reattach,
