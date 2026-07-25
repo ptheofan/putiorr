@@ -1,4 +1,4 @@
-# Extension Connection Profiles Design
+# Browser Sites Per Profile Design
 
 Follow-up to the browser grab extension
 (`2026-07-25-browser-grab-extension-design.md`, issue #59 / PR #60). Builds on
@@ -6,81 +6,87 @@ branch `feat/browser-grab-extension`.
 
 ## Goal
 
-Replace the extension's single global connection + flat site-rules table with
-named **grab profiles**. A grab profile is the object the user sees and edits
-in the extension configuration, and the object the context menu lists.
+The sites-to-profile mapping is configured **in putiorr**, on the putiorr
+profile itself, not in the extension. The extension configuration shows
+putiorr's profiles (with their site assignments, read-only) and keeps only
+its own concerns: connection, default profile, auto-capture.
 
-## Data model
+## putiorr side
+
+- Profiles gain a `browser_domains` field: the websites whose browser grabs
+  route to this profile. Stored as a JSON array in a new `browser_domains`
+  TEXT column (added via the existing `ensureColumn` migration path).
+- Edited in putiorr's dashboard profile form as a comma-separated "Browser
+  sites" input. Server-side normalization mirrors the extension's proven
+  rules: lowercase, punycode via the URL parser, scheme/path/port and
+  leading/trailing dots stripped, unmatchable entries rejected with a named
+  error, underscore hostnames allowed, suffix matching includes subdomains.
+- Normalization and matching live in a new server module
+  (`src/transfer/browser-domains.js`) so the profile form and the grab
+  resolution use the same code.
+
+## Grab resolution moves server-side
+
+`POST /api/grab` request gains optional fields; `profileId` becomes
+optional:
 
 ```json
 {
-  "id": 3,
-  "name": "XZ",
-  "baseUrl": "http://nas:9091",
-  "putiorrProfileId": 4,
-  "domains": ["x.example", "z.example"]
+  "profileId": 4,          // optional: explicit context-menu pick
+  "pageHost": "x.example", // hostname of the page the grab came from
+  "defaultProfileId": 2,   // optional: the extension's configured default
+  "magnet": "...",         // or torrentBase64 + filename, as before
+  "sourceUrl": "..."
 }
 ```
 
-- No per-profile credentials. The existing global optional Basic auth
-  username/password (in `chrome.storage.local`) applies to every profile's
-  connection.
-- `domains` declares which websites belong to the profile — same
-  normalization, validation, and suffix-match semantics as today's site
-  rules.
-- Profiles may point at different putiorr instances (each owns its
-  `baseUrl`).
+Resolution order: explicit `profileId` → first enabled profile whose
+`browser_domains` suffix-match `pageHost` (profile id order) → 
+`defaultProfileId` → 400 "no profile matches this site and no default
+profile is configured". Explicit ids that don't exist stay 404.
 
-Storage (`chrome.storage.sync`): `grabProfiles` (array of the shape above),
-`defaultGrabProfileId`, `autoCapture`. The old keys (`baseUrl`,
-`defaultProfileId`, `rules`, `profiles`) are superseded.
+The response now names the resolved profile so the extension can show it:
 
-## Resolution
+```json
+{ "ok": true, "profile": { "id": 4, "name": "XZ" }, "transfer": { "id": 9, "name": "..." } }
+```
 
-Explicit context-menu pick → first grab profile whose `domains` match the
-page hostname (reusing `matchSiteRuleProfileId`) → default grab profile.
-Notifications and the context menu show the grab profile's `name`.
+Editing sites in putiorr applies to the very next grab — no cache staleness.
 
-## Migration
+## Extension side
 
-A pure `migrateLegacySync(sync)` in `extension/lib/settings.js` converts the
-old schema when found: the global connection + `defaultProfileId` become a
-"Default" grab profile (no domains); each old rule becomes a grab profile
-named after its target putiorr profile (name taken from the old cached
-`profiles` list, falling back to `profile #N`), reusing the old global
-`baseUrl`. The worker runs it on `onInstalled`/`onStartup` and writes the new
-shape back (removing old keys); the options page also applies it on restore
-so the editor never shows stale shapes.
-
-## Options page
-
-The profile list is the page's primary content: one card/row per grab
-profile with name, putiorr URL, a per-profile "Test & load putiorr profiles"
-button feeding that profile's target dropdown, and its domains field.
-Global controls: username/password, default grab profile select,
-auto-capture toggle. All existing validation carries over per profile
-(root-only URL, domain normalization with visible write-back, unmatchable
-domains rejected, transactional save, sanitized shapes written).
-
-A profile with no domains is valid (reachable via default or context menu
-only). Domains claimed by two profiles: first match wins by profile order;
-the editor warns on overlap.
-
-## Server
-
-Untouched. `/api/grab` already receives everything per-request.
+- The site-rules editor is removed. `chrome.storage.sync` keeps
+  `baseUrl`, `defaultProfileId`, `autoCapture`, `profiles` (cached
+  `{id, name}` list for the context menu); `rules` is retired.
+- Grabs send `pageHost` (derived from the page URL in the worker) and
+  `defaultProfileId`; an explicit context-menu pick sends `profileId`.
+  Notifications use the `profile.name` from the response (the actually
+  resolved profile), falling back to the cached name for transport errors.
+- The options page lists the fetched putiorr profiles read-only, each with
+  its browser sites, so the mapping is visible where grabs are configured.
+- Legacy migration: if old `rules` exist in storage, the options page shows
+  them once, read-only, with a note that sites now live on putiorr profiles
+  and a dismiss action that deletes the key. Nothing is auto-pushed to
+  putiorr.
+- Unused rule machinery (`matchSiteRuleProfileId`, `resolveProfileId`,
+  domain parsing in `lib/settings.js`) is removed from the extension along
+  with its tests; the proven normalization/matching code moves to the server
+  module.
 
 ## Testing
 
-Extend the existing node test suites: pure logic (migration, sanitization,
-resolution) in `test/extension-resolve.test.js` / `test/extension-options.test.js`
-style; worker behavior (menus from grab profiles, migration write-back,
-grab flow to the profile's baseUrl) in the `test/extension-background.test.js`
-stub harness; options editor round-trips in the stub DOM harness.
+- Server: store round-trip of `browser_domains`; profile-input normalization
+  (valid, unmatchable, punycode, underscore); grab resolution paths
+  (explicit, site match incl. subdomain, default fallback, no-match 400,
+  disabled profiles skipped); web profile form testids.
+- Extension: worker payload shape, response-name notifications, menu cache;
+  options read-only profile display and legacy-rules notice; migration
+  drops `rules`.
 
 ## Delivery
 
 Branch `feat/extension-connection-profiles` (stacked on
 `feat/browser-grab-extension`); PR based on that branch, retargeting to
-`main` when #60 merges. Docs (`extension/README.md`, root README section)
-updated to describe profiles instead of site rules.
+`main` when #60 merges. Docs updated: `extension/README.md` (sites are
+configured in putiorr), root README section, and putiorr profile docs if
+present.
