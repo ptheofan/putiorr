@@ -259,14 +259,28 @@ export class DownloadManager {
 
       if (hasLocalData) continue;
 
-      if (this.service.getPutioToken()) {
-        await this.service.deleteDownloadBucket(transfer.id, {
-          deleteRemote: true,
-          deleteLocal: false,
+      // A put.io 404 here (the files are gone on both ends) used to propagate
+      // out of pollOnce and abort the whole cycle before it ever reached the
+      // refresh, so one dead row froze every download until a restart.
+      try {
+        if (this.service.getPutioToken()) {
+          await this.service.deleteDownloadBucket(transfer.id, {
+            deleteRemote: true,
+            deleteLocal: false,
+          });
+        } else {
+          this.store.deleteTransfer(transfer.id);
+          this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
+        }
+      } catch (error) {
+        logger.warn('failed to prune processed transfer with missing local data', {
+          transferId: transfer.id,
+          putioTransferId: transfer.putio_transfer_id,
+          putioFileId: transfer.putio_file_id,
+          name: transfer.name,
+          error: error.message,
         });
-      } else {
-        this.store.deleteTransfer(transfer.id);
-        this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
+        continue;
       }
       logger.info('processed transfer pruned after local data disappeared', {
         transferId: transfer.id,

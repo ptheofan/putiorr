@@ -1233,7 +1233,11 @@ test('RPC listing is scoped to the profile selected by the request path', async 
   }]);
 });
 
-test('unowned generic RPC endpoint allows session and torrent discovery across profiles', async (t) => {
+// An unowned shared endpoint used to answer torrent-get with every profile's
+// downloads, each carrying another profile's downloadDir. session-get is the
+// connection test *arr apps run, so that one still answers — with the server's
+// own target dir, which names no profile and gives nothing away.
+test('unowned generic RPC endpoint answers session-get but refuses cross-profile discovery', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -1292,21 +1296,36 @@ test('unowned generic RPC endpoint allows session and torrent discovery across p
     }),
   });
   const getBody = await getResponse.json();
-  assert.equal(getBody.result, 'success');
-  assert.deepEqual(getBody.arguments.torrents, [
-    { id: 1, hashString: 'defaulthash', labels: ['default'] },
-    { id: 2, hashString: 'sonarrhash', labels: ['sonarr'] },
-  ]);
+  assert.match(getBody.result, /RPC endpoint is ambiguous/);
+  assert.equal(getBody.arguments, undefined);
+
+  // Each profile still sees its own downloads on the path it owns.
+  for (const [rpcPath, hash] of [['/default/transmission/rpc', 'defaulthash'], [sonarr.rpc_path, 'sonarrhash']]) {
+    const scoped = await fetch(harness.url.replace('/transmission/rpc', rpcPath), {
+      method: 'POST',
+      headers: { 'X-Transmission-Session-Id': sessionId },
+      body: JSON.stringify({
+        method: 'torrent-get',
+        arguments: { fields: ['hashString'] },
+      }),
+    });
+    const scopedBody = await scoped.json();
+    assert.equal(scopedBody.result, 'success');
+    assert.deepEqual(scopedBody.arguments.torrents.map((torrent) => torrent.hashString), [hash]);
+  }
 });
 
+// The download-dir category is still what an unowned shared endpoint resolves an
+// add by; phase 2 of the ownership cleanup (#67) removes that too. What is gone
+// already is the client's own name: no scenario below sends a User-Agent, and
+// the routing is unchanged by its absence.
 test('generic RPC endpoint routes RR request categories without URL Base changes', async (t) => {
   const scenarios = [
-    { name: 'Sonarr', type: 'sonarr', slug: 'sonarr', category: 'sonarr', labels: ['sonarr'], userAgent: 'Sonarr/5.0' },
-    { name: 'Radarr', type: 'radarr', slug: 'radarr', category: 'radarr', labels: ['radarr'], userAgent: 'Radarr/6.3.0.10514 (alpine 3.24.1)' },
-    { name: 'Lidarr', type: 'lidarr', slug: 'lidarr', category: 'lidarr', labels: ['lidarr'], userAgent: 'Lidarr/3.1' },
-    { name: 'Whis', type: 'custom', slug: 'whis', category: 'whis', userAgent: 'Whisparr/2.0' },
-    { name: 'Prowlarr', type: 'prowlarr', slug: 'prowlarr', category: 'prowlarr', userAgent: 'Prowlarr/2.0' },
-    { name: 'Prowlarr mapped category', type: 'prowlarr', slug: 'prowlarr', category: 'movies', userAgent: 'Prowlarr/2.0' },
+    { name: 'Sonarr', type: 'sonarr', slug: 'sonarr', category: 'sonarr', labels: ['sonarr'] },
+    { name: 'Radarr', type: 'radarr', slug: 'radarr', category: 'radarr', labels: ['radarr'] },
+    { name: 'Lidarr', type: 'lidarr', slug: 'lidarr', category: 'lidarr', labels: ['lidarr'] },
+    { name: 'Whis', type: 'custom', slug: 'whis', category: 'whis' },
+    { name: 'Prowlarr', type: 'prowlarr', slug: 'prowlarr', category: 'prowlarr' },
   ];
 
   for (const scenario of scenarios) {
@@ -1329,13 +1348,11 @@ test('generic RPC endpoint routes RR request categories without URL Base changes
         enabled: true,
       });
 
-      const headers = { 'User-Agent': scenario.userAgent };
-      const first = await fetch(harness.url, { method: 'POST', headers });
+      const first = await fetch(harness.url, { method: 'POST' });
       const sessionId = first.headers.get('x-transmission-session-id');
       const addResponse = await fetch(harness.url, {
         method: 'POST',
         headers: {
-          ...headers,
           'Content-Type': 'application/json',
           'X-Transmission-Session-Id': sessionId,
         },
@@ -1457,17 +1474,13 @@ test('generic RPC endpoint rejects labels that conflict with download-dir catego
     });
   }
 
-  const first = await fetch(harness.url, {
-    method: 'POST',
-    headers: { 'User-Agent': 'Radarr/6.3' },
-  });
+  const first = await fetch(harness.url, { method: 'POST' });
   const sessionId = first.headers.get('x-transmission-session-id');
   const response = await fetch(harness.url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Transmission-Session-Id': sessionId,
-      'User-Agent': 'Radarr/6.3',
     },
     body: JSON.stringify({
       method: 'torrent-add',
@@ -1482,7 +1495,10 @@ test('generic RPC endpoint rejects labels that conflict with download-dir catego
   assert.match((await response.json()).result, /Labels sonarr conflict with download-dir category radarr/);
   assert.equal(harness.store.listActiveTransfers().length, 0);
 
-  const clientConflict = await fetch(harness.url, {
+  // The labels and the download-dir agree, so the add lands in Radarr. It used
+  // to be refused because the client called itself Sonarr — a header vetoing
+  // the profile the request's own arguments named.
+  const namedSonarr = await fetch(harness.url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1498,8 +1514,9 @@ test('generic RPC endpoint rejects labels that conflict with download-dir catego
       },
     }),
   });
-  assert.match((await clientConflict.json()).result, /Category radarr conflicts with Sonarr/);
-  assert.equal(harness.store.listActiveTransfers().length, 0);
+  assert.equal((await namedSonarr.json()).result, 'success');
+  const [added] = harness.store.listActiveTransfers();
+  assert.equal(added.profile_id, harness.store.findProfileBySlug('radarr').id);
 });
 
 test('put.io refresh preserves the RPC-selected profile association', async (t) => {
@@ -1630,18 +1647,18 @@ test('generic RPC keeps one put.io transfer with independent profile association
     enabled: true,
   });
 
-  async function rpc(userAgent, method, args) {
-    const handshake = await fetch(harness.url, {
-      method: 'POST',
-      headers: { 'User-Agent': userAgent },
-    });
+  // Each profile speaks on the RPC path it owns. This used to route by the
+  // client's User-Agent over the shared endpoint, which is what made a header
+  // enough to reach another profile's downloads.
+  async function rpc(rpcPath, method, args) {
+    const url = harness.url.replace('/transmission/rpc', rpcPath);
+    const handshake = await fetch(url, { method: 'POST' });
     const sessionId = handshake.headers.get('x-transmission-session-id');
-    const response = await fetch(harness.url, {
+    const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Transmission-Session-Id': sessionId,
-        'User-Agent': userAgent,
       },
       body: JSON.stringify({ method, arguments: args }),
     });
@@ -1649,17 +1666,17 @@ test('generic RPC keeps one put.io transfer with independent profile association
   }
 
   const magnet = 'magnet:?xt=urn:btih:abcdef&dn=Shared.Release';
-  const sonarrAdd = await rpc('Sonarr/5.0', 'torrent-add', {
+  const sonarrAdd = await rpc(sonarr.rpc_path, 'torrent-add', {
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'sonarr'),
     labels: ['sonarr'],
   });
-  const radarrAdd = await rpc('Radarr/6.3', 'torrent-add', {
+  const radarrAdd = await rpc(radarr.rpc_path, 'torrent-add', {
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'radarr'),
     labels: ['radarr'],
   });
-  const sonarrAgain = await rpc('Sonarr/5.0', 'torrent-add', {
+  const sonarrAgain = await rpc(sonarr.rpc_path, 'torrent-add', {
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'sonarr'),
     labels: ['sonarr'],
@@ -1696,7 +1713,7 @@ test('generic RPC keeps one put.io transfer with independent profile association
   await writeFile(path.join(sonarrPath, 'Shared.Release.mkv'), 'movie');
   await writeFile(path.join(radarrPath, 'Shared.Release.mkv'), 'movie');
 
-  const sonarrRemove = await rpc('Sonarr/5.0', 'torrent-remove', {
+  const sonarrRemove = await rpc(sonarr.rpc_path, 'torrent-remove', {
     ids: [sonarrAdd.arguments['torrent-added'].hashString],
     'delete-local-data': true,
   });
@@ -1708,10 +1725,10 @@ test('generic RPC keeps one put.io transfer with independent profile association
   await assert.rejects(() => stat(sonarrPath), { code: 'ENOENT' });
   await stat(radarrPath);
 
-  const radarrList = await rpc('Radarr/6.3', 'torrent-get', { fields: ['id', 'hashString'] });
+  const radarrList = await rpc(radarr.rpc_path, 'torrent-get', { fields: ['id', 'hashString'] });
   assert.deepEqual(radarrList.arguments.torrents, [{ id: radarrId, hashString: 'abcdef' }]);
 
-  await rpc('Radarr/6.3', 'torrent-remove', {
+  await rpc(radarr.rpc_path, 'torrent-remove', {
     ids: [radarrAdd.arguments['torrent-added'].hashString],
   });
   assert.deepEqual(harness.putio.deletedFiles, [88]);
@@ -2382,4 +2399,169 @@ test('a grab profile is never the profile an RPC client is identified as', async
   assert.equal(harness.service.findProfileByUserAgent('Sonarr/5.0'), undefined);
   assert.equal(harness.service.findProfilesByCategory('sonarr').length, 0);
   assert.equal(harness.service.findProfileByCategory('sonarr'), undefined);
+});
+
+// Phase 1 of the ownership cleanup (#67): the RPC client's own name is not a
+// credential. It used to select the profile on the shared endpoint and to veto
+// the one the category picked, which made a header anyone on the LAN can set
+// the only thing standing between a request and another profile's downloads.
+async function sharedRpcAs(harness, userAgent, method, args = {}) {
+  const handshake = await fetch(harness.url, { method: 'POST', headers: { 'User-Agent': userAgent } });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  const response = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+      'User-Agent': userAgent,
+    },
+    body: JSON.stringify({ method, arguments: args }),
+  });
+  return response.json();
+}
+
+function createTwoArrProfiles(harness) {
+  const sonarr = harness.store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/sonarr/transmission/rpc',
+    enabled: true,
+  });
+  const radarr = harness.store.createProfile({
+    name: 'Radarr',
+    type: 'radarr',
+    slug: 'radarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/radarr/transmission/rpc',
+    enabled: true,
+  });
+  return { sonarr, radarr };
+}
+
+test('a spoofed client name cannot remove another profile download on the shared endpoint', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr } = createTwoArrProfiles(harness);
+  const transfer = harness.store.createOrUpdateTransfer({
+    profile_id: sonarr.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'spoofablehash',
+    name: 'Sonarr.Release',
+    category: 'sonarr',
+    lifecycle: 'downloading',
+  });
+
+  const removed = await sharedRpcAs(harness, 'Sonarr/5.0', 'torrent-remove', { ids: [transfer.id] });
+
+  assert.match(removed.result, /RPC endpoint is ambiguous/);
+  assert.ok(harness.store.findTransferById(transfer.id));
+  assert.deepEqual(harness.putio.deletedTransfers, []);
+  assert.deepEqual(harness.putio.deletedFiles, []);
+});
+
+test('a spoofed client name cannot add into another profile on the shared endpoint', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr } = createTwoArrProfiles(harness);
+  const prowlarr = harness.store.createProfile({
+    name: 'Prowlarr',
+    type: 'prowlarr',
+    slug: 'prowlarr',
+    putio_folder_name: 'prowlarr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/prowlarr/transmission/rpc',
+    enabled: true,
+  });
+
+  // Prowlarr's mapped categories used to bypass every check on the strength of
+  // its User-Agent alone, so naming yourself Prowlarr claimed the add outright.
+  const added = await sharedRpcAs(harness, 'Prowlarr/2.0', 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+    'download-dir': path.join(harness.config.targetDir, 'movies'),
+  });
+
+  assert.match(added.result, /No enabled RR profile matches download-dir category movies/);
+  assert.equal(harness.store.listActiveTransfers({ profileId: prowlarr.id }).length, 0);
+  assert.equal(harness.store.listActiveTransfers({ profileId: sonarr.id }).length, 0);
+  assert.equal(harness.store.listActiveTransfers().length, 0);
+});
+
+test('an unresolved shared torrent-get refuses instead of listing every profile', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr, radarr } = createTwoArrProfiles(harness);
+  harness.store.createOrUpdateTransfer({
+    profile_id: sonarr.id,
+    putio_transfer_id: 101,
+    hash: 'sonarrhash',
+    name: 'Sonarr.Release',
+    category: 'sonarr',
+    lifecycle: 'downloading',
+  });
+  harness.store.createOrUpdateTransfer({
+    profile_id: radarr.id,
+    putio_transfer_id: 102,
+    hash: 'radarrhash',
+    name: 'Radarr.Release',
+    category: 'radarr',
+    lifecycle: 'downloading',
+  });
+
+  const listed = await sharedRpcAs(harness, 'Sonarr/5.0', 'torrent-get', {
+    fields: ['id', 'hashString', 'downloadDir'],
+  });
+
+  assert.match(listed.result, /RPC endpoint is ambiguous/);
+  assert.equal(listed.arguments, undefined);
+});
+
+test('a Putiorr Grab derived RPC path refuses Transmission traffic', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const grab = createGrabProfile(harness);
+  const grabUrl = harness.url.replace('/transmission/rpc', grab.rpc_path);
+
+  const handshake = await fetch(grabUrl, { method: 'POST' });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  for (const method of ['session-get', 'torrent-add', 'torrent-get', 'torrent-remove']) {
+    const response = await fetch(grabUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Transmission-Session-Id': sessionId ?? '',
+      },
+      body: JSON.stringify({
+        method,
+        arguments: {
+          filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+          ids: ['abcdef'],
+        },
+      }),
+    });
+    assert.equal(response.status, 200, method);
+    const body = await response.json();
+    assert.match(body.result, /browser extension/, method);
+    assert.notEqual(body.result, 'success');
+  }
+
+  assert.equal(harness.store.listActiveTransfers({ profileId: grab.id }).length, 0);
+  assert.equal(harness.store.listActiveTransfers().length, 0);
 });

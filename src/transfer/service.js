@@ -172,6 +172,9 @@ export class TransferService {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
+  // Unreachable from any request as of phase 1 of the ownership cleanup (#67):
+  // the RPC client's name never names a profile. Kept only until phase 2
+  // deletes the inference layer wholesale.
   findProfileByUserAgent(userAgent) {
     const client = normalizedIdentity(String(userAgent ?? '').split('/')[0]);
     if (!client) return undefined;
@@ -196,6 +199,13 @@ export class TransferService {
     }
   }
 
+  // `clientProfile` is the profile the RPC client's User-Agent was taken to
+  // mean. Nothing supplies it any more — the header is not a credential, and it
+  // used to both select a profile the path could not name and veto the one the
+  // category did. Every branch reading it below is therefore dead, and phase 2
+  // of the ownership cleanup (#67) deletes it along with the rest of the
+  // inference layer. It stays a parameter here only so that removal is one
+  // change rather than two.
   resolveProfileForAdd(args = {}, profile, clientProfile) {
     const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
     if (profile) {
@@ -275,9 +285,9 @@ export class TransferService {
     return this.store.updateProfile(current.id, { putio_folder_id: folderId });
   }
 
-  async addTorrent(args = {}, profile, clientProfile) {
+  async addTorrent(args = {}, profile) {
     const currentProfile = await this.ensureProfileFolder(
-      this.resolveProfileForAdd(args, profile, clientProfile),
+      this.resolveProfileForAdd(args, profile),
     );
     const filename = firstDefined(args.filename, args.url);
     const magnetLink = firstDefined(args.magnetLink, args['magnet-link']);
@@ -353,42 +363,63 @@ export class TransferService {
     for (const remote of remoteTransfers) {
       if (remote.id != null) remoteIds.add(remote.id);
       if (remote.hash) remoteHashes.add(String(remote.hash).trim().toLowerCase());
-      const remoteRow = remote.id ? this.store.findRemoteTransferByPutioId(remote.id) : undefined;
-      const associations = remoteRow
-        ? this.store.listTransfersForRemote(remoteRow.id)
-        : [];
-
-      if (associations.length > 0) {
-        for (const existing of associations) {
-          const updated = this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
-            profile_id: existing.profile_id,
-            hash: existing.hash,
-            category: existing.category,
-            download_dir: existing.download_dir,
-            lifecycle: existing.lifecycle,
-            download_speed: existing.download_speed,
-            eta: existing.eta,
-            source: existing.source ?? remote.magnetUri ?? '',
-            source_type: existing.source_type ?? 'remote',
-            reactivate: !existing.removed_at,
-          }));
-          if (!existing.removed_at) rows.push(updated);
-        }
-        continue;
+      // The poll is the only thing that advances every download on the box, so
+      // one row that throws — a hash colliding with another row's put.io id is
+      // the reproducible case — used to stop polling for all of them, on every
+      // tick, until a restart. A bad row is skipped and named; the next tick
+      // retries it.
+      try {
+        this.refreshRemoteTransfer(remote, byFolderId, rows);
+      } catch (error) {
+        logger.warn('skipped put.io transfer that failed to refresh', {
+          putioTransferId: remote.id,
+          hash: remote.hash,
+          name: remote.name,
+          saveParentId: remote.saveParentId,
+          error: error.message,
+        });
       }
-
-      const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
-      if (folderProfiles.length !== 1) continue;
-      const [profile] = folderProfiles;
-      rows.push(this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
-        profile_id: profile.id,
-        source: remote.magnetUri ?? '',
-        source_type: 'remote',
-      })));
     }
     this.pruneRemoteTransfers(remoteIds, remoteHashes);
     this.pruneRemovedTransfers(remoteIds, remoteHashes);
     return rows;
+  }
+
+  // One put.io transfer's worth of work, extracted so the caller can isolate a
+  // failure to the row that caused it. Appends the refreshed rows to `rows`.
+  refreshRemoteTransfer(remote, byFolderId, rows) {
+    const remoteRow = remote.id ? this.store.findRemoteTransferByPutioId(remote.id) : undefined;
+    const associations = remoteRow
+      ? this.store.listTransfersForRemote(remoteRow.id)
+      : [];
+
+    if (associations.length > 0) {
+      for (const existing of associations) {
+        const updated = this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
+          profile_id: existing.profile_id,
+          hash: existing.hash,
+          category: existing.category,
+          download_dir: existing.download_dir,
+          lifecycle: existing.lifecycle,
+          download_speed: existing.download_speed,
+          eta: existing.eta,
+          source: existing.source ?? remote.magnetUri ?? '',
+          source_type: existing.source_type ?? 'remote',
+          reactivate: !existing.removed_at,
+        }));
+        if (!existing.removed_at) rows.push(updated);
+      }
+      return;
+    }
+
+    const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
+    if (folderProfiles.length !== 1) return;
+    const [profile] = folderProfiles;
+    rows.push(this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
+      profile_id: profile.id,
+      source: remote.magnetUri ?? '',
+      source_type: 'remote',
+    })));
   }
 
   pruneRemoteTransfers(remoteIds, remoteHashes) {
@@ -424,7 +455,12 @@ export class TransferService {
   }
 
   async getTorrents(args = {}, profile) {
-    const currentProfile = profile ? this.requireProfile(profile) : undefined;
+    // Resolved the same way torrent-remove resolves it. Left optional, an
+    // unresolved listing skipped the profile filter entirely and handed the
+    // caller every profile's downloads, each labelled with another profile's
+    // downloadDir — which is both a leak and an invitation for the *arr that
+    // read it to act on a row it does not own.
+    const currentProfile = this.resolveRpcProfile(profile);
     if (this.config.refreshOnRpc) {
       await this.refreshRemoteTransfers();
     }
@@ -435,8 +471,8 @@ export class TransferService {
 
     const fields = Array.isArray(args.fields) ? args.fields : [];
     const rows = requestedIds.length > 0
-      ? requestedIds.map((id) => this.store.findTransfer(id, { profileId: currentProfile?.id })).filter(Boolean)
-      : this.store.listActiveTransfers({ profileId: currentProfile?.id });
+      ? requestedIds.map((id) => this.store.findTransfer(id, { profileId: currentProfile.id })).filter(Boolean)
+      : this.store.listActiveTransfers({ profileId: currentProfile.id });
 
     const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
     return { torrents };

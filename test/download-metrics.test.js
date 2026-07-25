@@ -308,3 +308,112 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     harness.store.close();
   }
 });
+
+// Phase 1 of the ownership cleanup (#67): the poll is the only thing that moves
+// downloads forward, so anything that throws inside it stops every download on
+// the box. Both sweeps below used to propagate out of pollOnce on their first
+// bad row and take the whole cycle with them, every tick, forever.
+test('a put.io transfer that collides with a stored row does not stop the refresh', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    // A row that already owns the hash put.io is about to report for a
+    // different transfer id...
+    harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 5,
+      save_parent_id: 42,
+      hash: 'collidinghash',
+      name: 'Colliding.Release',
+      lifecycle: 'remote',
+    });
+    // ...and an orphaned remote row that already owns that transfer id, so
+    // adopting the remote transfer trips transfers.putio_transfer_id UNIQUE.
+    const orphan = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 6,
+      save_parent_id: 42,
+      hash: 'orphanedhash',
+      name: 'Orphaned.Release',
+      lifecycle: 'remote',
+    });
+    harness.store.deleteTransfer(orphan.id);
+
+    harness.putio.remoteTransfers = [
+      { id: 6, fileId: 61, saveParentId: 42, hash: 'collidinghash', name: 'Colliding.Release', status: 'COMPLETED', percentDone: 100 },
+      { id: 7, fileId: 71, saveParentId: 42, hash: 'healthyhash', name: 'Healthy.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    let rows;
+    try {
+      rows = await harness.service.refreshRemoteTransfers();
+    } finally {
+      console.log = originalLog;
+    }
+
+    // The healthy transfer behind the bad one still gets processed.
+    assert.ok(rows.some((row) => row.hash === 'healthyhash'));
+    assert.ok(harness.store.findTransferByHash('healthyhash'));
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'skipped put.io transfer that failed to refresh');
+    assert.equal(logged.meta.putioTransferId, 6);
+    assert.match(logged.meta.error, /UNIQUE constraint failed/);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a failing processed-transfer prune does not abort the rest of the poll', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 22,
+      putio_file_id: 23,
+      save_parent_id: 42,
+      hash: 'prunefailurehash',
+      name: 'Prune.Failure.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+    // Its local data is already gone, so the sweep tries to delete it on put.io
+    // and put.io answers 404 because the files are gone there too.
+    harness.putio.deleteFile = async () => {
+      const error = new Error('put.io file 23 not found');
+      error.status = 404;
+      throw error;
+    };
+    harness.putio.remoteTransfers = [
+      { id: 31, fileId: 32, saveParentId: 42, hash: 'stillpollinghash', name: 'Still.Polling.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    // The rest of the cycle ran: the new put.io transfer was picked up.
+    assert.ok(harness.store.findTransferByHash('stillpollinghash'));
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
+    assert.equal(logged.meta.transferId, transfer.id);
+  } finally {
+    harness.store.close();
+  }
+});

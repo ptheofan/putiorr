@@ -438,9 +438,18 @@ export class TransmissionRpcServer {
     // used to unbind this endpoint the moment a user added their first grab
     // profile, breaking torrent-remove on a setup that had been working.
     const rpcProfiles = this.service.listArrProfiles();
+    const pathProfile = this.service.store.findProfileByRpcPath(requestPath);
+    // A Putiorr Grab profile only holds an rpc_path because the column is NOT
+    // NULL UNIQUE, and that accident used to make its derived /grab/<slug>/rpc a
+    // live Transmission endpoint an *arr could add into. Refuse at the router so
+    // the refusal covers every method, not just the ones that resolve a profile.
+    if (pathProfile?.type === GRAB_PROFILE_TYPE) {
+      this.refuseGrabProfileRpc(req, res, pathProfile);
+      return;
+    }
     const rpcProfile = requestPath === '/transmission/rpc' && rpcProfiles.length > 1
       ? undefined
-      : this.service.store.findProfileByRpcPath(requestPath);
+      : pathProfile;
     if (rpcProfile || requestPath === '/transmission/rpc') {
       await this.handleRpc(req, res, rpcProfile);
       return;
@@ -454,6 +463,20 @@ export class TransmissionRpcServer {
     await this.serveWeb(req, res, requestPath);
   }
 
+  // Transmission reports failures as a human-readable string in `result` with
+  // HTTP 200, and *arr apps surface that string, so the refusal arrives where
+  // the user is looking instead of as an opaque transport error.
+  refuseGrabProfileRpc(req, res, profile) {
+    logger.warn('refused Transmission RPC on a Putiorr Grab profile endpoint', {
+      requestPath: new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`).pathname,
+      requestMethod: req.method,
+      profile: profile.slug,
+    });
+    jsonResponse(res, 200, {
+      result: `${profile.name} is a Putiorr Grab profile and does not accept Transmission RPC; browser grabs reach it through the browser extension`,
+    }, this.sessionId);
+  }
+
   async handleRpc(req, res, profile) {
     const clientSessionId = req.headers['x-transmission-session-id'];
     if (clientSessionId !== this.sessionId) {
@@ -463,10 +486,12 @@ export class TransmissionRpcServer {
       return;
     }
 
+    // The request path is the only thing that names a profile here. The
+    // client's User-Agent used to select one when the path did not — and to
+    // veto the one the category picked — which made a header any client on the
+    // LAN can set the boundary between one profile's downloads and another's.
+    // RPC auth is off by default, so that header was the whole barrier.
     const currentProfile = profile ? this.service.requireProfile(profile) : undefined;
-    const clientProfile = currentProfile
-      ? undefined
-      : this.service.findProfileByUserAgent(req.headers['user-agent']);
 
     let rpcRequest;
     if (req.method === 'GET') {
@@ -485,7 +510,6 @@ export class TransmissionRpcServer {
         rpcRequest.method,
         rpcRequest.arguments ?? {},
         currentProfile,
-        clientProfile,
       );
     } catch (error) {
       // Transmission RPC reports failures in the `result` field as a
@@ -501,12 +525,12 @@ export class TransmissionRpcServer {
         requestPath,
         requestHeaders: requestHeadersForLog(req.headers),
         requestPayload: rpcRequest,
-        matchedProfile: (currentProfile ?? clientProfile)
+        matchedProfile: currentProfile
           ? {
-              id: (currentProfile ?? clientProfile).id,
-              name: (currentProfile ?? clientProfile).name,
-              slug: (currentProfile ?? clientProfile).slug,
-              rpcPath: (currentProfile ?? clientProfile).rpc_path,
+              id: currentProfile.id,
+              name: currentProfile.name,
+              slug: currentProfile.slug,
+              rpcPath: currentProfile.rpc_path,
             }
           : null,
         enabledProfiles: this.service.store.listProfiles().map((enabledProfile) => ({
@@ -1114,11 +1138,15 @@ export class TransmissionRpcServer {
       && timingSafeEqualString(password, this.config.rpcPassword);
   }
 
-  async dispatch(method, args, profile, clientProfile) {
+  async dispatch(method, args, profile) {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
-        profile = profile ?? clientProfile;
+        // session-get only advertises a directory, so an endpoint that names no
+        // profile answers with the server's own target dir rather than guessing
+        // a profile from the client. It is deliberately not a hard refusal:
+        // *arr apps call session-get to test the connection, and a refusal here
+        // reads as "putiorr is down" instead of "address your own RPC path".
         profile = profile ? this.service.requireProfile(profile) : undefined;
         return {
           'download-dir': profile?.download_at ?? this.config.targetDir,
@@ -1127,14 +1155,14 @@ export class TransmissionRpcServer {
           version: '2.94',
         };
       case 'torrent-add':
-        return this.service.addTorrent(args, profile, clientProfile);
+        return this.service.addTorrent(args, profile);
       case 'torrent-get':
-        return this.service.getTorrents(args, profile ?? clientProfile);
+        return this.service.getTorrents(args, profile);
       case 'torrent-set':
       case 'queue-move-top':
         return {};
       case 'torrent-remove':
-        return this.service.removeTorrents(args, profile ?? clientProfile);
+        return this.service.removeTorrents(args, profile);
       default:
         logger.debug('unsupported rpc method', { method });
         return {};
