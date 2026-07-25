@@ -1067,7 +1067,7 @@ export class TransmissionRpcServer {
     const body = await readJsonBody(req);
     const pageHost = String(body.pageHost ?? '').trim();
     const resolved = this.resolveGrabProfile(body, pageHost);
-    if (!resolved.profile) {
+    if (!resolved.ok) {
       jsonResponse(res, resolved.status, { error: resolved.error }, this.sessionId);
       return;
     }
@@ -1119,20 +1119,26 @@ export class TransmissionRpcServer {
 
   // Resolution order for a browser grab: the caller's explicit pick, then the
   // enabled profile that claims the site the grab came from, then the caller's
-  // configured default. Returns either `{ profile }` or the refusal to send.
+  // configured default. Returns `{ ok: true, profile }` or the refusal to send
+  // as `{ ok: false, status, error }` — tagged so a resolved profile is never
+  // confused with a branch that forgot to answer.
   resolveGrabProfile(body, pageHost) {
+    // An unset <select> submits '' and a cleared cached pick is null; neither
+    // is the caller naming a profile, so both fall through to site matching.
     const explicitId = body.profileId;
     if (explicitId !== undefined && explicitId !== null && String(explicitId) !== '') {
       // An explicit pick is not silently downgraded to site matching: the
       // caller named a profile, so a value that is not an id is its own error.
       const profileId = Number(explicitId);
       if (!Number.isInteger(profileId) || profileId <= 0) {
-        return { status: 400, error: 'profileId is required' };
+        return { ok: false, status: 400, error: 'profileId must be a positive integer' };
       }
       // Disabled is deliberately not filtered here — requireProfile refuses it
       // by name later, which tells the user why their pick did nothing.
       const profile = this.service.store.findProfileById(profileId);
-      return profile ? { profile } : { status: 404, error: 'Profile not found' };
+      return profile
+        ? { ok: true, profile }
+        : { ok: false, status: 404, error: 'Profile not found' };
     }
 
     // listProfiles() is enabled-only, so a profile that is switched off does
@@ -1140,16 +1146,22 @@ export class TransmissionRpcServer {
     const matched = pageHost
       ? matchProfileByHost(this.service.store.listProfiles(), pageHost)
       : undefined;
-    if (matched) return { profile: matched };
+    if (matched) return { ok: true, profile: matched };
 
     const defaultId = Number(body.defaultProfileId);
     if (!Number.isInteger(defaultId) || defaultId <= 0) {
-      return { status: 400, error: 'no profile matches this site and no default profile is configured' };
+      return {
+        ok: false,
+        status: 400,
+        error: 'no profile matches this site and no default profile is configured',
+      };
     }
     // A stale cached default has to surface; routing the grab elsewhere would
     // put the transfer somewhere the user never chose.
     const fallback = this.service.store.findProfileById(defaultId);
-    return fallback ? { profile: fallback } : { status: 404, error: 'Profile not found' };
+    return fallback
+      ? { ok: true, profile: fallback }
+      : { ok: false, status: 404, error: 'Profile not found' };
   }
 
   async testClientSettings(input) {

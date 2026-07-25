@@ -272,7 +272,7 @@ test('grab with an unusable profileId returns 400', async (t) => {
   });
 
   assert.equal(status, 400);
-  assert.equal(body.error, 'profileId is required');
+  assert.equal(body.error, 'profileId must be a positive integer');
 });
 
 test('grab for a disabled profile returns 400', async (t) => {
@@ -385,6 +385,28 @@ test('a grab without a profileId lands in the profile that claims the page host'
   assert.deepEqual(body.profile, { id: site.id, name: site.name });
   assert.equal(body.transfer.name, 'Example.Release');
   assert.equal(harness.putio.added.length, 1);
+  // Naming the profile in the response is not the same as routing to it: the
+  // transfer itself has to be owned by the profile that claimed the site.
+  assert.equal(harness.store.findTransferByPutioId(77).profile_id, site.id);
+});
+
+test('an empty or null profileId is a caller with no pick, not a bad one', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  // An unset options-page <select> submits '', and a cleared cached pick is
+  // null; neither is the user naming a profile, so both resolve by site.
+  const site = createSiteProfile(harness, 'browser', ['x.example']);
+
+  for (const profileId of ['', null]) {
+    const { status, body } = await postGrab(harness, {
+      profileId,
+      pageHost: 'x.example',
+      magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+    });
+
+    assert.equal(status, 200, `profileId ${JSON.stringify(profileId)} must resolve by site`);
+    assert.equal(body.profile.id, site.id);
+  }
 });
 
 test('a page host on a subdomain still matches the site the profile claims', async (t) => {
