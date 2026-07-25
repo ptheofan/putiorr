@@ -228,6 +228,21 @@ stops working on upgrade, so each needs the fix spelled out.
     download its original Transmission id back, so the *arr's queue item
     recovers — unless something has taken that id in the meantime, in which case
     the *arr re-grabs on its next RSS cycle.
+- **Downloaded files move into a folder per download** (phase 4). Staging is
+  `<download_at>/<category>/<download.id>-<put.io name>/…` instead of
+  `<download_at>/<category>/<put.io name>/…`. The first poll after the upgrade
+  moves each download's existing files into its new folder and logs every move;
+  anything it cannot move — no owner, both layouts populated, a failed rename —
+  is named in the log and left untouched on disk, and the "local data
+  disappeared" sweep keeps looking in both layouts so nothing is deleted over a
+  move that did not happen. Fix for a folder left behind: move it by hand, or
+  delete the copy you do not want.
+- **`torrent-get` reports the staging folder as the torrent name** (phase 4).
+  Every *arr resolves a download's files as `downloadDir + name`, so the name
+  has to be the folder the files are in — `17-Example.Release`, not
+  `Example.Release`. Queues show the prefixed name. Nothing needs fixing; a
+  download grabbed before the upgrade keeps its id, so its folder and its
+  reported name change together.
 - **Putiorr Grab profiles lose their `/grab/<slug>/rpc` endpoint.** It only
   existed because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a
   live Transmission endpoint. The path now answers every request with a refusal.
