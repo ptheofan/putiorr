@@ -4,6 +4,10 @@ const MENU_ROOT = 'putiorr-root';
 const MENU_CONFIGURE = 'putiorr-configure';
 const MENU_PREFIX = 'putiorr-profile-';
 
+// Longer than the content script's fetch budget on purpose: putiorr waits on
+// put.io during addTorrent, so the server legitimately needs the headroom.
+const GRAB_TIMEOUT_MS = 30000;
+
 const SYNC_DEFAULTS = {
   baseUrl: '',
   defaultProfileId: 0,
@@ -64,12 +68,22 @@ async function postGrab(settings, payload) {
     method: 'POST',
     headers: authHeaders(settings),
     body: JSON.stringify(payload),
+    // A sleeping NAS accepts the connection and then says nothing. Without a
+    // deadline this fetch never settles, so the content script's sendMessage
+    // hangs with it and the link stays stuck until Chrome tears the worker down.
+    signal: AbortSignal.timeout(GRAB_TIMEOUT_MS),
   };
 
   let response;
   try {
     response = await fetch(endpoint, request);
-  } catch {
+  } catch (error) {
+    // A host that is simply not there fails as a TypeError; only the deadline
+    // produces these two. Saying "unreachable" for a server that answered the
+    // connection and then stalled would send the user hunting the wrong fault.
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error(`putiorr did not respond within ${GRAB_TIMEOUT_MS / 1000}s at ${settings.baseUrl}`);
+    }
     throw new Error(`putiorr is unreachable at ${settings.baseUrl}`);
   }
   const body = await response.json().catch(() => ({}));

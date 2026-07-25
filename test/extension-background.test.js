@@ -233,6 +233,53 @@ test('grab messages from other extensions are ignored', async () => {
   assert.equal(fetched, false, 'a foreign extension must not be able to spend the put.io account');
 });
 
+test('a stalled putiorr is reported as not responding, and the fetch carries a deadline', async () => {
+  // A sleeping NAS accepts the connection and then says nothing. Without the
+  // deadline this fetch never settles: the menu click reports nothing, and a
+  // captured link stays stuck behind the content script's in-flight guard.
+  let request;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'Movies' }] },
+    fetch: async (url, init) => {
+      request = { url: String(url), init };
+      // What AbortSignal.timeout actually produces once it fires.
+      throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.test/page' },
+  );
+  await settle();
+
+  assert.ok(request.init.signal instanceof AbortSignal, 'the grab must carry a timeout signal');
+  assert.equal(request.init.signal.aborted, false);
+  assert.equal(harness.notifications[0].title, 'putiorr grab failed');
+  // "unreachable" would send the user hunting the wrong fault: the server is
+  // there, it answered the connection and then stalled.
+  assert.match(harness.notifications[0].message, /did not respond within 30s/);
+});
+
+test('a genuinely unreachable putiorr still reads as unreachable', async () => {
+  // fetch fails this way when nothing is listening, and it must not be
+  // confused with the timeout above.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'Movies' }] },
+    fetch: async () => {
+      throw new TypeError('fetch failed');
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.test/page' },
+  );
+  await settle();
+
+  assert.match(harness.notifications[0].message, /unreachable/);
+});
+
 test('a malformed base URL is reported as invalid rather than unreachable', async () => {
   const harness = await loadWorker({
     sync: { baseUrl: 'putiorr.test:8080', profiles: [{ id: 3, name: 'Movies' }] },

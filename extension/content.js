@@ -56,8 +56,10 @@
     // is non-ASCII and the plain filename is the server's mangled fallback.
     const extended = disposition.match(EXT_FILENAME);
     if (extended) {
-      // ext-value is charset'language'percent-encoded-name.
-      const value = extended[1].trim().replace(/^[^']*'[^']*'/, '');
+      // ext-value is charset'language'percent-encoded-name, and is not allowed
+      // to be quoted — but servers that quote it anyway would otherwise leave
+      // the closing quote glued to the name.
+      const value = extended[1].trim().replace(/^"(.*)"$/s, '$1').replace(/^[^']*'[^']*'/, '');
       try {
         return decodeURIComponent(value);
       } catch {
@@ -163,7 +165,7 @@
     })();
   }, true);
 
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.kind !== 'fetch-link') return undefined;
     fetchTorrent(message.url)
       .then((result) => sendResponse({ ok: true, ...result }))

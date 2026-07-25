@@ -230,13 +230,17 @@ test('content-disposition filenames follow RFC 6266', async () => {
   let headers = {};
   const harness = await loadContent({ fetch: async () => torrentResponse(bytes, headers) });
   let counter = 0;
+  let fallback;
 
   // Each case gets its own anchor URL so the basename fallback is distinguishable
-  // and the in-flight guard never sees a repeat.
+  // and the in-flight guard never sees a repeat. `fallback` names what the URL
+  // alone would yield, so the header-ignored cases can assert it without
+  // hard-coding a position in this list.
   const filenameFor = async (disposition) => {
     headers = disposition === undefined ? {} : { 'content-disposition': disposition };
     counter += 1;
-    harness.dispatch(harness.anchor(`https://tracker.test/dl/Fallback.${counter}.torrent?x=1`));
+    fallback = `Fallback.${counter}.torrent`;
+    harness.dispatch(harness.anchor(`https://tracker.test/dl/${fallback}?x=1`));
     await settle();
     return harness.sent.at(-1).filename;
   };
@@ -253,6 +257,13 @@ test('content-disposition filenames follow RFC 6266', async () => {
     'Série.torrent'.normalize('NFD'),
   );
 
+  // Quoting an ext-value is not legal, but servers do it and the closing quote
+  // must not end up glued to the name.
+  assert.equal(
+    await filenameFor("attachment; filename*=\"UTF-8''quoted%20ext.torrent\""),
+    'quoted ext.torrent',
+  );
+
   // A quoted value may contain the ";" that otherwise ends the parameter.
   assert.equal(await filenameFor('attachment; filename="semi;colon.torrent"'), 'semi;colon.torrent');
 
@@ -266,9 +277,9 @@ test('content-disposition filenames follow RFC 6266', async () => {
   assert.equal(await filenameFor('attachment; filename="100% Legal.torrent"'), '100% Legal.torrent');
 
   // A different parameter that merely ends in "filename" is not this one.
-  assert.equal(await filenameFor('attachment; x-filename=weird.torrent'), 'Fallback.7.torrent');
+  assert.equal(await filenameFor('attachment; x-filename=weird.torrent'), fallback);
 
-  assert.equal(await filenameFor(undefined), 'Fallback.8.torrent');
+  assert.equal(await filenameFor(undefined), fallback);
 });
 
 test('a failed .torrent fetch falls through to a normal download exactly once', async () => {
