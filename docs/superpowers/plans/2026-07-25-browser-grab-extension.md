@@ -1032,6 +1032,37 @@ git add extension/options.html extension/options.js
 git commit -m "Add extension options page with site rules (#59)"
 ```
 
+- [ ] **Step 5: Harden the options page (added after code review)**
+
+The committed files supersede the blocks above (commits landed as "Add
+extension options page with validated site rules", plus two fix commits):
+- All dynamic DOM is built with `createElement`/`textContent` — the plan's
+  `profileOptions()` HTML interpolation was an XSS hole for server-supplied
+  profile names.
+- New shared pure modules: `extension/lib/auth.js` (`encodeCredentials`,
+  UTF-8-safe Basic auth, also imported by background.js) and
+  `extension/lib/settings.js` (`validateBaseUrl`, `parseRuleDomains`).
+- `validateBaseUrl`: http/https only, no path/credentials (putiorr is not
+  subpath-deployable), scheme-less input gets an add-`http://` hint only when
+  it looks like a host, trailing-dot hosts normalized.
+- `parseRuleDomains`: normalized (punycode) forms are written back into the
+  fields; unmatchable domains (wildcards anywhere, empty labels, edge
+  hyphens) block the save with a named error; single-label domains warn;
+  underscore hostnames are allowed (Chrome matches them — LAN hosts);
+  bracketed IPv6 literals work.
+- Save is transactional (invalid input writes nothing), writes credentials
+  to storage.local before settings to storage.sync with distinct failure
+  messages, and runs fetched profiles through `sanitizeProfiles` before
+  storing. A test pins the written sync key set against background.js's
+  `SYNC_DEFAULTS` so the two cannot drift.
+- "Test connection" with zero enabled profiles no longer clears the loaded
+  profile list/default selection (previously the next Save wiped a working
+  config). 401 → friendly credentials message; profile fetch has a 15s
+  timeout.
+- `#status` is `aria-live="polite"` and scrolled into view on updates.
+- `test/extension-options.test.js` (41 tests: pure validation + stub-DOM
+  round-trips) covers the above.
+
 ---
 
 ### Task 6: Documentation and full verification
