@@ -2,7 +2,9 @@
 
 Captures `magnet:` links and `.torrent` downloads on any site and sends them to
 putiorr, which adds them to put.io and downloads them to the local folder of the
-putiorr profile the grab resolved to.
+putiorr profile the grab resolved to. That profile is always one whose **App
+preset** is **Putiorr Grab**: no other preset is offered here, and a grab aimed
+at any other preset is refused.
 
 There are two ways to grab:
 
@@ -20,7 +22,7 @@ cookies apply.
 
 ## Install
 
-The extension is not published; load it unpacked.
+The extension is not on the Chrome Web Store yet; until it is, load it unpacked.
 
 1. Open `chrome://extensions` and enable **Developer mode**.
 2. Click **Load unpacked** and select this `extension/` directory.
@@ -33,10 +35,14 @@ The extension is not published; load it unpacked.
 
 Which site grabs into which profile is a putiorr setting, kept on the profile
 itself — the extension holds no copy of it. In the putiorr dashboard, open a
-profile's setup wizard and fill in step **4. Browser grabs**: **Browser sites**
-is a comma-separated list of the sites whose grabs land in that profile.
-Subdomains match automatically, so list the domain itself — `x.example` also
-covers `dl.x.example`. Leave it empty to keep a profile out of browser grabs.
+profile's setup wizard and set **App preset** to **Putiorr Grab**. The wizard
+then drops the RPC endpoint step — no *arr download client connects to a grab
+profile, so its path, host, port, and SSL are not asked for; putiorr reserves a
+path behind the scenes — and shows step **3. Browser grabs** instead.
+**Browser sites** there is a comma-separated list of the sites whose grabs land
+in that profile. Subdomains match automatically, so list the domain itself —
+`x.example` also covers `dl.x.example`. Leave it empty to keep a profile out of
+browser grabs. Sites listed on any other preset are never consulted.
 
 putiorr normalizes what you save and the profile card shows the stored result,
 so what is listed is what will be matched: a unicode domain is stored in
@@ -60,21 +66,31 @@ Open the extension options (`chrome://extensions` → **Details** →
 2. If putiorr is behind Basic auth, fill in **Username** and **Password**. They
    are kept in `chrome.storage.local`, not in the Google-account-synced storage
    that holds the rest of the settings.
-3. Click **Test connection & load profiles**. It calls `GET /api/profiles` and
-   loads the enabled profiles. Loading only fills the page — press **Save** to
-   store them.
+3. Click **Test connection & load profiles**. It calls
+   `GET /api/profiles?type=grab` and loads the enabled Putiorr Grab profiles
+   from the answer; putiorr applies the preset filter, so this page never
+   offers a profile it would refuse. Loading only fills the page — press
+   **Save** to store them.
 4. Pick a **default profile**. It is used for grabs from sites no putiorr
    profile claims. Without one, only the sites configured in putiorr and the
    right-click menu can grab.
 5. Leave **Auto-capture magnet and .torrent clicks** on, or switch it off to
    grab exclusively through the right-click menu.
 
-The **Profiles** card lists what the last load returned: every enabled profile
-with its browser sites, read-only. It is a view of putiorr's setting, not a
-second place to edit it — nothing about the sites is stored, so the card is
-empty again after a reload of the options page until you test the connection,
-and a site moved to another profile in putiorr applies to the very next click
-whether or not the card has caught up.
+A putiorr with no Putiorr Grab profile at all answers that load with an empty
+list, and so does one whose grab profiles are all disabled. Neither is applied
+— clearing the page and saving that would empty the right-click menu too — and
+the status names the fix: "has no Putiorr Grab profiles; create one there with
+the Putiorr Grab preset", or "has no enabled Putiorr Grab profiles; enable one
+there". A putiorr full of *arr profiles is the first of those two: none of them
+can accept a grab.
+
+The **Profiles** card lists what the last load returned: every enabled Putiorr
+Grab profile with its browser sites, read-only. It is a view of putiorr's
+setting, not a second place to edit it — nothing about the sites is stored, so
+the card is empty again after a reload of the options page until you test the
+connection, and a site moved to another profile in putiorr applies to the very
+next click whether or not the card has caught up.
 
 Upgrading from a version that had its own site rules? The options page shows
 them read-only under **Old site rules**, above the connection card, and keeps
@@ -85,16 +101,25 @@ dismiss.
 
 ## Which Profile A Grab Lands In
 
-putiorr resolves this on every grab, in this order:
+putiorr resolves this on every grab, in this order, and every path ends at a
+Putiorr Grab profile:
 
 1. The profile picked from the right-click menu, when the grab came from there.
-2. Otherwise the first enabled profile, in creation order, whose **Browser
-   sites** match the page's hostname exactly or as a suffix. Listing one site on
-   two profiles is therefore not an error; the older profile simply wins.
+2. Otherwise the first enabled Putiorr Grab profile, in creation order, whose
+   **Browser sites** match the page's hostname exactly or as a suffix. Listing
+   one site on two profiles is therefore not an error; the older profile simply
+   wins.
 3. Otherwise the default profile configured in the extension options.
 4. Otherwise nothing: putiorr answers `400`, and the notification reads "No
    profile matches this site and no default profile is set — click here to
    open the options". Clicking it opens the extension options.
+
+Steps 1 and 3 name a profile the extension holds, so putiorr checks the preset
+before grabbing into it: a profile that is not a Putiorr Grab profile is refused
+with "`<name>` is not a Putiorr Grab profile; set its App preset to Putiorr Grab
+in putiorr". Both lists were loaded with the preset filter applied, so this is
+what a stale one looks like — load profiles again in the options, or change that
+profile's preset in putiorr.
 
 A disabled profile does not claim its sites — routing to it is exactly what
 disabling turned off. An explicit right-click pick is still sent to it, and
@@ -103,15 +128,19 @@ quietly grabbing somewhere else.
 
 ## Pick The Right Profile
 
-Create a dedicated putiorr profile for browser grabs and enable **Auto-remove
-completed downloads** on it. A browser grab has no *arr app that will import it
-and signal completion, so without that flag the transfer sits in the putiorr
-list forever. With it — exactly like a `prowlarr` profile, which gets the flag
-by default — the completed transfer is removed from putiorr and from put.io
-once the files have downloaded, while the downloaded files stay on disk.
+Browser grabs get their own profile, created with the **Putiorr Grab** preset,
+which turns **Auto-remove completed downloads** on by default. A browser grab
+has no *arr app that will import it and signal completion, so without that flag
+the transfer sits in the putiorr list forever. With it — exactly like a
+`prowlarr` profile, which gets the flag for the same reason — the completed
+transfer is removed from putiorr and from put.io once the files have
+downloaded, while the downloaded files stay on disk. Switching it back off is
+allowed, and putiorr logs a warning (once per profile) when a grab targets a
+profile that does not have the flag set.
 
-putiorr logs a warning (once per profile) when a grab targets a profile that
-does not have the flag set.
+Grabs land in the profile's **Shared download folder** as put.io named them,
+with no category subfolder: that folder exists so an *arr app can find its own
+imports, and nothing imports a browser grab.
 
 ## Verify The Setup
 
@@ -125,12 +154,12 @@ Run this once after loading the extension, against a running putiorr (the
    the uploaded file.
 3. Right-click a link → **Send to putiorr → `<other profile>`** → the
    transfer lands under that other profile's folder.
-4. In putiorr, set **Browser sites** on a profile that is *not* the extension's
-   default to the site you are testing on, save, and click a `magnet:` link
-   there → the notification names that profile, not the default, and the
-   transfer lands under its folder. Nothing in the extension is touched for
-   this: the options page shows the new site after the next **Test connection &
-   load profiles**, but grabs route correctly before that.
+4. In putiorr, set **Browser sites** on a Putiorr Grab profile that is *not* the
+   extension's default to the site you are testing on, save, and click a
+   `magnet:` link there → the notification names that profile, not the default,
+   and the transfer lands under its folder. Nothing in the extension is touched
+   for this: the options page shows the new site after the next **Test
+   connection & load profiles**, but grabs route correctly before that.
 
 ## What To Expect
 
@@ -175,7 +204,7 @@ curl -X POST http://nas:9091/api/grab \
   -d '{"pageHost":"x.example","magnet":"magnet:?xt=urn:btih:…"}'
 ```
 
-That call lands only if some profile claims `x.example`; add
+That call lands only if some Putiorr Grab profile claims `x.example`; add
 `"defaultProfileId":N`, or `"profileId":N` to pick a profile outright, to grab
 without a matching site.
 
@@ -188,13 +217,20 @@ that decide the profile:
   putiorr does not have is a `404`, never a silent fallback. Empty or `null`
   counts as no pick at all and falls through to the site match.
 - `pageHost` — optional, the hostname of the page the grab came from, matched
-  against the profiles' **Browser sites**. Omitting it skips straight to the
-  default.
+  against the **Browser sites** of the enabled Putiorr Grab profiles. Omitting
+  it skips straight to the default.
 - `defaultProfileId` — optional, used only when no site matches. Missing (or
   `0`, `''`, `null`), with no match, is the `400` "No profile matches this site
   and no default profile is configured"; a value that is not an id is the `400`
   "defaultProfileId must be a positive integer"; an id putiorr does not have is
   a `404`.
+
+`profileId` and `defaultProfileId` name a profile instead of letting putiorr
+find one, so either can name a profile of the wrong preset. That is the `400`
+"`<name>` is not a Putiorr Grab profile; set its App preset to Putiorr Grab in
+putiorr". The list to pick from is `GET /api/profiles?type=grab`, which putiorr
+filters by preset; without the parameter that route answers with every profile,
+disabled ones included.
 
 The reply names the profile that answered, so the caller does not have to repeat
 its own guess back to the user:
@@ -236,8 +272,10 @@ applies to `/api/grab` like it does to every other putiorr route.
   auto-captured click sends no `profileId` — that is the server's decision now —
   so against an older putiorr it comes back as "profileId is required" and only
   the right-click menu still grabs. Update putiorr, or use the menu. The skew in
-  the other direction is harmless: an extension older than putiorr always sends
-  an explicit `profileId`, which the new resolver honours ahead of any site
-  match, so those grabs keep landing exactly where they used to.
+  the other direction shows up in the menu: an extension that loaded its
+  profiles before the Putiorr Grab preset existed cached *arr profiles too, and
+  picking one of those is refused with "is not a Putiorr Grab profile". Load
+  profiles again in the options and the menu holds only profiles that can
+  actually grab.
 - Chrome only. This is a Manifest V3 extension built against the `chrome.*` APIs
   and has not been adapted for other browsers.

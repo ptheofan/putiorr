@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0f766e">
-    <meta name="description" content="putiorr configuration guide for RR profiles, download profiles, Radarr, Sonarr, Lidarr, Prowlarr, and progress behavior.">
+    <meta name="description" content="putiorr configuration guide for RR profiles, download profiles, Radarr, Sonarr, Lidarr, Prowlarr, browser grabs, and progress behavior.">
     <title>putiorr configuration guide</title>
     <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
     <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
@@ -42,6 +42,7 @@
           <a href="#download-profiles">Download profiles</a>
           <a href="#download-client">Download clients</a>
           <a href="#prowlarr">Prowlarr</a>
+          <a href="#browser-grabs">Browser grabs</a>
           <a href="#progress">Progress model</a>
         </aside>
 
@@ -221,6 +222,82 @@
             <pre><code>Radarr URL: http://radarr:7878
 Sonarr URL: http://sonarr:8989
 Lidarr URL: http://lidarr:8686</code></pre>
+          </section>
+
+          <section id="browser-grabs" class="doc-section">
+            <h2>Browser grabs</h2>
+            <p>
+              The putiorr browser extension, in the <code>extension/</code>
+              folder of the
+              <a href="https://github.com/ptheofan/putiorr">putiorr repository</a>,
+              captures the <code>magnet:</code> links and <code>.torrent</code>
+              downloads you click in Chrome and sends them to putiorr, which
+              queues them on put.io and copies the finished files to the local
+              download folder. No *arr app is involved, so these grabs get their
+              own kind of profile.
+            </p>
+            <p>
+              In the putiorr dashboard, add a profile and set
+              <strong>App preset</strong> to <strong>Putiorr Grab</strong>. The
+              wizard then hides the RPC endpoint step, because nothing connects
+              to a grab profile over Transmission RPC, and shows a
+              <strong>Browser grabs</strong> step instead.
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Field</th>
+                    <th>What to enter</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Display name</td>
+                    <td>The name the extension shows in its profile list and right-click menu, such as <code>movies</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>put.io destination folder</td>
+                    <td><code>putiorr</code>, or a separate folder to keep browser grabs apart on put.io.</td>
+                  </tr>
+                  <tr>
+                    <td>Shared download folder</td>
+                    <td>Where the files land, such as <code>/downloads</code>. Grabs are written straight into it; no category subfolder is created.</td>
+                  </tr>
+                  <tr>
+                    <td>Download profile</td>
+                    <td>The local-copy behavior to apply, exactly as for an *arr profile.</td>
+                  </tr>
+                  <tr>
+                    <td>Browser sites</td>
+                    <td>Comma-separated sites whose grabs land here, such as <code>x.example, z.example</code>. Subdomains match automatically, so <code>x.example</code> also covers <code>dl.x.example</code>.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              putiorr resolves every grab itself. A click on a listed site goes
+              to the profile that lists it even when the extension points at a
+              different default profile, and a grab aimed at a profile that is
+              not a Putiorr Grab profile is refused by name.
+            </p>
+            <p>
+              Install the extension from the Chrome Web Store once it is
+              published. Until then, load it unpacked:
+            </p>
+            <ol>
+              <li>Open <code>chrome://extensions</code> and enable Developer mode.</li>
+              <li>Choose Load unpacked and select the repository's <code>extension/</code> folder.</li>
+              <li>Open the extension options and enter the putiorr URL, such as <code>http://nas:9091</code>, plus the Basic auth credentials if putiorr uses them.</li>
+              <li>Click Test connection &amp; load profiles, pick a default profile for sites no profile claims, and press Save.</li>
+            </ol>
+            <p class="doc-note">
+              The extension only ever lists Putiorr Grab profiles, so create at
+              least one before loading profiles there. The preset also enables
+              auto-remove completed: nothing imports a browser grab, so putiorr
+              drops the finished transfer from its list and from put.io once the
+              files are on disk.
+            </p>
           </section>
 
           <section id="progress" class="doc-section">
