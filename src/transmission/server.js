@@ -883,6 +883,9 @@ export class TransmissionRpcServer {
       },
       defaultDownloadProfileId: defaultDownloadProfile?.id,
       downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
+      // What the last schema upgrade migrated and quarantined. The dashboard
+      // renders the quarantine itself; this is the record of the run.
+      schemaMigrations: this.service.store.schemaMigrationReports(),
     };
   }
 

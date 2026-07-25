@@ -985,3 +985,46 @@ test('a quarantined download with no identity or a claimed one cannot be reassig
     store.close();
   }
 });
+
+// R8 — the migration is one-way. Rolling back to 2.0.x recreates `transfers`
+// and writes into it, and those rows are invisible to every later version.
+test('reappearing legacy tables are reported after the migration has run', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 2, putio_transfer_id: 1002 })],
+    associations: [associationRow({ id: 2, transfer_id: 2 })],
+  });
+
+  const first = new StateStore(dbPath);
+  const reports = first.schemaMigrationReports();
+  assert.equal(reports.downloads.migrated, 1);
+  assert.equal(reports.profiles.version, 2);
+  first.close();
+
+  // An older putiorr booting against the migrated database.
+  const downgraded = new DatabaseSync(dbPath);
+  downgraded.exec('CREATE TABLE transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+  downgraded.close();
+
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (line) => logs.push(line);
+  let store;
+  try {
+    store = new StateStore(dbPath);
+  } finally {
+    console.log = originalLog;
+  }
+  try {
+    const warned = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'legacy transfer tables reappeared after the downloads schema migration');
+    assert.ok(warned, 'the downgrade has to be loud: zero rows in a table nobody reads is a legal answer');
+    assert.match(warned.meta.fix, /pre-downloads-\*\.bak/);
+    // And it does not re-run the collapse against the decoy.
+    assert.equal(store.findDownloadById(2).id, 2);
+  } finally {
+    store.close();
+  }
+});

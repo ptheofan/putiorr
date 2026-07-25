@@ -412,17 +412,23 @@ export class StateStore {
     // table that is not there answers with an empty list rather than an error —
     // so an ungated ensureColumn would ALTER a table that does not exist, and
     // an ungated SELECT would throw on the first boot of a new install.
-    if (this.hasTable('transfers')) {
+    //
+    // Gated on the collapse guard as well as on the table, so that a `transfers`
+    // that reappears after a downgrade-and-upgrade is left strictly alone: the
+    // legacy hop has already happened, and touching the table again would be
+    // writing to storage this version does not read.
+    const collapsed = this.getSetting('downloads_schema_v1') === '1';
+    if (!collapsed && this.hasTable('transfers')) {
       this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
       this.ensureColumn('transfers', 'completion_percent', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('transfers', 'putio_status_message', "TEXT NOT NULL DEFAULT ''");
       this.ensureColumn('transfers', 'putio_peers', 'INTEGER NOT NULL DEFAULT 0');
       this.ensureColumn('transfers', 'putio_availability', 'INTEGER NOT NULL DEFAULT 0');
     }
-    if (this.hasTable('transfer_files')) {
+    if (!collapsed && this.hasTable('transfer_files')) {
       this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     }
-    if (this.hasTable('transfers')) {
+    if (!collapsed && this.hasTable('transfers')) {
       this.migrateTransferAssociations();
       // Must run before the collapse: it rewrites transfers.hash in place, and
       // after the collapse there is no transfers table left to rewrite.
@@ -431,6 +437,39 @@ export class StateStore {
     this.migrateDownloadsCollapse();
     this.migrateProfilesSchema();
     this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
+    this.warnAboutDowngradedWrites();
+  }
+
+  // The migration is one-way. A user who rolls back to 2.0.x runs an older
+  // putiorr that recreates `transfers` and writes into it, and the rows it adds
+  // are invisible to every later version — silently, because zero rows in a
+  // table nobody reads is a legal answer. Say so loudly; the fix is to restore
+  // the .pre-downloads-*.bak the collapse wrote.
+  warnAboutDowngradedWrites() {
+    if (this.getSetting('downloads_schema_v1') !== '1') return;
+    if (!this.hasTable('transfers')) return;
+    logger.warn('legacy transfer tables reappeared after the downloads schema migration', {
+      consequence: 'an older putiorr has written downloads this version cannot see',
+      fix: 'restore the .pre-downloads-*.bak written before the migration, or delete the legacy tables',
+    });
+  }
+
+  // The machine-readable record of what each schema migration did, so the
+  // dashboard can show an upgrade's fallout instead of leaving it in the log.
+  schemaMigrationReports() {
+    const parse = (key) => {
+      const raw = this.getSetting(key);
+      if (!raw) return undefined;
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return undefined;
+      }
+    };
+    return {
+      downloads: parse('downloads_schema_v1_report'),
+      profiles: parse('profiles_schema_v2_report'),
+    };
   }
 
   hasTable(name) {

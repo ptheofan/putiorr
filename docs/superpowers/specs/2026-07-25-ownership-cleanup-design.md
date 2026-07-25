@@ -207,5 +207,30 @@ stops working on upgrade, so each needs the fix spelled out.
   its own RPC path, including the seeded profile that still holds the shared
   one. A single-profile install is unaffected.
 - **Downloads with no owning profile no longer acquire one at boot.** They
-  appear in the dashboard as errored and are skipped by the sweeps rather than
-  being handed to whichever profile sorted first. Fix: reassign or delete them.
+  appear in the dashboard's **Needs attention** section rather than in the
+  downloads list, and are skipped by the sweeps rather than being handed to
+  whichever profile sorted first. Fix: assign each one to a profile, or delete
+  it. Their files are untouched on disk either way.
+- **The schema upgrade rewrites the database once, in place** (phase 3). Before
+  it starts it writes `<state>.pre-downloads-<timestamp>.bak` next to the state
+  file and logs the path. The backup is never deleted automatically and is safe
+  to delete once the upgrade looks right; **restoring it is the only way to roll
+  back to 2.0.x**, because the older version recreates the legacy tables and
+  writes into storage the new version does not read.
+  - Downloads the upgrade could not attach to a profile, could not identify (no
+    put.io transfer id), or whose put.io transfer an older sibling already
+    claimed, are moved to the Needs attention section. A machine-readable record
+    of everything it did is kept in the `downloads_schema_v1_report` and
+    `profiles_schema_v2_report` settings keys and returned by
+    `GET /api/settings` as `schemaMigrations`. Check the list against the *arr
+    queues: an *arr holding the Transmission id of a quarantined download gets
+    an empty `torrent-get` until it is reassigned.
+- **Putiorr Grab profiles lose their `/grab/<slug>/rpc` endpoint.** It only
+  existed because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a
+  live Transmission endpoint. The path now answers every request with a refusal.
+  Fix: nothing — grab profiles are reached through the browser extension.
+- **Every RR profile must have a download profile.** The upgrade assigns the
+  default to any profile that had none, and a download profile that is in use
+  can no longer be deleted without reassigning the profiles that reference it —
+  which `DELETE /api/download-profiles/:id` now does automatically, to the
+  default.
