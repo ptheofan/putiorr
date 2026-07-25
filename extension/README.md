@@ -40,11 +40,11 @@ covers `dl.x.example`. Leave it empty to keep a profile out of browser grabs.
 
 putiorr normalizes what you save and the profile card shows the stored result,
 so what is listed is what will be matched: a unicode domain is stored in
-punycode, a scheme, port, or path is stripped, and leading and trailing dots are
-dropped. Underscore hostnames (`media_server.lan`) are accepted because they
-really do match on a home LAN. Wildcards are refused — `*.x.example` is answered
-with the entry you actually want, `x.example`, and the profile is not saved
-until you fix it. A single-label site saves with a warning next to the
+punycode, a scheme, port, or path is stripped, and leading dots and a trailing
+dot are dropped. Underscore hostnames (`media_server.lan`) are accepted because
+they really do match on a home LAN. Wildcards are refused — `*.x.example` is
+answered with the entry you actually want, `x.example`, and the profile is not
+saved until you fix it. A single-label site saves with a warning next to the
 confirmation, because suffix matching makes `lan` a rule over every host ending
 in `.lan`.
 
@@ -174,15 +174,21 @@ curl -X POST http://nas:9091/api/grab \
   -d '{"pageHost":"x.example","magnet":"magnet:?xt=urn:btih:…"}'
 ```
 
+That call lands only if some profile claims `x.example`; add
+`"defaultProfileId":N`, or `"profileId":N` to pick a profile outright, to grab
+without a matching site.
+
 The body carries either `magnet` or `torrentBase64` (plus an optional
 `filename`), an optional `sourceUrl` for putiorr's log, and the three fields
 that decide the profile:
 
 - `profileId` — optional, the caller's explicit pick. It wins over everything
-  else; a value that is not a positive integer is a `400`, and an id putiorr
-  does not have is a `404`, never a silent fallback.
-- `pageHost` — the hostname of the page the grab came from, matched against the
-  profiles' **Browser sites**.
+  else; a non-empty value that is not a positive integer is a `400`, and an id
+  putiorr does not have is a `404`, never a silent fallback. Empty or `null`
+  counts as no pick at all and falls through to the site match.
+- `pageHost` — optional, the hostname of the page the grab came from, matched
+  against the profiles' **Browser sites**. Omitting it skips straight to the
+  default.
 - `defaultProfileId` — optional, used only when no site matches. Missing, with
   no match, is the `400` "no profile matches this site and no default profile
   is configured"; present but unknown to putiorr is a `404`.
