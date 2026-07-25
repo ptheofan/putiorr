@@ -48,9 +48,14 @@ function wildcardHint(entry) {
 
 // A stored value is always an array; the profile form sends the raw
 // comma-separated text the user typed. Both are accepted so the caller does not
-// have to guess which side it is on.
+// have to guess which side it is on. Anything else is passed through as a
+// single entry for the non-string branch below to report: String(5) would
+// otherwise reach the URL parser and come back as the host "0.0.0.5".
 function splitEntries(input) {
-  const raw = Array.isArray(input) ? input : String(input ?? '').split(',');
+  if (input === null || input === undefined) return [];
+  if (!Array.isArray(input) && typeof input !== 'string') return [input];
+
+  const raw = Array.isArray(input) ? input : input.split(',');
   return raw
     .map((entry) => (typeof entry === 'string' ? entry.trim() : entry))
     .filter((entry) => entry !== '' && entry !== null && entry !== undefined);
@@ -103,7 +108,10 @@ export function matchProfileByHost(profiles, host) {
   if (!hostname) return undefined;
 
   for (const profile of Array.isArray(profiles) ? profiles : []) {
-    const domains = Array.isArray(profile?.browser_domains) ? profile.browser_domains : [];
+    // Store rows carry both key styles; a caller assembling a profile by hand
+    // may have only one of them.
+    const stored = profile?.browser_domains ?? profile?.browserDomains;
+    const domains = Array.isArray(stored) ? stored : [];
     for (const domain of domains) {
       const normalized = normalizeDomain(domain);
       if (!normalized) continue;

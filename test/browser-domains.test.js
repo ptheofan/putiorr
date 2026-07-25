@@ -43,6 +43,17 @@ test('normalizeBrowserDomains accepts an array as well as a comma-separated stri
   });
 });
 
+test('normalizeBrowserDomains reports a scalar that is not text instead of parsing it as a host', () => {
+  // The URL parser turns "5" into "0.0.0.5" and "true" into a single label, so
+  // coercing a stray scalar would store a site the caller never named. A bare
+  // scalar is reported exactly as one inside an array is.
+  for (const input of [5, true, {}]) {
+    const result = normalizeBrowserDomains(input);
+    assert.deepEqual(result.domains, [], String(input));
+    assert.equal(result.errors.length, 1, String(input));
+  }
+});
+
 test('normalizeBrowserDomains rejects a wildcard and names the entry that replaces it', () => {
   const wildcard = normalizeBrowserDomains('*.x.example');
   assert.deepEqual(wildcard.domains, []);
@@ -140,6 +151,10 @@ test('matchProfileByHost tolerates malformed stored rows without throwing', () =
   assert.equal(matchProfileByHost([{ id: 3, browser_domains: [null, ''] }], 'x.example'), undefined);
   // A malformed row must not stop a later valid one from matching.
   assert.equal(matchProfileByHost([null, { id: 7, browser_domains: ['x.example'] }], 'x.example')?.id, 7);
+});
+
+test('matchProfileByHost reads either key style, as store rows carry both', () => {
+  assert.equal(matchProfileByHost([{ id: 3, browserDomains: ['x.example'] }], 'sub.x.example')?.id, 3);
 });
 
 test('matchProfileByHost normalizes stored domains and the page host', () => {

@@ -8,6 +8,7 @@ import {
   downloadPolicyInput,
   normalizeDownloadPolicy,
 } from '../download/policy.js';
+import { normalizeBrowserDomains } from '../transfer/browser-domains.js';
 
 function nowIso() {
   return new Date().toISOString();
@@ -127,9 +128,15 @@ function profileDownloadProfileId(input) {
 
 // Stored as JSON text in one column rather than a join table: the list is
 // short, only ever read whole, and never queried by domain.
+//
+// Normalized here as well as at the API boundary because the store has callers
+// that never pass one: seedFromConfig writes PUTIORR_PROFILES_JSON straight in,
+// and storing that comma-separated text verbatim would read back as no sites at
+// all. Re-normalizing an already normalized list is a no-op; unmatchable
+// entries are dropped, since a seed has nobody to report an error to.
 function profileBrowserDomainsPatch(input) {
   const domains = input.browser_domains ?? input.browserDomains;
-  return domains === undefined ? undefined : JSON.stringify(domains);
+  return domains === undefined ? undefined : JSON.stringify(normalizeBrowserDomains(domains).domains);
 }
 
 function profileClientHost(input) {

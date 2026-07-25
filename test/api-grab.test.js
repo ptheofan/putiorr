@@ -412,3 +412,61 @@ test('a profile without browser sites keeps none, and an update replaces them', 
   assert.equal(response.status, 200);
   assert.deepEqual(updated.browser_domains, ['z.example']);
 });
+
+test('several bad browser sites are listed one per line and capped', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  // The profile wizard renders the error with white-space: pre-line, so a
+  // joined-by-space run-on is unreadable exactly when there is most to read.
+  const two = await postProfile(harness, { browserDomains: '*.x.example, x..example' });
+  assert.equal(two.status, 400);
+  assert.equal(two.body.error.split('\n').length, 2);
+  assert.match(two.body.error, /\*\.x\.example/);
+  assert.match(two.body.error, /x\.\.example/);
+
+  // A grab request body can hold megabytes of entries; the message must not
+  // grow with it.
+  const many = await postProfile(harness, {
+    browserDomains: Array.from({ length: 9 }, (_, index) => `x${index}..example`).join(','),
+  });
+  assert.equal(many.status, 400);
+  assert.equal(many.body.error.split('\n').length, 6);
+  assert.match(many.body.error, /\n…and 4 more$/);
+});
+
+test('a browser site that matches more than the user meant is saved with a warning', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, { browserDomains: 'com, x.example' });
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.browser_domains, ['com', 'x.example']);
+  assert.deepEqual(created.body.browser_domain_warnings, [
+    '"com" also matches every site ending in ".com"',
+  ]);
+  // The warning is advice about the input, not part of the profile.
+  assert.equal('browser_domain_warnings' in harness.store.findProfileById(created.body.id), false);
+
+  const response = await fetch(`${harness.base}/api/profiles/${created.body.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ browserDomains: 'example' }),
+  });
+  const updated = await response.json();
+  assert.equal(response.status, 200);
+  assert.deepEqual(updated.browser_domain_warnings, [
+    '"example" also matches every site ending in ".example"',
+  ]);
+});
+
+test('a profile whose browser sites are all unambiguous carries no warning key', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, { browserDomains: 'x.example' });
+
+  assert.equal(created.status, 201);
+  assert.equal('browser_domain_warnings' in created.body, false);
+});

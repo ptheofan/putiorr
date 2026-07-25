@@ -637,19 +637,18 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'POST' && requestPath === '/api/profiles') {
-        const profile = this.service.store.createProfile(normalizeProfileInput(await readJsonBody(req)));
-        jsonResponse(res, 201, profile, this.sessionId);
+        const input = normalizeProfileInput(await readJsonBody(req));
+        const profile = this.service.store.createProfile(input);
+        jsonResponse(res, 201, profileResponse(profile, input), this.sessionId);
         return;
       }
 
       const profileMatch = requestPath.match(/^\/api\/profiles\/(\d+)$/);
       if (profileMatch && method === 'PUT') {
-        const profile = this.service.store.updateProfile(
-          Number(profileMatch[1]),
-          normalizeProfileInput(await readJsonBody(req), { partial: true }),
-        );
+        const input = normalizeProfileInput(await readJsonBody(req), { partial: true });
+        const profile = this.service.store.updateProfile(Number(profileMatch[1]), input);
         if (!profile) throw new Error('Profile not found');
-        jsonResponse(res, 200, profile, this.sessionId);
+        jsonResponse(res, 200, profileResponse(profile, input), this.sessionId);
         return;
       }
 
@@ -1204,6 +1203,26 @@ async function probeWritableDownloadFolder(downloadAt) {
   }
 }
 
+const BROWSER_DOMAIN_ERROR_LIMIT = 5;
+
+// #profileWizardMessage renders with white-space: pre-line, so one refused
+// entry per line. Capped because the request body is bounded by bytes rather
+// than by entry count: a pasted list must not turn into a message no dialog can
+// show.
+function browserDomainError(errors) {
+  const shown = errors.slice(0, BROWSER_DOMAIN_ERROR_LIMIT).join('\n');
+  return errors.length > BROWSER_DOMAIN_ERROR_LIMIT
+    ? `${shown}\n…and ${errors.length - BROWSER_DOMAIN_ERROR_LIMIT} more`
+    : shown;
+}
+
+// Warnings are advice about what was just typed, not profile data: they ride
+// along on the reply that answered for them and are never stored.
+function profileResponse(profile, input) {
+  const warnings = input.browser_domain_warnings;
+  return warnings?.length ? { ...profile, browser_domain_warnings: warnings } : profile;
+}
+
 function normalizeProfileInput(input, { partial = false } = {}) {
   const output = {};
   const name = input.name == null ? undefined : String(input.name).trim();
@@ -1234,9 +1253,12 @@ function normalizeProfileInput(input, { partial = false } = {}) {
     // The form sends the raw comma-separated text. An entry no hostname can
     // ever match is a refusal rather than a silent drop: the profile would
     // otherwise look configured for a site it can never receive a grab from.
-    const { domains, errors } = normalizeBrowserDomains(browserDomains);
-    if (errors.length) throw new Error(errors.join(' '));
+    const { domains, errors, warnings } = normalizeBrowserDomains(browserDomains);
+    if (errors.length) throw new Error(browserDomainError(errors));
     output.browser_domains = domains;
+    // Not a column: the store ignores unknown keys, and profileResponse lifts
+    // this back out onto the reply.
+    if (warnings.length) output.browser_domain_warnings = warnings;
   }
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;

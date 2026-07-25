@@ -473,3 +473,83 @@ test('profile browser sites survive text no JSON parser can read', () => {
     store.close();
   }
 });
+
+test('the store normalizes browser sites it is handed directly', () => {
+  const store = new StateStore(':memory:');
+  try {
+    // PUTIORR_PROFILES_JSON seeds profiles through createProfile without going
+    // past the API's normalization, so the same comma-separated text the form
+    // accepts has to survive here too rather than being stringified whole.
+    const seeded = store.createProfile({
+      name: 'Seeded',
+      type: 'custom',
+      slug: 'seeded',
+      putio_folder_name: 'seeded',
+      downloadAt: '/downloads',
+      rpc_path: '/seeded/transmission/rpc',
+      browser_domains: 'https://x.example/dl, bücher.example',
+    });
+    assert.deepEqual(seeded.browser_domains, ['x.example', 'xn--bcher-kva.example']);
+
+    // An entry no hostname can match is dropped rather than stored as a site
+    // that would never fire.
+    const wildcard = store.createProfile({
+      name: 'Wildcard',
+      type: 'custom',
+      slug: 'wildcard',
+      putio_folder_name: 'wildcard',
+      downloadAt: '/downloads',
+      rpc_path: '/wildcard/transmission/rpc',
+      browser_domains: ['*.x.example'],
+    });
+    assert.deepEqual(wildcard.browser_domains, []);
+    assert.deepEqual(store.updateProfile(seeded.id, { browser_domains: ['*.x.example'] }).browser_domains, []);
+
+    // Normalizing an already normalized list must not change it.
+    const normalized = store.updateProfile(seeded.id, { browser_domains: ['x.example', 'z.example'] });
+    assert.deepEqual(normalized.browser_domains, ['x.example', 'z.example']);
+    assert.deepEqual(
+      store.updateProfile(seeded.id, { browser_domains: normalized.browser_domains }).browser_domains,
+      ['x.example', 'z.example'],
+    );
+  } finally {
+    store.close();
+  }
+});
+
+test('profiles written before the browser sites column read as none and stay editable', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
+  const dbPath = path.join(root, 'state.db');
+
+  const store = new StateStore(dbPath);
+  try {
+    store.createProfile({
+      name: 'Sonarr',
+      type: 'sonarr',
+      slug: 'sonarr',
+      putio_folder_name: 'putiorr',
+      downloadAt: '/downloads',
+      rpc_path: '/sonarr/transmission/rpc',
+    });
+  } finally {
+    store.close();
+  }
+
+  // Drop the column back off a populated database: that is exactly the shape an
+  // upgrade meets, and the migration has to add it without disturbing the rows.
+  const legacy = new DatabaseSync(dbPath);
+  try {
+    legacy.exec('ALTER TABLE profiles DROP COLUMN browser_domains');
+  } finally {
+    legacy.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    const profile = reopened.findProfileBySlug('sonarr');
+    assert.deepEqual(profile.browser_domains, []);
+    assert.deepEqual(reopened.updateProfile(profile.id, { browser_domains: ['x.example'] }).browser_domains, ['x.example']);
+  } finally {
+    reopened.close();
+  }
+});
