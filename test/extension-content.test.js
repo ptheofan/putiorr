@@ -23,10 +23,14 @@ async function settle(ms = 20) {
 }
 
 // Minimal stand-ins for the DOM bits content.js touches. `Element` has to be a
-// global because the click handler gates on `event.target instanceof Element`.
+// global because the anchor lookup gates on `node instanceof Element`.
 class FakeElement {
   closest() {
     return null;
+  }
+
+  matches() {
+    return false;
   }
 }
 
@@ -42,10 +46,15 @@ class FakeAnchor extends FakeElement {
     return selector === 'a[href]' ? this : null;
   }
 
+  matches(selector) {
+    return selector === 'a[href]';
+  }
+
   // Mirrors HTMLElement.click(): a fresh event that travels the same listener.
+  // Crucially it is synthetic, so isTrusted is false exactly as in a browser.
   click() {
     this.clicks += 1;
-    this.dispatch(this);
+    this.dispatch(this, { isTrusted: false });
   }
 }
 
@@ -55,13 +64,22 @@ function createHarness({ sync = {}, fetch: fetchStub, sendMessage } = {}) {
   const listeners = {};
   const events = [];
 
-  const dispatch = (anchor, overrides = {}) => {
+  // `path` stands in for composedPath(): the browser hands the listener the
+  // full chain from the innermost node outwards, crossing open shadow roots.
+  const dispatch = (target, { path, ...overrides } = {}) => {
+    const composed = path ?? target?.path ?? [target];
     const event = {
       button: 0,
       defaultPrevented: false,
-      target: anchor,
+      isTrusted: true,
+      ctrlKey: false,
+      metaKey: false,
+      shiftKey: false,
+      altKey: false,
+      target,
       prevented: false,
       stopped: false,
+      composedPath: () => composed,
       preventDefault() {
         this.prevented = true;
       },
@@ -91,7 +109,7 @@ function createHarness({ sync = {}, fetch: fetchStub, sendMessage } = {}) {
     },
   };
 
-  const anchor = (href) => new FakeAnchor(href, (target) => dispatch(target));
+  const anchor = (href) => new FakeAnchor(href, (target, overrides) => dispatch(target, overrides));
 
   globalThis.chrome = chrome;
   globalThis.Element = FakeElement;
@@ -195,6 +213,10 @@ test('a .torrent click is fetched with page credentials and forwarded byte-exact
   assert.equal(request.url, 'https://tracker.test/dl/1234.torrent?passkey=secret');
   // Without credentials a private tracker hands back an HTML login page.
   assert.equal(request.init.credentials, 'include');
+  // A tracker that stalls instead of answering must not strand the click: the
+  // abort turns into a rejection, which the fallback below can act on.
+  assert.ok(request.init.signal instanceof AbortSignal, 'the fetch must carry a timeout signal');
+  assert.equal(request.init.signal.aborted, false);
   assert.deepEqual(harness.sent, [{
     kind: 'grab',
     torrentBase64: Buffer.from(bytes).toString('base64'),
@@ -203,26 +225,50 @@ test('a .torrent click is fetched with page credentials and forwarded byte-exact
   }]);
 });
 
-test('the filename comes from RFC 5987 encoding, then the URL, then a fallback', async () => {
+test('content-disposition filenames follow RFC 6266', async () => {
   const bytes = new Uint8Array([0x64, 0x65]);
   let headers = {};
   const harness = await loadContent({ fetch: async () => torrentResponse(bytes, headers) });
+  let counter = 0;
 
-  headers = { 'content-disposition': "attachment; filename*=UTF-8''Se%CC%81rie%20S01E01.torrent" };
-  harness.dispatch(harness.anchor('https://tracker.test/dl/1.torrent'));
-  await settle();
-  assert.equal(harness.sent.at(-1).filename, 'Série S01E01.torrent'.normalize('NFD'));
+  // Each case gets its own anchor URL so the basename fallback is distinguishable
+  // and the in-flight guard never sees a repeat.
+  const filenameFor = async (disposition) => {
+    headers = disposition === undefined ? {} : { 'content-disposition': disposition };
+    counter += 1;
+    harness.dispatch(harness.anchor(`https://tracker.test/dl/Fallback.${counter}.torrent?x=1`));
+    await settle();
+    return harness.sent.at(-1).filename;
+  };
 
-  // A quoted name that is not percent-encoded must survive decodeURIComponent.
-  headers = { 'content-disposition': 'attachment; filename="100% Legal.torrent"' };
-  harness.dispatch(harness.anchor('https://tracker.test/dl/2.torrent'));
-  await settle();
-  assert.equal(harness.sent.at(-1).filename, '100% Legal.torrent');
+  assert.equal(
+    await filenameFor("attachment; filename*=UTF-8''Se%CC%81rie%20S01E01.torrent"),
+    'Série S01E01.torrent'.normalize('NFD'),
+  );
 
-  headers = {};
-  harness.dispatch(harness.anchor('https://tracker.test/dl/Example.S01.torrent?x=1'));
-  await settle();
-  assert.equal(harness.sent.at(-1).filename, 'Example.S01.torrent');
+  // RFC 6266: a server sends both exactly when the real name is non-ASCII, and
+  // the plain one is its mangled fallback. Picking it would be the wrong name.
+  assert.equal(
+    await filenameFor("attachment; filename=\"Serie.torrent\"; filename*=UTF-8''Se%CC%81rie.torrent"),
+    'Série.torrent'.normalize('NFD'),
+  );
+
+  // A quoted value may contain the ";" that otherwise ends the parameter.
+  assert.equal(await filenameFor('attachment; filename="semi;colon.torrent"'), 'semi;colon.torrent');
+
+  // Whitespace is legal around the "=" of a header parameter.
+  assert.equal(await filenameFor('attachment; filename = spaced.torrent'), 'spaced.torrent');
+
+  // Percent escapes are literal in a plain filename; decoding would forge a path.
+  assert.equal(await filenameFor('attachment; filename=a%2Fb.torrent'), 'a%2Fb.torrent');
+
+  // Which is also why an unencoded "%" has to survive untouched.
+  assert.equal(await filenameFor('attachment; filename="100% Legal.torrent"'), '100% Legal.torrent');
+
+  // A different parameter that merely ends in "filename" is not this one.
+  assert.equal(await filenameFor('attachment; x-filename=weird.torrent'), 'Fallback.7.torrent');
+
+  assert.equal(await filenameFor(undefined), 'Fallback.8.torrent');
 });
 
 test('a failed .torrent fetch falls through to a normal download exactly once', async () => {
@@ -271,10 +317,14 @@ test('a second click on a link that already fell back is captured again', async 
   assert.equal(anchor.clicks, 2);
 });
 
-test('a magnet that never reaches the worker does not refire into a dead download', async () => {
+test('a magnet that never reaches the worker falls back to the OS handler', async () => {
+  // An extension reload orphans this content script, and every later magnet
+  // click would be a silent no-op: preventDefault has run and sendMessage has
+  // nothing to talk to. Refiring hands the magnet to the protocol handler,
+  // which is what would have happened without the extension installed.
   const harness = await loadContent({
     sendMessage: async () => {
-      throw new Error('Could not establish connection.');
+      throw new Error('Extension context invalidated.');
     },
   });
 
@@ -282,8 +332,26 @@ test('a magnet that never reaches the worker does not refire into a dead downloa
   harness.dispatch(anchor);
   await settle();
 
-  assert.equal(anchor.clicks, 0, 'there is no browser fallback for a magnet worth firing');
-  assert.match(harness.warnings.join('\n'), /Could not establish connection/);
+  assert.equal(anchor.clicks, 1, 'the magnet must still reach the OS protocol handler');
+  const refired = harness.events.at(-1);
+  assert.equal(refired.prevented, false, 'the fallback click must not be swallowed in turn');
+  assert.match(harness.warnings.join('\n'), /Extension context invalidated/);
+});
+
+test('a grab that putiorr itself rejects does not also fall back to the browser', async () => {
+  // The service worker resolves with ok:false and has already shown the user a
+  // notification. Refiring here would download the .torrent behind their back
+  // or fire the magnet handler on top of a reported failure.
+  const harness = await loadContent({
+    sendMessage: async () => ({ ok: false, error: 'putiorr rejected the credentials' }),
+  });
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(anchor.clicks, 0, 'a reported failure is not a reason to fall back');
+  assert.deepEqual(harness.warnings, []);
 });
 
 test('non-torrent links, non-left buttons and already-handled clicks are left alone', async () => {
@@ -296,13 +364,101 @@ test('non-torrent links, non-left buttons and already-handled clicks are left al
   assert.equal(harness.dispatch(torrent, { button: 1 }).prevented, false, 'middle click opens a tab');
   assert.equal(harness.dispatch(torrent, { defaultPrevented: true }).prevented, false, 'the page already handled it');
 
-  // A click that lands outside any anchor must not throw on closest().
+  // A click that lands outside any anchor must not throw on the lookup.
   const bare = new FakeElement();
   assert.equal(harness.dispatch(bare).prevented, false);
   assert.equal(harness.dispatch({ notAnElement: true }).prevented, false);
 
   await settle();
   assert.deepEqual(harness.sent, []);
+});
+
+test('a click the page synthesized cannot drive a grab', async () => {
+  // Any page can plant a magnet anchor and call click() on it. Acting on that
+  // would let a site push transfers onto the user's put.io account unprompted.
+  const harness = await loadContent();
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:evil');
+  const event = harness.dispatch(anchor, { isTrusted: false });
+  await settle();
+
+  assert.equal(event.prevented, false, 'the page keeps whatever behaviour it already had');
+  assert.deepEqual(harness.sent, []);
+});
+
+test('a modified click is left to the browser', async () => {
+  // Alt+click is Chrome's "download to disk"; honouring modifiers also gives
+  // the user a way to bypass capture for one link without opening options.
+  const harness = await loadContent();
+
+  const anchor = harness.anchor('https://tracker.test/dl/1234.torrent');
+  for (const modifier of ['ctrlKey', 'metaKey', 'shiftKey', 'altKey']) {
+    const event = harness.dispatch(anchor, { [modifier]: true });
+    assert.equal(event.prevented, false, `${modifier} must not be captured`);
+  }
+
+  await settle();
+  assert.deepEqual(harness.sent, []);
+});
+
+test('a link inside an open shadow root is still found', async () => {
+  // The document-level listener sees the event retargeted to the shadow host,
+  // whose closest() cannot reach across the boundary; composedPath still can.
+  const harness = await loadContent();
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:shadow');
+  const inner = new FakeElement();
+  const host = new FakeElement();
+  const event = harness.dispatch(host, { path: [inner, anchor, host] });
+  await settle();
+
+  assert.equal(event.prevented, true);
+  assert.equal(harness.sent.length, 1);
+  assert.equal(harness.sent[0].magnet, 'magnet:?xt=urn:btih:shadow');
+});
+
+test('an event without composedPath still resolves the anchor', async () => {
+  const harness = await loadContent();
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc');
+  const event = harness.dispatch(anchor, { composedPath: undefined });
+  await settle();
+
+  assert.equal(event.prevented, true);
+  assert.equal(harness.sent.length, 1);
+});
+
+test('a second click while a capture is pending does not double-grab', async () => {
+  // Trackers are slow enough to invite an impatient second click, and a double
+  // click is one event pair. Letting the second through to the browser would
+  // download the very file the pending capture is fetching.
+  let release;
+  let attempts = 0;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const bytes = new Uint8Array([0x64, 0x65]);
+  const harness = await loadContent({
+    fetch: async () => {
+      attempts += 1;
+      await pending;
+      return torrentResponse(bytes);
+    },
+  });
+
+  const anchor = harness.anchor('https://tracker.test/dl/1234.torrent');
+  harness.dispatch(anchor);
+  const second = harness.dispatch(anchor);
+  assert.equal(second.prevented, true, 'the duplicate must not reach the browser either');
+
+  release();
+  await settle();
+
+  assert.equal(attempts, 1, 'only one fetch may be in flight for an anchor');
+  assert.equal(harness.sent.length, 1);
+
+  // Once it settles the anchor is clickable again.
+  harness.dispatch(anchor);
+  await settle();
+  assert.equal(attempts, 2);
 });
 
 test('autoCapture off leaves every link to the browser', async () => {
