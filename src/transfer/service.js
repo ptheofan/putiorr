@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import path from 'node:path';
 import { deleteLocalData, deleteLocalFileData, extractCategory } from '../download/paths.js';
 import { logger } from '../logger.js';
@@ -10,10 +9,6 @@ import { GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined);
-}
-
-function generatedHash() {
-  return crypto.randomBytes(20).toString('hex');
 }
 
 function deriveHashFromSource(source) {
@@ -98,7 +93,12 @@ function putioTransferToStoreInput(transfer, fallback = {}) {
     putio_transfer_id: transfer.id ?? fallback.putio_transfer_id,
     putio_file_id: transfer.fileId ?? fallback.putio_file_id,
     save_parent_id: transfer.saveParentId ?? fallback.save_parent_id,
-    hash: fallback.hash || transfer.hash || generatedHash(),
+    // put.io's report wins over what we derived from the source, and an
+    // absent report changes nothing (the store keeps the stored hash). It
+    // used to be 20 random bytes when neither side knew: a permanent identity
+    // no *arr could ever correlate and put.io could never confirm. Empty is
+    // the honest answer until put.io reports one.
+    hash: transfer.hash || fallback.hash || '',
     name: transfer.name || fallback.name || deriveNameFromSource(fallback.source),
     source: fallback.source ?? transfer.magnetUri ?? '',
     source_type: fallback.source_type ?? 'remote',
@@ -347,6 +347,19 @@ export class TransferService {
     const existing = remote.id ? this.store.findDownloadByPutioTransferId(remote.id) : undefined;
 
     if (existing) {
+      // A corrected hash changes the string every *arr correlates its queue
+      // item against, so it is never silent: the log names both sides.
+      const reported = String(remote.hash ?? '').trim().toLowerCase();
+      const known = String(existing.hash ?? '').trim().toLowerCase();
+      if (reported && known && reported !== known) {
+        logger.info('corrected download hash from put.io', {
+          id: existing.id,
+          putioTransferId: remote.id,
+          name: existing.name,
+          previousHash: known,
+          hash: reported,
+        });
+      }
       // The row's own profile_id is passed back in, so the store's
       // already-belongs-to refusal can never fire on the poll path.
       const updated = this.store.upsertDownload(putioTransferToStoreInput(remote, {

@@ -46,14 +46,66 @@ test('upsertDownload matches later remote updates by put.io id', () => {
     });
 
     assert.equal(second.id, first.id);
-    // The row is resolved by put.io id alone; the hash is informational and
-    // still write-once. Phase 4 makes it correctable on a later refresh that
-    // reports a different one.
-    assert.equal(second.hash, 'temporaryhash');
+    // The row is resolved by put.io id alone, and the hash is informational —
+    // so a later refresh that reports a different one corrects it rather than
+    // preserving whatever was known first. A stale hash is what an *arr
+    // correlates its queue item against, so leaving it wrong is not neutral.
+    assert.equal(second.hash, 'realhashfromputio');
     assert.equal(second.name, 'Updated Name');
     assert.equal(second.putio_status, 'DOWNLOADING');
     assert.equal(second.percent_done, 25);
     assert.equal(store.listActiveDownloads().length, 1);
+  } finally {
+    store.close();
+  }
+});
+
+test('upsertDownload keeps the known hash when put.io reports none', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    const created = store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 15,
+      hash: 'knownhash',
+      name: 'Known Hash',
+    });
+
+    // put.io reports no hash for a transfer it has not started yet. That is
+    // not a correction — an empty hash carries no information, and taking it
+    // would erase the one the magnet already told us.
+    const refreshed = store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 15,
+      hash: '',
+      putio_status: 'DOWNLOADING',
+    });
+
+    assert.equal(refreshed.id, created.id);
+    assert.equal(refreshed.hash, 'knownhash');
+  } finally {
+    store.close();
+  }
+});
+
+test('a download with no hash yet is never resolved by an empty hash', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    // The state a torrent upload lands in when put.io reports no hash: real
+    // download, no infohash yet. Nothing may match it by hash, or an *arr
+    // asking for '' would be handed somebody's download.
+    store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 16,
+      hash: '',
+      name: 'Hashless Upload',
+    });
+
+    assert.equal(store.findDownloadByHash(''), undefined);
+    assert.equal(store.findDownloadByHash('   '), undefined);
+    assert.equal(store.findDownloadByHash(undefined), undefined);
+    assert.equal(store.findDownload(''), undefined);
   } finally {
     store.close();
   }

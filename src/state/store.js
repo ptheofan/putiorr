@@ -1464,9 +1464,16 @@ export class StateStore {
       );
     }
 
+    // Informational, never an identity, and corrected the moment put.io
+    // reports a different one (design: "written when put.io reports it and
+    // corrected on any later refresh that reports a different one"). An empty
+    // input is not a correction: put.io reports no hash for a transfer it has
+    // not started, and taking that would erase what the magnet already said.
+    const nextHash = normalizeHash(input.hash) || existing.hash;
+
     this.db.prepare(`
       UPDATE downloads
-      SET putio_file_id = ?, save_parent_id = ?, name = ?, source = ?, source_type = ?,
+      SET hash = ?, putio_file_id = ?, save_parent_id = ?, name = ?, source = ?, source_type = ?,
           category = ?, lifecycle = ?, putio_status = ?, putio_status_message = ?,
           putio_peers = ?, putio_availability = ?, percent_done = ?, completion_percent = ?,
           total_size = ?, downloaded_ever = ?, uploaded_ever = ?, download_speed = ?,
@@ -1475,6 +1482,7 @@ export class StateStore {
           updated_at = ?
       WHERE id = ?
     `).run(
+      nextHash,
       input.putio_file_id ?? existing.putio_file_id,
       input.save_parent_id ?? existing.save_parent_id,
       input.name ?? existing.name,
@@ -1544,7 +1552,12 @@ export class StateStore {
     return normalizeDownloadRow(this.db.prepare('SELECT * FROM downloads WHERE id = ?').get(id));
   }
 
+  // A download whose hash put.io has not reported yet stores '', so an empty
+  // needle would match an arbitrary one of them — and every hash lookup here
+  // is a client naming a download it wants listed or removed. "I do not know
+  // this download's hash" is not a way to address it.
   findDownloadByHash(hash, { profileId } = {}) {
+    if (!normalizeHash(hash)) return undefined;
     const params = [normalizeHash(hash)];
     let where = 'WHERE lower(hash) = lower(?)';
     if (profileId != null) {

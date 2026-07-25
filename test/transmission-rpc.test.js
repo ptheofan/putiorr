@@ -10,6 +10,11 @@ import { TRANSMISSION_STATUS } from '../src/transmission/progress.js';
 import { TransmissionRpcServer } from '../src/transmission/server.js';
 import { CURRENT_VERSION, parseSemver } from '../src/version.js';
 
+function magnetInfoHash(source) {
+  const match = String(source ?? '').match(/xt=urn:btih:([^&]+)/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
 class FakePutio {
   constructor() {
     this.deletedFiles = [];
@@ -21,11 +26,15 @@ class FakePutio {
     return 42;
   }
 
+  // put.io parses the magnet it is handed, so the hash it reports back is the
+  // magnet's own infohash. The fake used to answer with an unrelated string,
+  // which only went unnoticed while the stored hash was write-once and taken
+  // from the magnet; put.io's report is authoritative now.
   async addTransfer(source, folderId) {
     return {
       id: 77,
       name: 'Example.Release',
-      hash: 'abcdef1234567890',
+      hash: magnetInfoHash(source),
       status: 'IN_QUEUE',
       percentDone: 0,
       size: 1000,
@@ -1002,6 +1011,69 @@ test('profile-specific RPC path uses that profile download directory', async (t)
   const row = harness.store.findDownloadByHash('ABCDEF');
   assert.equal(row.profile_id, sonarr.id);
   assert.equal(row.category, 'season-1');
+});
+
+test('a torrent upload put.io reports no hash for is stored without one', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  harness.putio.uploadTorrent = async () => ({
+    id: 91,
+    name: 'Uploaded.Release',
+    hash: '',
+    status: 'IN_QUEUE',
+    fileId: 92,
+    saveParentId: 42,
+  });
+
+  const added = await harness.service.addTorrent({
+    metainfo: Buffer.from('d8:announce0:e').toString('base64'),
+    filename: 'upload.torrent',
+  });
+
+  // This used to be 20 random bytes: a permanent identity nothing on put.io
+  // could ever confirm and no *arr could correlate, and one the store could
+  // never correct because the hash was write-once.
+  assert.equal(added['torrent-added'].hashString, '');
+  const row = harness.store.findDownloadById(added['torrent-added'].id);
+  assert.equal(row.hash, '');
+  assert.equal(row.putio_transfer_id, 91);
+});
+
+test('a refresh that reports a different hash corrects the stored one', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const download = harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 55,
+    putio_file_id: 56,
+    save_parent_id: 42,
+    hash: '',
+    name: 'Uploaded.Release',
+    lifecycle: 'remote',
+  });
+
+  harness.putio.transfers = [{
+    id: 55,
+    name: 'Uploaded.Release',
+    hash: 'REALHASHFROMPUTIO',
+    status: 'DOWNLOADING',
+    fileId: 56,
+    saveParentId: 42,
+  }];
+  await harness.service.refreshRemoteTransfers();
+
+  // Stored lowercase, the way every hash lookup compares them.
+  assert.equal(harness.store.findDownloadById(download.id).hash, 'realhashfromputio');
+  assert.equal(harness.store.findDownloadByHash('realhashfromputio').id, download.id);
 });
 
 test('torrent-get reports weighted progress consistently for Sonarr', async (t) => {
