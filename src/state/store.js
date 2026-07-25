@@ -159,7 +159,7 @@ function magnetInfoHash(source) {
   return '';
 }
 
-function normalizeTransferRow(row) {
+function normalizeDownloadRow(row) {
   if (!row) return undefined;
   return {
     ...row,
@@ -1125,7 +1125,7 @@ export class StateStore {
   // transfer id is the only thing this resolves on. The old hash-first lookup
   // is gone with UNIQUE(hash): across a non-unique column it would return an
   // arbitrary row, and the hash is informational from here on.
-  createOrUpdateTransfer(input) {
+  upsertDownload(input) {
     const timestamp = nowIso();
     const putioTransferId = input.putio_transfer_id;
     // Without an id from put.io the row can never be matched against put.io
@@ -1176,7 +1176,7 @@ export class StateStore {
         timestamp,
         timestamp,
       );
-      return this.findTransferById(Number(result.lastInsertRowid));
+      return this.findDownloadById(Number(result.lastInsertRowid));
     }
 
     // The owner is frozen at creation (design rule 4). The poll passes the
@@ -1228,11 +1228,11 @@ export class StateStore {
       timestamp,
       existing.id,
     );
-    return this.findTransferById(existing.id);
+    return this.findDownloadById(existing.id);
   }
 
-  updateTransfer(id, patch) {
-    const existing = this.findTransferById(id);
+  updateDownload(id, patch) {
+    const existing = this.findDownloadById(id);
     if (!existing) return undefined;
     // profile_id is deliberately absent: the owner is resolved once, at
     // ingestion, and frozen (design rule 4). Nothing in src/ patches it.
@@ -1264,14 +1264,14 @@ export class StateStore {
     const values = keys.map((key) => (key === 'error' ? (patch[key] ? 1 : 0) : patch[key]));
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE downloads SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
-    return this.findTransferById(id);
+    return this.findDownloadById(id);
   }
 
-  findTransferById(id) {
-    return normalizeTransferRow(this.db.prepare('SELECT * FROM downloads WHERE id = ?').get(id));
+  findDownloadById(id) {
+    return normalizeDownloadRow(this.db.prepare('SELECT * FROM downloads WHERE id = ?').get(id));
   }
 
-  findTransferByHash(hash, { profileId } = {}) {
+  findDownloadByHash(hash, { profileId } = {}) {
     const params = [normalizeHash(hash)];
     let where = 'WHERE lower(hash) = lower(?)';
     if (profileId != null) {
@@ -1279,10 +1279,10 @@ export class StateStore {
       params.push(profileId);
     }
     const row = this.db.prepare(`SELECT * FROM downloads ${where} ORDER BY id ASC LIMIT 1`).get(...params);
-    return normalizeTransferRow(row);
+    return normalizeDownloadRow(row);
   }
 
-  findTransferByPutioId(putioTransferId, { profileId } = {}) {
+  findDownloadByPutioTransferId(putioTransferId, { profileId } = {}) {
     const params = [putioTransferId];
     let where = 'WHERE putio_transfer_id = ?';
     if (profileId != null) {
@@ -1290,25 +1290,25 @@ export class StateStore {
       params.push(profileId);
     }
     const row = this.db.prepare(`SELECT * FROM downloads ${where} LIMIT 1`).get(...params);
-    return normalizeTransferRow(row);
+    return normalizeDownloadRow(row);
   }
 
-  findTransfer(identifier, { profileId } = {}) {
+  findDownload(identifier, { profileId } = {}) {
     if (identifier == null) return undefined;
     if (typeof identifier === 'number') {
-      const row = this.findTransferById(identifier);
+      const row = this.findDownloadById(identifier);
       return profileId == null || row?.profile_id === profileId ? row : undefined;
     }
     const value = String(identifier);
     if (/^\d+$/.test(value)) {
-      const row = this.findTransferById(Number(value));
+      const row = this.findDownloadById(Number(value));
       if (row && (profileId == null || row.profile_id === profileId)) return row;
-      return this.findTransferByHash(value, { profileId });
+      return this.findDownloadByHash(value, { profileId });
     }
-    return this.findTransferByHash(value, { profileId });
+    return this.findDownloadByHash(value, { profileId });
   }
 
-  listActiveTransfers({ profileId } = {}) {
+  listActiveDownloads({ profileId } = {}) {
     const params = [];
     let where = 'removed_at IS NULL';
     if (profileId != null) {
@@ -1317,16 +1317,16 @@ export class StateStore {
     }
     return this.db.prepare(`SELECT * FROM downloads WHERE ${where} ORDER BY id ASC`)
       .all(...params)
-      .map(normalizeTransferRow);
+      .map(normalizeDownloadRow);
   }
 
-  listRemovedTransfers() {
+  listRemovedDownloads() {
     return this.db.prepare('SELECT * FROM downloads WHERE removed_at IS NOT NULL ORDER BY id ASC')
       .all()
-      .map(normalizeTransferRow);
+      .map(normalizeDownloadRow);
   }
 
-  markTransferRemoved(id) {
+  markDownloadRemoved(id) {
     this.db.prepare(`
       UPDATE downloads
       SET removed_at = ?, lifecycle = 'removed', updated_at = ?
@@ -1336,11 +1336,11 @@ export class StateStore {
 
   // The only delete. There is no separate remote record to orphan any more:
   // the download row is the remote row.
-  deleteTransfer(id) {
+  deleteDownload(id) {
     this.db.prepare('DELETE FROM downloads WHERE id = ?').run(id);
   }
 
-  deleteTransferFile(id) {
+  deleteDownloadFile(id) {
     this.db.prepare('DELETE FROM download_files WHERE id = ?').run(id);
   }
 
@@ -1348,7 +1348,7 @@ export class StateStore {
   // so the downloader does not re-fetch it. Once its download is 'processed' the download
   // path never revisits it (see pollOnce / prepareTransfer), so the tombstone is dead weight
   // and is hard-deleted here to keep the table from accumulating rows over time.
-  purgeDeletedFilesForProcessedTransfers() {
+  purgeDeletedFilesForProcessedDownloads() {
     const result = this.db.prepare(`
       DELETE FROM download_files
       WHERE status = 'deleted'
@@ -1360,9 +1360,9 @@ export class StateStore {
     return result.changes;
   }
 
-  upsertTransferFile(input) {
+  upsertDownloadFile(input) {
     const timestamp = nowIso();
-    const existing = this.findTransferFileByPutioId(input.putio_file_id, input.download_id);
+    const existing = this.findDownloadFileByPutioId(input.putio_file_id, input.download_id);
     if (!existing) {
       const result = this.db.prepare(`
         INSERT INTO download_files (
@@ -1383,7 +1383,7 @@ export class StateStore {
         timestamp,
         timestamp,
       );
-      return this.findTransferFileById(Number(result.lastInsertRowid));
+      return this.findDownloadFileById(Number(result.lastInsertRowid));
     }
 
     this.db.prepare(`
@@ -1413,10 +1413,10 @@ export class StateStore {
       timestamp,
       existing.id,
     );
-    return this.findTransferFileById(existing.id);
+    return this.findDownloadFileById(existing.id);
   }
 
-  findTransferFileById(id) {
+  findDownloadFileById(id) {
     const row = this.db.prepare('SELECT * FROM download_files WHERE id = ?').get(id);
     return normalizeFileRow(row);
   }
@@ -1424,14 +1424,14 @@ export class StateStore {
   // putio_file_id is unique only within a download, so the id-less branch can
   // legitimately match several rows. It is a test and debug affordance; every
   // caller in src/ passes the download id.
-  findTransferFileByPutioId(putioFileId, downloadId) {
+  findDownloadFileByPutioId(putioFileId, downloadId) {
     const row = downloadId == null
       ? this.db.prepare('SELECT * FROM download_files WHERE putio_file_id = ? ORDER BY id ASC LIMIT 1').get(putioFileId)
       : this.db.prepare('SELECT * FROM download_files WHERE putio_file_id = ? AND download_id = ?').get(putioFileId, downloadId);
     return normalizeFileRow(row);
   }
 
-  listFilesForTransfer(downloadId) {
+  listFilesForDownload(downloadId) {
     return this.db.prepare(`
       SELECT * FROM download_files
       WHERE download_id = ?
@@ -1442,7 +1442,7 @@ export class StateStore {
 
   listPendingFiles(limit = 100) {
     return this.db.prepare(`
-      SELECT f.*, d.category, d.name AS transfer_name, d.hash AS transfer_hash
+      SELECT f.*, d.category, d.name AS download_name, d.hash AS download_hash
       FROM download_files f
       JOIN downloads d ON d.id = f.download_id
       WHERE f.status IN ('pending', 'failed')
@@ -1452,23 +1452,23 @@ export class StateStore {
     `).all(limit).map(normalizeFileRow);
   }
 
-  updateTransferFile(id, patch) {
-    const existing = this.findTransferFileById(id);
+  updateDownloadFile(id, patch) {
+    const existing = this.findDownloadFileById(id);
     if (!existing) return undefined;
     if (existing.status === 'deleted' && patch.status !== 'deleted') return existing;
 
     const allowed = ['downloaded_bytes', 'download_speed', 'status', 'attempts', 'error_string'];
     const keys = allowed.filter((key) => Object.hasOwn(patch, key));
-    if (keys.length === 0) return this.findTransferFileById(id);
+    if (keys.length === 0) return this.findDownloadFileById(id);
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
     const values = keys.map((key) => patch[key]);
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE download_files SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
-    return this.findTransferFileById(id);
+    return this.findDownloadFileById(id);
   }
 
-  markTransferFileDeleted(id) {
-    return this.updateTransferFile(id, {
+  markDownloadFileDeleted(id) {
+    return this.updateDownloadFile(id, {
       downloaded_bytes: 0,
       download_speed: 0,
       status: 'deleted',
@@ -1476,7 +1476,7 @@ export class StateStore {
     });
   }
 
-  getTransferFileStats(downloadId) {
+  getDownloadFileStats(downloadId) {
     return this.db.prepare(`
       SELECT
         COUNT(*) AS total_files,

@@ -38,7 +38,7 @@ async function createHarness(env = {}, putio = new FakePutio()) {
 
 function createTransfer(store, patch = {}) {
   const profile = store.findProfileBySlug('default');
-  return store.createOrUpdateTransfer({
+  return store.upsertDownload({
     profile_id: profile.id,
     putio_transfer_id: 10,
     putio_file_id: 20,
@@ -96,7 +96,7 @@ test('prepareTransfer records existing partial file bytes for resume', async () 
     });
     await manager.prepareTransfer(transfer);
 
-    const [file] = harness.store.listFilesForTransfer(transfer.id);
+    const [file] = harness.store.listFilesForDownload(transfer.id);
     assert.equal(file.downloaded_bytes, 4);
     assert.equal(file.status, 'pending');
   } finally {
@@ -134,8 +134,8 @@ test('prepareTransferSafely removes a transfer whose files 404 on put.io and kee
     // Default bucket delete: also removed from put.io, downloaded file kept on disk,
     // and tombstoned locally (the poll prune physically removes the row afterwards).
     assert.deepEqual(removed, [['file', 20], ['transfer', 10]]);
-    assert.ok(harness.store.findTransferById(transfer.id).removed_at);
-    assert.deepEqual(harness.store.listActiveTransfers(), []);
+    assert.ok(harness.store.findDownloadById(transfer.id).removed_at);
+    assert.deepEqual(harness.store.listActiveDownloads(), []);
     assert.equal(await readFile(fileOnDisk, 'utf8'), 'already downloaded');
   } finally {
     harness.store.close();
@@ -162,7 +162,7 @@ test('prepareTransferSafely keeps the transfer for non-404 errors so the next po
     await manager.prepareTransferSafely(transfer);
 
     // Transient error -> row is left intact for a later retry.
-    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.ok(harness.store.findDownloadById(transfer.id));
   } finally {
     harness.store.close();
   }
@@ -193,7 +193,7 @@ test('manual start stores the failure reason on the download', async () => {
       /temporary failure/,
     );
 
-    const updated = harness.store.findTransferById(transfer.id);
+    const updated = harness.store.findDownloadById(transfer.id);
     assert.equal(updated.error, true);
     assert.equal(updated.error_string, 'put.io 500: temporary failure');
   } finally {
@@ -205,7 +205,7 @@ test('downloadToPath resumes an existing part file with a Range request', async 
   const harness = await createHarness();
   try {
     const transfer = createTransfer(harness.store, { total_size: 10 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 902,
       relative_path: 'movie.mkv',
@@ -235,7 +235,7 @@ test('downloadToPath resumes an existing part file with a Range request', async 
 
     assert.deepEqual(requests, ['bytes=4-']);
     assert.equal((await readFile(targetPath, 'utf8')), 'abcdefghij');
-    assert.equal(harness.store.findTransferFileById(file.id).downloaded_bytes, 10);
+    assert.equal(harness.store.findDownloadFileById(file.id).downloaded_bytes, 10);
   } finally {
     harness.store.close();
   }
@@ -245,7 +245,7 @@ test('downloadToPath restarts bad partial downloads and records size mismatch', 
   const harness = await createHarness();
   try {
     const transfer = createTransfer(harness.store, { total_size: 4 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 908,
       relative_path: 'movie.mkv',
@@ -268,7 +268,7 @@ test('downloadToPath restarts bad partial downloads and records size mismatch', 
       /download size mismatch/,
     );
 
-    const updated = harness.store.findTransferFileById(file.id);
+    const updated = harness.store.findDownloadFileById(file.id);
     assert.equal(updated.downloaded_bytes, 2);
     assert.equal(updated.status, 'pending');
   } finally {
@@ -280,7 +280,7 @@ test('downloadToPath restarts when the remote rejects a range request', async ()
   const harness = await createHarness();
   try {
     const transfer = createTransfer(harness.store, { total_size: 6 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 909,
       relative_path: 'movie.mkv',
@@ -321,7 +321,7 @@ test('slow-speed reset keeps the part file and resumes without a failed attempt'
   });
   try {
     const transfer = createTransfer(harness.store, { total_size: 6 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 903,
       relative_path: 'movie.mkv',
@@ -368,7 +368,7 @@ test('slow-speed reset keeps the part file and resumes without a failed attempt'
 
     await manager.downloadToPath('https://example.test/slow', targetPath, file);
 
-    const updated = harness.store.findTransferFileById(file.id);
+    const updated = harness.store.findDownloadFileById(file.id);
     assert.deepEqual(requests, ['', 'bytes=2-']);
     assert.equal((await readFile(targetPath, 'utf8')), 'abcdef');
     assert.equal(updated.status, 'downloading');
@@ -396,7 +396,7 @@ test('slow-speed guard uses the download profile attached to the RR profile', as
     });
 
     const transfer = createTransfer(harness.store, { total_size: 10 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 904,
       relative_path: 'movie.mkv',
@@ -435,7 +435,7 @@ test('processFile downloads a pending file, finalizes the transfer, and cleans u
   const harness = await createHarness({}, putio);
   try {
     const transfer = createTransfer(harness.store, { total_size: 4 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 905,
       relative_path: 'movie.mkv',
@@ -454,8 +454,8 @@ test('processFile downloads a pending file, finalizes the transfer, and cleans u
 
     const targetPath = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
     assert.equal(await readFile(targetPath, 'utf8'), 'done');
-    assert.equal(harness.store.findTransferFileById(file.id).status, 'complete');
-    assert.equal(harness.store.findTransferById(transfer.id).lifecycle, 'processed');
+    assert.equal(harness.store.findDownloadFileById(file.id).status, 'complete');
+    assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'processed');
     assert.deepEqual(deleted, [20]);
   } finally {
     harness.store.close();
@@ -466,7 +466,7 @@ test('processFile completes an already downloaded file without fetching it', asy
   const harness = await createHarness({}, { async deleteFile() {} });
   try {
     const transfer = createTransfer(harness.store, { total_size: 4 });
-    const file = harness.store.upsertTransferFile({
+    const file = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 910,
       relative_path: 'movie.mkv',
@@ -488,8 +488,8 @@ test('processFile completes an already downloaded file without fetching it', asy
 
     await manager.processFile(file);
 
-    assert.equal(harness.store.findTransferFileById(file.id).status, 'complete');
-    assert.equal(harness.store.findTransferById(transfer.id).lifecycle, 'processed');
+    assert.equal(harness.store.findDownloadFileById(file.id).status, 'complete');
+    assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'processed');
   } finally {
     harness.store.close();
   }
@@ -499,7 +499,7 @@ test('processFile discards locally deleted files and nextPendingFile skips activ
   const harness = await createHarness();
   try {
     const transfer = createTransfer(harness.store, { total_size: 8 });
-    const pending = harness.store.upsertTransferFile({
+    const pending = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 906,
       relative_path: 'pending.mkv',
@@ -507,7 +507,7 @@ test('processFile discards locally deleted files and nextPendingFile skips activ
       downloaded_bytes: 0,
       status: 'pending',
     });
-    const deleted = harness.store.upsertTransferFile({
+    const deleted = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 907,
       relative_path: 'season/deleted.mkv',
@@ -526,7 +526,7 @@ test('processFile discards locally deleted files and nextPendingFile skips activ
     manager.activeFileIds.clear();
     assert.equal(manager.nextPendingFile().id, pending.id);
 
-    harness.store.updateTransferFile(deleted.id, { status: 'deleted' });
+    harness.store.updateDownloadFile(deleted.id, { status: 'deleted' });
     const targetPath = path.join(harness.config.targetDir, transfer.name, 'season', 'deleted.mkv');
     await mkdir(path.dirname(targetPath), { recursive: true });
     await writeFile(targetPath, 'data');
@@ -545,8 +545,8 @@ test('download manager start and stop are idempotent without a put.io token', as
   const manager = new DownloadManager({
     config: { pollIntervalMs: 60_000, workers: 0 },
     store: {
-      listActiveTransfers: () => [],
-      purgeDeletedFilesForProcessedTransfers: () => 0,
+      listActiveDownloads: () => [],
+      purgeDeletedFilesForProcessedDownloads: () => 0,
     },
     service: {
       getPutioToken: () => '',

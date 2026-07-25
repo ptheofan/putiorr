@@ -390,7 +390,7 @@ test('a grab without a profileId lands in the profile that claims the page host'
   assert.equal(harness.putio.added.length, 1);
   // Naming the profile in the response is not the same as routing to it: the
   // transfer itself has to be owned by the profile that claimed the site.
-  assert.equal(harness.store.findTransferByPutioId(77).profile_id, site.id);
+  assert.equal(harness.store.findDownloadByPutioTransferId(77).profile_id, site.id);
 });
 
 test('an empty or null profileId is a caller with no pick, not a bad one', async (t) => {
@@ -506,7 +506,7 @@ test('a grab profile claims the site even when an *arr profile listed it first',
 
   assert.equal(status, 200);
   assert.deepEqual(body.profile, { id: grab.id, name: grab.name });
-  assert.equal(harness.store.findTransferByPutioId(77).profile_id, grab.id);
+  assert.equal(harness.store.findDownloadByPutioTransferId(77).profile_id, grab.id);
 });
 
 test('an *arr profile that lists the site does not claim a grab on its own', async (t) => {

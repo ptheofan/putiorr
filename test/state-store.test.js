@@ -22,11 +22,11 @@ function seedProfile(store, overrides = {}) {
   });
 }
 
-test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
+test('upsertDownload matches later remote updates by put.io id', () => {
   const store = new StateStore(':memory:');
   try {
     const profile = seedProfile(store);
-    const first = store.createOrUpdateTransfer({
+    const first = store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 10,
       putio_file_id: 20,
@@ -35,7 +35,7 @@ test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
       source_type: 'magnet',
     });
 
-    const second = store.createOrUpdateTransfer({
+    const second = store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 10,
       putio_file_id: 20,
@@ -53,17 +53,17 @@ test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
     assert.equal(second.name, 'Updated Name');
     assert.equal(second.putio_status, 'DOWNLOADING');
     assert.equal(second.percent_done, 25);
-    assert.equal(store.listActiveTransfers().length, 1);
+    assert.equal(store.listActiveDownloads().length, 1);
   } finally {
     store.close();
   }
 });
 
-test('createOrUpdateTransfer persists put.io completion_percent across updates', () => {
+test('upsertDownload persists put.io completion_percent across updates', () => {
   const store = new StateStore(':memory:');
   try {
     const profile = seedProfile(store);
-    const created = store.createOrUpdateTransfer({
+    const created = store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 11,
       hash: 'completinghash',
@@ -74,7 +74,7 @@ test('createOrUpdateTransfer persists put.io completion_percent across updates',
     });
     assert.equal(created.completion_percent, 67);
 
-    const updated = store.createOrUpdateTransfer({
+    const updated = store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 11,
       hash: 'completinghash',
@@ -89,11 +89,11 @@ test('createOrUpdateTransfer persists put.io completion_percent across updates',
   }
 });
 
-test('createOrUpdateTransfer persists put.io status details across updates', () => {
+test('upsertDownload persists put.io status details across updates', () => {
   const store = new StateStore(':memory:');
   try {
     const profile = seedProfile(store);
-    const created = store.createOrUpdateTransfer({
+    const created = store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 12,
       hash: 'statusmessagehash',
@@ -105,7 +105,7 @@ test('createOrUpdateTransfer persists put.io status details across updates', () 
     });
     assert.equal(created.putio_status_message, 'Waiting for torrent details from the network...');
 
-    const updated = store.createOrUpdateTransfer({
+    const updated = store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 12,
       hash: 'statusmessagehash',
@@ -210,7 +210,7 @@ test('profiles with linked downloads cannot be deleted', () => {
       rpc_path: '/sonarr/transmission/rpc',
       enabled: true,
     });
-    store.createOrUpdateTransfer({
+    store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 10,
       hash: 'linkedhash',
@@ -427,16 +427,16 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
 
   const store = new StateStore(dbPath);
   try {
-    assert.equal(store.findTransferByHash('ABCDEF1234567890ABCDEF1234567890ABCDEF12').id, 1);
+    assert.equal(store.findDownloadByHash('ABCDEF1234567890ABCDEF1234567890ABCDEF12').id, 1);
     assert.equal(
-      store.findTransferById(1).hash,
+      store.findDownloadById(1).hash,
       'abcdef1234567890abcdef1234567890abcdef12',
     );
-    assert.equal(store.findTransferById(1).profile_id, 1);
+    assert.equal(store.findDownloadById(1).profile_id, 1);
     // The transfer id, the association id and the download id are all 1: the
     // chain copies the id at every hop so the ids the *arr apps hold survive.
-    assert.equal(store.findTransferById(1).id, 1);
-    assert.deepEqual(store.listFilesForTransfer(1).map((file) => file.putio_file_id), [789]);
+    assert.equal(store.findDownloadById(1).id, 1);
+    assert.deepEqual(store.listFilesForDownload(1).map((file) => file.putio_file_id), [789]);
   } finally {
     store.close();
   }
@@ -685,7 +685,7 @@ test('a download cannot be stored without an owning profile', () => {
   try {
     store.seedFromConfig(config);
     assert.throws(
-      () => store.createOrUpdateTransfer({
+      () => store.upsertDownload({
         putio_transfer_id: 91,
         hash: 'ownerlesshash',
         name: 'Ownerless.Release',
@@ -696,14 +696,14 @@ test('a download cannot be stored without an owning profile', () => {
 
     // And seeding still never rewrites the owner of a download that has one.
     const owner = store.listProfiles()[0];
-    const stored = store.createOrUpdateTransfer({
+    const stored = store.upsertDownload({
       profile_id: owner.id,
       putio_transfer_id: 92,
       hash: 'ownedhash',
       name: 'Owned.Release',
     });
     store.seedFromConfig(config);
-    assert.equal(store.findTransferById(stored.id).profile_id, owner.id);
+    assert.equal(store.findDownloadById(stored.id).profile_id, owner.id);
   } finally {
     store.close();
   }

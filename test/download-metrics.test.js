@@ -52,7 +52,7 @@ async function createHarness(remoteTransfers = []) {
 
 function createDownloadingTransfer(store) {
   const profile = store.findProfileBySlug('default');
-  const transfer = store.createOrUpdateTransfer({
+  const transfer = store.upsertDownload({
     profile_id: profile.id,
     putio_transfer_id: 7,
     putio_file_id: 8,
@@ -66,7 +66,7 @@ function createDownloadingTransfer(store) {
     download_speed: 0,
     eta: -1,
   });
-  const file = store.upsertTransferFile({
+  const file = store.upsertDownloadFile({
     download_id: transfer.id,
     putio_file_id: 81,
     relative_path: 'movie.mkv',
@@ -89,7 +89,7 @@ test('local download progress updates dashboard speed and ETA metrics', async ()
 
     manager.updateLocalProgressMetrics(file, 400, 300);
 
-    const updated = harness.store.findTransferById(transfer.id);
+    const updated = harness.store.findDownloadById(transfer.id);
     assert.equal(updated.download_speed, 300);
     assert.equal(updated.eta, 2);
     assert.equal(updated.downloaded_ever, 400);
@@ -143,7 +143,7 @@ test('dashboard reports multi-file progress details', async () => {
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 22,
       putio_file_id: 23,
@@ -159,7 +159,7 @@ test('dashboard reports multi-file progress details', async () => {
     });
 
     for (let index = 1; index <= 15; index += 1) {
-      harness.store.upsertTransferFile({
+      harness.store.upsertDownloadFile({
         download_id: transfer.id,
         putio_file_id: 1_000 + index,
         relative_path: `Feature/file-${String(index).padStart(2, '0')}.mkv`,
@@ -170,7 +170,7 @@ test('dashboard reports multi-file progress details', async () => {
     }
 
     for (let index = 1; index <= 6; index += 1) {
-      harness.store.upsertTransferFile({
+      harness.store.upsertDownloadFile({
         download_id: transfer.id,
         putio_file_id: 2_000 + index,
         relative_path: `Extras/extra-${String(index).padStart(2, '0')}.mkv`,
@@ -180,7 +180,7 @@ test('dashboard reports multi-file progress details', async () => {
       });
     }
 
-    const activeFile = harness.store.upsertTransferFile({
+    const activeFile = harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 3_001,
       relative_path: 'Feature/currently-copying.mkv',
@@ -235,14 +235,14 @@ test('put.io refresh preserves local speed and ETA while staged files are downlo
   const harness = await createHarness(remoteTransfers);
   try {
     const { transfer } = createDownloadingTransfer(harness.store);
-    harness.store.updateTransfer(transfer.id, {
+    harness.store.updateDownload(transfer.id, {
       download_speed: 300,
       eta: 2,
     });
 
     await harness.service.refreshRemoteTransfers();
 
-    const updated = harness.store.findTransferById(transfer.id);
+    const updated = harness.store.findDownloadById(transfer.id);
     assert.equal(updated.lifecycle, 'downloading');
     assert.equal(updated.download_speed, 300);
     assert.equal(updated.eta, 2);
@@ -255,7 +255,7 @@ test('poll prunes processed transfers after local staging data disappears', asyn
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 22,
       putio_file_id: 23,
@@ -269,7 +269,7 @@ test('poll prunes processed transfers after local staging data disappears', asyn
       total_size: 5,
       downloaded_ever: 5,
     });
-    harness.store.upsertTransferFile({
+    harness.store.upsertDownloadFile({
       download_id: transfer.id,
       putio_file_id: 24,
       relative_path: 'movie.mkv',
@@ -294,12 +294,12 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     });
 
     await manager.pollOnce();
-    assert.equal(harness.store.findTransferById(transfer.id).id, transfer.id);
+    assert.equal(harness.store.findDownloadById(transfer.id).id, transfer.id);
 
     await unlink(stagedFile);
     await manager.pollOnce();
 
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
     assert.deepEqual(harness.putio.deletedFiles, [23]);
     assert.deepEqual(harness.putio.deletedTransfers, [22]);
     assert.deepEqual(harness.service.listDownloads(), []);
@@ -321,8 +321,8 @@ test('one put.io transfer that fails to refresh does not stop the poll', async (
     // alone, so that particular collision is gone — but the poll is still the
     // only thing that advances every download on the box, and any row that
     // throws must stay one row's problem.
-    const upsert = harness.store.createOrUpdateTransfer.bind(harness.store);
-    harness.store.createOrUpdateTransfer = (input) => {
+    const upsert = harness.store.upsertDownload.bind(harness.store);
+    harness.store.upsertDownload = (input) => {
       if (input.putio_transfer_id === 6) throw new Error('UNIQUE constraint failed: downloads.putio_transfer_id');
       return upsert(input);
     };
@@ -340,13 +340,13 @@ test('one put.io transfer that fails to refresh does not stop the poll', async (
       rows = await harness.service.refreshRemoteTransfers();
     } finally {
       console.log = originalLog;
-      harness.store.createOrUpdateTransfer = upsert;
+      harness.store.upsertDownload = upsert;
     }
 
     // The healthy transfer behind the bad one still gets processed.
     assert.ok(rows.some((row) => row.hash === 'healthyhash'));
-    assert.ok(harness.store.findTransferByHash('healthyhash'));
-    assert.equal(harness.store.findTransferByPutioId(6), undefined);
+    assert.ok(harness.store.findDownloadByHash('healthyhash'));
+    assert.equal(harness.store.findDownloadByPutioTransferId(6), undefined);
     assert.equal(profile.id > 0, true);
     const logged = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'skipped put.io transfer that failed to refresh');
@@ -361,7 +361,7 @@ test('a processed transfer put.io no longer has is pruned, not retried every tic
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 22,
       putio_file_id: 23,
@@ -401,9 +401,9 @@ test('a processed transfer put.io no longer has is pruned, not retried every tic
     }
 
     // The rest of the cycle ran: the new put.io transfer was picked up.
-    assert.ok(harness.store.findTransferByHash('stillpollinghash'));
+    assert.ok(harness.store.findDownloadByHash('stillpollinghash'));
     // And the dead row is gone rather than queued up to fail again forever.
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
     const pruned = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'processed transfer pruned after local data disappeared');
     assert.equal(pruned.meta.transferId, transfer.id);
@@ -431,7 +431,7 @@ test('a transient prune failure is left for the next tick and does not abort the
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 42,
       putio_file_id: 43,
@@ -469,8 +469,8 @@ test('a transient prune failure is left for the next tick and does not abort the
       console.log = originalLog;
     }
 
-    assert.ok(harness.store.findTransferByHash('stillpollinghash'));
-    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.ok(harness.store.findDownloadByHash('stillpollinghash'));
+    assert.ok(harness.store.findDownloadById(transfer.id));
     const logged = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
     assert.equal(logged.meta.transferId, transfer.id);
@@ -494,7 +494,7 @@ test('a transient prune failure is left for the next tick and does not abort the
 // user with sqlite3 would.
 function createOwnerlessTransfer(store, patch = {}) {
   const owner = store.findProfileBySlug('default');
-  const row = store.createOrUpdateTransfer({
+  const row = store.upsertDownload({
     profile_id: owner.id,
     putio_transfer_id: 55,
     putio_file_id: 56,
@@ -509,7 +509,7 @@ function createOwnerlessTransfer(store, patch = {}) {
   store.db.exec('PRAGMA foreign_keys = OFF');
   store.db.prepare('UPDATE downloads SET profile_id = 999999 WHERE id = ?').run(row.id);
   store.db.exec('PRAGMA foreign_keys = ON');
-  return store.findTransferById(row.id);
+  return store.findDownloadById(row.id);
 }
 
 test('preparing a download with no owning profile fails loudly instead of borrowing one', async () => {
@@ -523,7 +523,7 @@ test('preparing a download with no owning profile fails loudly instead of borrow
     });
 
     await assert.rejects(
-      () => manager.prepareTransfer(harness.store.findTransferById(transfer.id)),
+      () => manager.prepareTransfer(harness.store.findDownloadById(transfer.id)),
       /no owning RR profile/i,
     );
   } finally {
@@ -534,7 +534,7 @@ test('preparing a download with no owning profile fails loudly instead of borrow
 test('the dashboard shows an ownerless download as broken rather than under someone else', async () => {
   const harness = await createHarness();
   try {
-    const owned = harness.store.createOrUpdateTransfer({
+    const owned = harness.store.upsertDownload({
       profile_id: harness.store.findProfileBySlug('default').id,
       putio_transfer_id: 60,
       hash: 'ownedhash',
@@ -579,7 +579,7 @@ test('the sweeps skip an ownerless download loudly instead of resolving its path
     }
 
     // Nothing was deleted on the strength of a borrowed profile's folder.
-    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.ok(harness.store.findDownloadById(transfer.id));
     assert.deepEqual(harness.putio.deletedFiles, []);
     assert.deepEqual(harness.putio.deletedTransfers, []);
     const warned = logs.map((line) => JSON.parse(line))
@@ -605,7 +605,7 @@ test('an ownerless download can still be deleted from the dashboard', async () =
     });
 
     assert.equal(result.ok, true);
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
     assert.deepEqual(harness.putio.deletedTransfers, [55]);
 
     // Asking to delete files there is no folder for is the one refusal — and it
@@ -617,7 +617,7 @@ test('an ownerless download can still be deleted from the dashboard', async () =
       () => harness.service.deleteDownloadBucket(second.id, { deleteRemote: true, deleteLocal: true }),
       /no owning RR profile/i,
     );
-    assert.ok(harness.store.findTransferById(second.id));
+    assert.ok(harness.store.findDownloadById(second.id));
     // Nothing of the second download reached put.io: 55/56 are the first one.
     assert.deepEqual(harness.putio.deletedTransfers, [55]);
     assert.deepEqual(harness.putio.deletedFiles, [56]);
@@ -628,7 +628,7 @@ test('an ownerless download can still be deleted from the dashboard', async () =
       deleteLocal: false,
     });
     assert.equal(cleaned.ok, true);
-    assert.equal(harness.store.findTransferById(second.id), undefined);
+    assert.equal(harness.store.findDownloadById(second.id), undefined);
   } finally {
     harness.store.close();
   }
@@ -640,7 +640,7 @@ test('a mixed-status put.io failure is not read as "the remote is gone"', async 
   // on the strength of that would throw away a download that still exists.
   const harness = await createHarness();
   try {
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: harness.store.findProfileBySlug('default').id,
       putio_transfer_id: 70,
       putio_file_id: 71,
@@ -678,7 +678,7 @@ test('a mixed-status put.io failure is not read as "the remote is gone"', async 
       console.log = originalLog;
     }
 
-    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.ok(harness.store.findDownloadById(transfer.id));
     const logged = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
     assert.equal(logged.meta.transferId, transfer.id);

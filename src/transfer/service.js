@@ -201,18 +201,19 @@ export class TransferService {
   // sorted first, with no type filter, so a Putiorr Grab profile could quietly
   // become the owner of an *arr download and take its files with it.
   //
-  // Until phase 3 makes profile_id NOT NULL the column can still be null on
-  // rows written by older versions, so this stays a runtime check rather than
-  // an assertion.
-  findTransferProfile(transfer) {
-    return transfer?.profile_id != null
-      ? this.store.findProfileById(transfer.profile_id)
+  // downloads.profile_id is NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT
+  // from phase 3 on, so this can only come back empty for a database that was
+  // edited by hand. It stays a runtime check rather than an assertion because
+  // the dashboard has to be able to show such a row and let the user fix it.
+  findDownloadOwner(download) {
+    return download?.profile_id != null
+      ? this.store.findProfileById(download.profile_id)
       : undefined;
   }
 
-  requireTransferProfile(transfer) {
-    const profile = this.findTransferProfile(transfer);
-    if (!profile) throw new Error(ownerlessDownloadMessage(transfer));
+  requireDownloadOwner(download) {
+    const profile = this.findDownloadOwner(download);
+    if (!profile) throw new Error(ownerlessDownloadMessage(download));
     return profile;
   }
 
@@ -266,7 +267,7 @@ export class TransferService {
       throw new Error('put.io accepted the torrent but returned no transfer id; nothing was recorded');
     }
 
-    const row = this.store.createOrUpdateTransfer(putioTransferToStoreInput(putioTransfer, {
+    const row = this.store.upsertDownload(putioTransferToStoreInput(putioTransfer, {
       profile_id: currentProfile.id,
       hash: deriveHashFromSource(source),
       source,
@@ -340,12 +341,12 @@ export class TransferService {
   // One put.io transfer's worth of work, extracted so the caller can isolate a
   // failure to the row that caused it. Appends the refreshed rows to `rows`.
   refreshRemoteTransfer(remote, byFolderId, rows) {
-    const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
+    const existing = remote.id ? this.store.findDownloadByPutioTransferId(remote.id) : undefined;
 
     if (existing) {
       // The row's own profile_id is passed back in, so the store's
       // already-belongs-to refusal can never fire on the poll path.
-      const updated = this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
+      const updated = this.store.upsertDownload(putioTransferToStoreInput(remote, {
         profile_id: existing.profile_id,
         hash: existing.hash,
         category: existing.category,
@@ -367,7 +368,7 @@ export class TransferService {
     const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
     if (folderProfiles.length !== 1) return;
     const [profile] = folderProfiles;
-    rows.push(this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
+    rows.push(this.store.upsertDownload(putioTransferToStoreInput(remote, {
       profile_id: profile.id,
       source: remote.magnetUri ?? '',
       source_type: 'remote',
@@ -375,10 +376,10 @@ export class TransferService {
   }
 
   pruneRemoteTransfers(remoteIds, remoteHashes) {
-    for (const transfer of this.store.listActiveTransfers()) {
+    for (const transfer of this.store.listActiveDownloads()) {
       if (transfer.lifecycle !== 'remote' || transfer.putio_transfer_id == null) continue;
       if (isTransferStillListed(transfer, remoteIds, remoteHashes)) continue;
-      this.store.deleteTransfer(transfer.id);
+      this.store.deleteDownload(transfer.id);
       logger.info('pruned remote transfer no longer on put.io', {
         id: transfer.id,
         putioTransferId: transfer.putio_transfer_id,
@@ -393,9 +394,9 @@ export class TransferService {
   // the tombstone is dead weight, so hard-delete it here (files cascade away). This
   // reuses the transfer list already fetched by the poll — no extra API calls.
   pruneRemovedTransfers(remoteIds, remoteHashes) {
-    for (const removed of this.store.listRemovedTransfers()) {
+    for (const removed of this.store.listRemovedDownloads()) {
       if (!isTransferStillListed(removed, remoteIds, remoteHashes)) {
-        this.store.deleteTransfer(removed.id);
+        this.store.deleteDownload(removed.id);
         logger.info('pruned tombstoned transfer no longer on put.io', {
           id: removed.id,
           hash: removed.hash,
@@ -421,8 +422,8 @@ export class TransferService {
 
     const fields = Array.isArray(args.fields) ? args.fields : [];
     const rows = requestedIds.length > 0
-      ? requestedIds.map((id) => this.store.findTransfer(id, { profileId: currentProfile.id })).filter(Boolean)
-      : this.store.listActiveTransfers({ profileId: currentProfile.id });
+      ? requestedIds.map((id) => this.store.findDownload(id, { profileId: currentProfile.id })).filter(Boolean)
+      : this.store.listActiveDownloads({ profileId: currentProfile.id });
 
     const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
     return { torrents };
@@ -434,7 +435,7 @@ export class TransferService {
     const deleteLocal = Boolean(args['delete-local-data'] ?? args.deleteLocalData);
 
     for (const id of ids) {
-      const transfer = this.store.findTransfer(id, { profileId: currentProfile.id });
+      const transfer = this.store.findDownload(id, { profileId: currentProfile.id });
       if (!transfer) {
         // An id nobody has is a no-op: Transmission clients routinely remove
         // ids they have already forgotten. An id that exists but belongs to
@@ -450,11 +451,11 @@ export class TransferService {
         // auto-remove sweep having hard-deleted the row between the client's
         // get and its remove. A mis-addressed client has no valid ids either,
         // so the check keeps its value.
-        const foreign = isAssociationId(id) ? this.store.findTransferById(Number(id)) : undefined;
+        const foreign = isAssociationId(id) ? this.store.findDownloadById(Number(id)) : undefined;
         // A tombstoned row is already gone as far as any client is concerned,
         // so there is nothing to correct anyone about.
         if (foreign && !foreign.removed_at) {
-          const owner = this.findTransferProfile(foreign);
+          const owner = this.findDownloadOwner(foreign);
           throw new Error(
             `Download ${id} belongs to RR profile ${owner ? owner.name : '(none)'}, not ${currentProfile.name}`
             + `${owner?.rpc_path ? `; use ${owner.rpc_path}` : ''}`,
@@ -472,7 +473,7 @@ export class TransferService {
         const targetDir = path.join(currentProfile.download_at, transfer.category ?? '');
         await deleteLocalData(targetDir, transfer.name);
       }
-      this.store.deleteTransfer(transfer.id);
+      this.store.deleteDownload(transfer.id);
       logger.info('torrent removed', {
         id: transfer.id,
         hash: transfer.hash,
@@ -484,7 +485,7 @@ export class TransferService {
   }
 
   async deleteDownloadBucket(transferId, { deleteRemote = true, deleteLocal = true } = {}) {
-    const transfer = this.store.findTransfer(transferId);
+    const transfer = this.store.findDownload(transferId);
     if (!transfer || transfer.removed_at) {
       throw new Error('Download bucket not found');
     }
@@ -495,7 +496,7 @@ export class TransferService {
     // never be removed again: put.io 404s on the retry and the local half
     // throws before it gets there.
     const localTarget = deleteLocal
-      ? path.join(this.requireTransferProfile(transfer).download_at, transfer.category ?? '')
+      ? path.join(this.requireDownloadOwner(transfer).download_at, transfer.category ?? '')
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -503,7 +504,7 @@ export class TransferService {
       await this.removeRemoteTransfer(transfer, { throwOnError: true });
     }
 
-    const fileCount = this.store.listFilesForTransfer(transfer.id).length;
+    const fileCount = this.store.listFilesForDownload(transfer.id).length;
     if (deleteLocal) {
       await deleteLocalData(localTarget, transfer.name);
     }
@@ -511,9 +512,9 @@ export class TransferService {
     // intentionally kept, a tombstone stays behind so the next refresh cannot
     // recreate the download from the remote transfer.
     if (deleteRemote) {
-      this.store.deleteTransfer(transfer.id);
+      this.store.deleteDownload(transfer.id);
     } else {
-      this.store.markTransferRemoved(transfer.id);
+      this.store.markDownloadRemoved(transfer.id);
     }
 
     logger.info('download bucket deleted from dashboard', {
@@ -533,7 +534,7 @@ export class TransferService {
   }
 
   async deleteDownloadFiles(transferId, fileIds, { deleteRemote = true, deleteLocal = true } = {}) {
-    const transfer = this.store.findTransfer(transferId);
+    const transfer = this.store.findDownload(transferId);
     if (!transfer || transfer.removed_at) {
       throw new Error('Download bucket not found');
     }
@@ -543,7 +544,7 @@ export class TransferService {
         .map((id) => Number(id))
         .filter((id) => Number.isInteger(id) && id > 0),
     );
-    const visibleFiles = this.store.listFilesForTransfer(transfer.id);
+    const visibleFiles = this.store.listFilesForDownload(transfer.id);
     const files = visibleFiles.filter((file) => requestedIds.has(Number(file.id)));
     if (files.length === 0) {
       throw new Error('No files selected');
@@ -556,7 +557,7 @@ export class TransferService {
     // Same rule as the bucket delete: resolve the owner before the first
     // irreversible step, never after it.
     const targetDir = deleteLocal
-      ? path.join(this.requireTransferProfile(transfer).download_at, transfer.category ?? '')
+      ? path.join(this.requireDownloadOwner(transfer).download_at, transfer.category ?? '')
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -570,9 +571,9 @@ export class TransferService {
     this.store.transaction(() => {
       for (const file of files) {
         if (remoteDeleted) {
-          this.store.deleteTransferFile(file.id);
+          this.store.deleteDownloadFile(file.id);
         } else {
-          this.store.markTransferFileDeleted(file.id);
+          this.store.markDownloadFileDeleted(file.id);
         }
       }
     });
@@ -602,9 +603,9 @@ export class TransferService {
   }
 
   refreshTransferAfterFileDeletion(transferId) {
-    const transfer = this.store.findTransferById(transferId);
+    const transfer = this.store.findDownloadById(transferId);
     if (!transfer || transfer.removed_at) return undefined;
-    const stats = this.store.getTransferFileStats(transferId);
+    const stats = this.store.getDownloadFileStats(transferId);
     const totalFiles = Number(stats.total_files ?? 0);
     const completedFiles = Number(stats.completed_files ?? 0);
     const totalSize = Number(stats.total_size ?? 0);
@@ -621,7 +622,7 @@ export class TransferService {
       patch.eta = -1;
     }
 
-    return this.store.updateTransfer(transferId, patch);
+    return this.store.updateDownload(transferId, patch);
   }
 
   async removeRemoteFiles(files, { throwOnError = false } = {}) {
@@ -683,10 +684,10 @@ export class TransferService {
     // Rows reach here only from getTorrents, which selects them scoped to a
     // resolved profile, so an ownerless one is a bug rather than a state to
     // render around.
-    const profile = this.requireTransferProfile(row);
-    const stats = this.store.getTransferFileStats(row.id);
+    const profile = this.requireDownloadOwner(row);
+    const stats = this.store.getDownloadFileStats(row.id);
     const progress = calculateTransmissionProgress(row, stats);
-    const files = this.store.listFilesForTransfer(row.id);
+    const files = this.store.listFilesForDownload(row.id);
     const totalSize = Number(stats.total_size ?? 0) > 0
       ? Number(stats.total_size)
       : Number(row.total_size ?? 0);
@@ -761,18 +762,18 @@ export class TransferService {
   }
 
   listDownloads() {
-    return this.store.listActiveTransfers().map((row) => {
+    return this.store.listActiveDownloads().map((row) => {
       // The dashboard is where an ownerless download has to become visible, so
       // this is the one read path that reports the problem instead of throwing
       // — one broken row must not blank the whole list. It is still never
       // attributed to a profile that does not own it.
-      const profile = this.findTransferProfile(row);
+      const profile = this.findDownloadOwner(row);
       const ownerError = profile ? '' : ownerlessDownloadMessage(row);
       const downloadProfile = profile
         ? this.store.findDownloadProfileById(profile.download_profile_id) ?? this.store.findDefaultDownloadProfile()
         : undefined;
-      const stats = this.store.getTransferFileStats(row.id);
-      const fileItems = this.store.listFilesForTransfer(row.id).map((file) => {
+      const stats = this.store.getDownloadFileStats(row.id);
+      const fileItems = this.store.listFilesForDownload(row.id).map((file) => {
         const size = Number(file.size ?? 0);
         const downloadedSize = Number(file.downloaded_bytes ?? 0);
         return {

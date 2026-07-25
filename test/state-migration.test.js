@@ -422,7 +422,7 @@ test('an association-era database collapses keeping every id and column', async 
 
   const store = new StateStore(dbPath);
   try {
-    const first = store.findTransferById(7);
+    const first = store.findDownloadById(7);
     assert.equal(first.id, 7);
     assert.equal(first.putio_transfer_id, 1007);
     assert.equal(first.profile_id, 1);
@@ -437,9 +437,9 @@ test('an association-era database collapses keeping every id and column', async 
     assert.equal(first.upload_speed, 3);
     assert.equal(first.eta, 25);
     assert.equal(first.created_at, '2026-01-01T00:00:00.000Z');
-    assert.equal(store.findTransferById(8).total_size, 700);
+    assert.equal(store.findDownloadById(8).total_size, 700);
 
-    const files = store.listFilesForTransfer(7);
+    const files = store.listFilesForDownload(7);
     assert.deepEqual(files.map((file) => file.id), [11]);
     assert.equal(files[0].download_id, 7);
     assert.equal(files[0].downloaded_bytes, 250);
@@ -473,7 +473,7 @@ test('the collapse leaves AUTOINCREMENT above the highest migrated id', async ()
 
   const store = new StateStore(dbPath);
   try {
-    const created = store.createOrUpdateTransfer({
+    const created = store.upsertDownload({
       profile_id: 1,
       putio_transfer_id: 2000,
       hash: 'cccccccccccccccccccccccccccccccccccccccc',
@@ -527,14 +527,14 @@ test('a pre-association database migrates through associations into downloads', 
 
   const store = new StateStore(dbPath);
   try {
-    const row = store.findTransferById(5);
+    const row = store.findDownloadById(5);
     assert.equal(row.id, 5);
     assert.equal(row.putio_transfer_id, 1005);
     assert.equal(row.profile_id, 1);
     assert.equal(row.lifecycle, 'downloading');
-    assert.deepEqual(store.listFilesForTransfer(5).map((file) => file.id), [9]);
+    assert.deepEqual(store.listFilesForDownload(5).map((file) => file.id), [9]);
 
-    assert.equal(store.findTransferById(6).profile_id, 1);
+    assert.equal(store.findDownloadById(6).profile_id, 1);
     const report = collapseReport(store);
     assert.equal(report.migrated, 2);
     assert.equal(report.adoptedBySoleProfile, 1);
@@ -578,9 +578,9 @@ test('only the oldest association of a put.io transfer becomes the download', as
 
   const store = new StateStore(dbPath);
   try {
-    assert.equal(store.findTransferById(4).profile_id, 1);
-    assert.equal(store.findTransferById(5), undefined);
-    assert.deepEqual(store.listFilesForTransfer(4).map((file) => file.id), [20]);
+    assert.equal(store.findDownloadById(4).profile_id, 1);
+    assert.equal(store.findDownloadById(5), undefined);
+    assert.deepEqual(store.listFilesForDownload(4).map((file) => file.id), [20]);
     assert.equal(
       allRows(dbPath, 'SELECT id FROM download_files').some((row) => row.id === 21),
       false,
@@ -618,7 +618,7 @@ test('a transfer with no put.io id is quarantined and the unique index survives'
 
   const store = new StateStore(dbPath);
   try {
-    assert.equal(store.listActiveTransfers().length, 0);
+    assert.equal(store.listActiveDownloads().length, 0);
     const report = collapseReport(store);
     assert.equal(report.migrated, 0);
     assert.equal(report.noPutioId.length, 1);
@@ -631,7 +631,7 @@ test('a transfer with no put.io id is quarantined and the unique index survives'
     assert.equal(quarantined[0].reason, 'no put.io transfer id');
     assert.equal(quarantined[0].putio_transfer_id, null);
 
-    store.createOrUpdateTransfer({
+    store.upsertDownload({
       profile_id: 1, putio_transfer_id: 55, hash: 'e'.repeat(40), name: 'One',
     });
     assert.throws(
@@ -660,7 +660,7 @@ test('an ownerless transfer in a multi-profile database is quarantined, not adop
 
   const store = new StateStore(dbPath);
   try {
-    assert.equal(store.listActiveTransfers().length, 0);
+    assert.equal(store.listActiveDownloads().length, 0);
     const report = collapseReport(store);
     assert.equal(report.adoptedBySoleProfile, 0);
     assert.equal(report.ownerless.length, 1);
@@ -694,7 +694,7 @@ test('the collapse is idempotent and does not back up again on the second boot',
   const second = new StateStore(dbPath);
   try {
     assert.equal(second.getSetting('downloads_schema_v1_report'), firstReport);
-    assert.equal(second.findTransferById(2).id, 2);
+    assert.equal(second.findDownloadById(2).id, 2);
   } finally {
     second.close();
   }
@@ -739,7 +739,7 @@ test('a failure during the collapse rolls the whole database back', async () => 
   // The next boot finishes the job.
   const store = new StateStore(dbPath);
   try {
-    assert.equal(store.findTransferById(2).id, 2);
+    assert.equal(store.findDownloadById(2).id, 2);
     assert.equal(store.getSetting('downloads_schema_v1'), '1');
   } finally {
     store.close();
