@@ -966,6 +966,42 @@ test('deleting a quarantined download refuses a folder another download also cla
   }
 });
 
+test('deleting a quarantined download refuses a whole category folder', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    // A legacy row with no name left its recorded path pointing at the
+    // category directory itself, which holds every download that profile
+    // stages. rm -rf there is the profile's whole staging folder.
+    harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 46,
+      hash: 'categoryneighbourhash',
+      name: 'Neighbour.Release',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    const categoryDir = path.join(harness.config.targetDir, 'tv');
+    await mkdir(categoryDir, { recursive: true });
+    await writeFile(path.join(categoryDir, 'keep.mkv'), 'keep');
+
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: 47,
+      name: '',
+      category: 'tv',
+      legacy_download_dir: categoryDir,
+    });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /downloads own it/,
+    );
+    assert.equal(await readFile(path.join(categoryDir, 'keep.mkv'), 'utf8'), 'keep');
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('deleting a quarantined download from put.io needs put.io ids to delete', async () => {
   const harness = await createHarness();
   try {

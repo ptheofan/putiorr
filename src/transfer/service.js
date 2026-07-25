@@ -259,6 +259,12 @@ export class TransferService {
       ) {
         return true;
       }
+      // Anything above a download's folder takes that download's files with
+      // it, so it is claimed too. A quarantined row whose recorded path is a
+      // whole category directory — the shape a legacy row with no name leaves
+      // behind — is then contested by every download staging under it rather
+      // than looking like one entry's private folder.
+      if (target === categoryDir || categoryDir.startsWith(`${target}${path.sep}`)) return true;
       return legacyDownloadLocalRoot(profile, download) === target;
     } catch {
       // A profile with no usable download folder cannot claim anything; it
