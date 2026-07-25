@@ -178,7 +178,48 @@ export const WIZARD_HELP = {
       ? 'Auto-remove from putiorr after local download'
       : 'Wait for the app to remove the download',
   },
+  wizardBrowserDomains: {
+    title: 'Browser sites',
+    paragraphs: [
+      'The websites whose browser-extension grabs are sent to this profile. A magnet or torrent clicked on one of these sites lands here even when the extension is set to a different default profile.',
+      'Separate sites with commas. Subdomains are matched automatically, so x.example also covers tracker.x.example. Do not write *.x.example.',
+    ],
+    tips: [
+      'Leave this empty to keep the profile out of browser grabs. Those grabs then use the default profile configured in the extension.',
+      'The first matching profile wins, so avoid listing the same site on two profiles.',
+      'putiorr rewrites what you type: sites are lowercased, unicode becomes punycode, and any scheme, port, or path is dropped.',
+    ],
+    valueLabel: 'Sites routed here',
+    value: (profile) => browserDomainsText(profile),
+  },
 };
+
+// The stored value is an array, the wizard field is the raw comma-separated
+// text the user typed, and the help panel reads whichever of the two it is
+// handed. Both shapes collapse to the same list here.
+export function browserDomainsList(profile) {
+  const stored = profile?.browser_domains ?? profile?.browserDomains;
+  const entries = Array.isArray(stored) ? stored : String(stored ?? '').split(',');
+  return entries.map((entry) => String(entry ?? '').trim()).filter(Boolean);
+}
+
+export function browserDomainsText(profile) {
+  const domains = browserDomainsList(profile);
+  return domains.length ? domains.join(', ') : 'None';
+}
+
+// Warnings ride along on the save response and are never stored, so they are
+// read off the reply once and shown with the confirmation. #profileWizardMessage
+// renders white-space: pre-line, so one warning per line.
+export function browserDomainWarnings(profile) {
+  const warnings = profile?.browser_domain_warnings;
+  return Array.isArray(warnings) ? warnings.filter((warning) => typeof warning === 'string') : [];
+}
+
+export function withBrowserDomainWarnings(message, profile) {
+  const warnings = browserDomainWarnings(profile);
+  return warnings.length ? [message, ...warnings].join('\n') : message;
+}
 
 export function renderProfiles() {
   el.profilesBody.replaceChildren();
@@ -223,6 +264,10 @@ export function createProfileCard(profile) {
         <dt>Downloader Profile</dt>
         <dd data-role="download-profile"></dd>
       </div>
+      <div class="profile-fact-wide">
+        <dt>Browser sites</dt>
+        <dd data-role="browser-domains" data-testid="profile-card-browser-domains"></dd>
+      </div>
       <div>
         <dt>RPC</dt>
         <dd data-role="rpc"></dd>
@@ -241,6 +286,7 @@ export function createProfileCard(profile) {
   setProfileFact(card, 'putio', profile.putio_folder_name || 'Not set');
   setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
   setProfileFact(card, 'download-profile', downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId));
+  setProfileFact(card, 'browser-domains', browserDomainsText(profile));
   const status = card.querySelector('[data-role="status"]');
   status.className = `profile-status status ${profile.enabled === false ? 'warn' : 'ok'}`;
   setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
@@ -305,6 +351,7 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
       ?? profile.autoRemoveCompleted
       ?? detail.autoRemoveCompleted,
   ));
+  setWizardField(el.wizardBrowserDomains, browserDomainsList(profile).join(', '));
   el.deleteProfileButton.hidden = !isExisting;
   el.saveProfileButton.textContent = 'Save & test';
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
@@ -375,6 +422,9 @@ export function getWizardPayload() {
     client_use_ssl: fieldChecked(el.wizardUseSsl),
     auto_remove_completed: fieldChecked(el.wizardAutoRemoveCompleted),
     enabled: fieldChecked(el.wizardEnabled),
+    // Sent as typed: the server normalizes the list and refuses entries no
+    // hostname can match, so the wizard shows that error instead of guessing.
+    browserDomains: fieldValue(el.wizardBrowserDomains).trim(),
   };
 }
 
@@ -435,11 +485,11 @@ export async function saveAndTestClientSettings() {
       method: 'POST',
       body: JSON.stringify(savedProfile),
     });
-    setWizardMessage('Profile tested and saved successfully!', 'info');
+    setWizardMessage(withBrowserDomainWarnings('Profile tested and saved successfully!', savedProfile), 'info');
   } catch (error) {
     setWizardMessage(
       savedProfile
-        ? formatClientTestFailureMessage(error, savedProfile)
+        ? withBrowserDomainWarnings(formatClientTestFailureMessage(error, savedProfile), savedProfile)
         : `Profile was not saved.\nReason: ${error.message}`,
       'warn',
     );

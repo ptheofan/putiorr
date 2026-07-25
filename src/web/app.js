@@ -259,6 +259,7 @@ for (const input of [
   el.wizardUseSsl,
   el.wizardEnabled,
   el.wizardAutoRemoveCompleted,
+  el.wizardBrowserDomains,
 ]) {
   input.addEventListener('input', updateWizardPreview);
   input.addEventListener('change', updateWizardPreview);

@@ -424,6 +424,12 @@
                 <wa-checkbox id="wizardAutoRemoveCompleted" data-testid="profile-auto-remove-completed">App will not signal import completion; remove from putiorr once files download locally</wa-checkbox>
               </div>
             </section>
+
+            <section class="wizard-step">
+              <div class="step-label">4. Browser grabs</div>
+              <wa-input id="wizardBrowserDomains" label="Browser sites" type="text" autocomplete="off" placeholder="x.example, z.example" data-testid="profile-browser-domains"></wa-input>
+              <p class="field-help">Browser grabs from these sites use this profile; subdomains match automatically. Leave empty for none.</p>
+            </section>
           </div>
 
           <aside class="setup-preview context-help" aria-live="polite">
