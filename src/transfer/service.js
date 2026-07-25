@@ -1,5 +1,10 @@
 import path from 'node:path';
-import { deleteLocalData, deleteLocalFileData, extractCategory } from '../download/paths.js';
+import {
+  deleteLocalData,
+  deleteLocalFileData,
+  extractCategory,
+  resolveDownloadRoot,
+} from '../download/paths.js';
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
 import { calculateTransmissionProgress } from '../transmission/progress.js';
@@ -486,8 +491,7 @@ export class TransferService {
       await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
         // The row was found scoped to this profile, so this is that profile.
-        const targetDir = path.join(currentProfile.download_at, transfer.category ?? '');
-        await deleteLocalData(targetDir, transfer.name);
+        await deleteLocalData(await resolveDownloadRoot(currentProfile, transfer));
       }
       this.store.deleteDownload(transfer.id);
       logger.info('torrent removed', {
@@ -512,7 +516,7 @@ export class TransferService {
     // never be removed again: put.io 404s on the retry and the local half
     // throws before it gets there.
     const localTarget = deleteLocal
-      ? path.join(this.requireDownloadOwner(transfer).download_at, transfer.category ?? '')
+      ? await resolveDownloadRoot(this.requireDownloadOwner(transfer), transfer)
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -522,7 +526,7 @@ export class TransferService {
 
     const fileCount = this.store.listFilesForDownload(transfer.id).length;
     if (deleteLocal) {
-      await deleteLocalData(localTarget, transfer.name);
+      await deleteLocalData(localTarget);
     }
     // The row can be hard-deleted once put.io has been cleaned up. If put.io is
     // intentionally kept, a tombstone stays behind so the next refresh cannot
@@ -572,8 +576,8 @@ export class TransferService {
 
     // Same rule as the bucket delete: resolve the owner before the first
     // irreversible step, never after it.
-    const targetDir = deleteLocal
-      ? path.join(this.requireDownloadOwner(transfer).download_at, transfer.category ?? '')
+    const downloadRoot = deleteLocal
+      ? await resolveDownloadRoot(this.requireDownloadOwner(transfer), transfer)
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -596,7 +600,7 @@ export class TransferService {
 
     if (deleteLocal) {
       for (const file of files) {
-        await deleteLocalFileData(targetDir, transfer.name, file.relative_path);
+        await deleteLocalFileData(downloadRoot, file.relative_path);
       }
     }
 
@@ -850,7 +854,7 @@ export class TransferService {
           + ' remove them by hand, then delete this entry without the local-files option',
         );
       }
-      await deleteLocalData(path.dirname(row.legacy_download_dir), path.basename(row.legacy_download_dir));
+      await deleteLocalData(row.legacy_download_dir);
     }
     this.store.deleteOrphanedDownload(orphanId);
     logger.info('quarantined download deleted', {

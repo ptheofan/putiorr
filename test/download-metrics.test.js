@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DownloadManager } from '../src/download/manager.js';
+import { downloadFolderName } from '../src/download/paths.js';
 import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
@@ -48,6 +49,14 @@ async function createHarness(remoteTransfers = []) {
     putioFactory: () => putio,
   });
   return { config, store, service, putio };
+}
+
+function createManager(harness) {
+  return new DownloadManager({
+    config: harness.config,
+    store: harness.store,
+    service: harness.service,
+  });
 }
 
 function createDownloadingTransfer(store) {
@@ -281,7 +290,7 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     const stagedFile = path.join(
       harness.config.targetDir,
       'radarr',
-      'Prune.Missing.Local.Release',
+      downloadFolderName(transfer),
       'movie.mkv',
     );
     await mkdir(path.dirname(stagedFile), { recursive: true });
@@ -303,6 +312,91 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     assert.deepEqual(harness.putio.deletedFiles, [23]);
     assert.deepEqual(harness.putio.deletedTransfers, [22]);
     assert.deepEqual(harness.service.listDownloads(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 4 of the ownership cleanup (#67): the staging folder gained the
+// download's id, so an install upgrading into this version has every file in
+// the old `<category>/<put.io name>` layout. The poll moves them before it
+// does anything else — the very next thing it does is delete downloads whose
+// local data has disappeared, and "moved" would otherwise read as "gone".
+test('the poll moves an upgraded install into the per-download folders', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 30,
+      putio_file_id: 31,
+      save_parent_id: 42,
+      hash: 'legacylayouthash',
+      name: 'Legacy.Layout.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+      total_size: 5,
+      downloaded_ever: 5,
+    });
+    harness.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 32,
+      relative_path: 'movie.mkv',
+      size: 5,
+      downloaded_bytes: 5,
+      status: 'complete',
+    });
+
+    const legacyPath = path.join(harness.config.targetDir, 'radarr', 'Legacy.Layout.Release');
+    await mkdir(legacyPath, { recursive: true });
+    await writeFile(path.join(legacyPath, 'movie.mkv'), 'movie');
+
+    await createManager(harness).pollOnce();
+
+    const moved = path.join(harness.config.targetDir, 'radarr', downloadFolderName(transfer), 'movie.mkv');
+    assert.equal(await readFile(moved, 'utf8'), 'movie');
+    await assert.rejects(() => stat(legacyPath), { code: 'ENOENT' });
+    // The download survived the sweep that deletes downloads whose files are
+    // gone, and its put.io transfer was not cancelled.
+    assert.ok(harness.store.findDownloadById(transfer.id));
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.equal(harness.store.getSetting('download_layout_v2'), '1');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the layout sweep leaves a download it cannot move, and the poll keeps it', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 33,
+      putio_file_id: 34,
+      hash: 'conflictlayouthash',
+      name: 'Conflict.Layout.Release',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+
+    // Both layouts populated: merging them is a guess about which copy is the
+    // real one, so the sweep refuses and says so. The files stay where they
+    // are, and the prune must still not read this as data that disappeared.
+    const legacyPath = path.join(harness.config.targetDir, 'Conflict.Layout.Release');
+    const newPath = path.join(harness.config.targetDir, downloadFolderName(transfer));
+    await mkdir(legacyPath, { recursive: true });
+    await mkdir(newPath, { recursive: true });
+    await writeFile(path.join(legacyPath, 'old.mkv'), 'old');
+
+    await createManager(harness).pollOnce();
+
+    assert.equal(await readFile(path.join(legacyPath, 'old.mkv'), 'utf8'), 'old');
+    assert.ok(harness.store.findDownloadById(transfer.id));
+    assert.deepEqual(harness.putio.deletedTransfers, []);
   } finally {
     harness.store.close();
   }

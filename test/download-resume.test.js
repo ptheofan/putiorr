@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { DownloadManager } from '../src/download/manager.js';
+import { downloadFolderName } from '../src/download/paths.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
 
@@ -83,7 +84,7 @@ test('prepareTransfer records existing partial file bytes for resume', async () 
     const transfer = createTransfer(harness.store, { total_size: 10 });
     const targetPath = path.join(
       harness.config.targetDir,
-      transfer.name,
+      downloadFolderName(transfer),
       'movie.mkv',
     );
     await mkdir(path.dirname(targetPath), { recursive: true });
@@ -118,7 +119,7 @@ test('prepareTransferSafely removes a transfer whose files 404 on put.io and kee
   const harness = await createHarness({}, putio);
   try {
     const transfer = createTransfer(harness.store, { total_size: 10 });
-    const fileOnDisk = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
+    const fileOnDisk = path.join(harness.config.targetDir, downloadFolderName(transfer), 'movie.mkv');
     await mkdir(path.dirname(fileOnDisk), { recursive: true });
     await writeFile(fileOnDisk, 'already downloaded');
 
@@ -452,7 +453,7 @@ test('processFile downloads a pending file, finalizes the transfer, and cleans u
 
     await manager.processFile(file);
 
-    const targetPath = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
+    const targetPath = path.join(harness.config.targetDir, downloadFolderName(transfer), 'movie.mkv');
     assert.equal(await readFile(targetPath, 'utf8'), 'done');
     assert.equal(harness.store.findDownloadFileById(file.id).status, 'complete');
     assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'processed');
@@ -474,7 +475,7 @@ test('processFile completes an already downloaded file without fetching it', asy
       downloaded_bytes: 0,
       status: 'pending',
     });
-    const targetPath = path.join(harness.config.targetDir, transfer.name, 'movie.mkv');
+    const targetPath = path.join(harness.config.targetDir, downloadFolderName(transfer), 'movie.mkv');
     await mkdir(path.dirname(targetPath), { recursive: true });
     await writeFile(targetPath, 'done');
     const manager = new DownloadManager({
@@ -527,7 +528,7 @@ test('processFile discards locally deleted files and nextPendingFile skips activ
     assert.equal(manager.nextPendingFile().id, pending.id);
 
     harness.store.updateDownloadFile(deleted.id, { status: 'deleted' });
-    const targetPath = path.join(harness.config.targetDir, transfer.name, 'season', 'deleted.mkv');
+    const targetPath = path.join(harness.config.targetDir, downloadFolderName(transfer), 'season', 'deleted.mkv');
     await mkdir(path.dirname(targetPath), { recursive: true });
     await writeFile(targetPath, 'data');
     await writeFile(`${targetPath}.part`, 'part');
