@@ -366,7 +366,7 @@ test('a put.io transfer that collides with a stored row does not stop the refres
   }
 });
 
-test('a failing processed-transfer prune does not abort the rest of the poll', async () => {
+test('a processed transfer put.io no longer has is pruned, not retried every tick', async () => {
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
@@ -383,7 +383,8 @@ test('a failing processed-transfer prune does not abort the rest of the poll', a
       percent_done: 100,
     });
     // Its local data is already gone, so the sweep tries to delete it on put.io
-    // and put.io answers 404 because the files are gone there too.
+    // and put.io answers 404 because the files are gone there too. Nothing about
+    // that can ever succeed on a later tick, so the row has to go now.
     harness.putio.deleteFile = async () => {
       const error = new Error('put.io file 23 not found');
       error.status = 404;
@@ -410,9 +411,79 @@ test('a failing processed-transfer prune does not abort the rest of the poll', a
 
     // The rest of the cycle ran: the new put.io transfer was picked up.
     assert.ok(harness.store.findTransferByHash('stillpollinghash'));
+    // And the dead row is gone rather than queued up to fail again forever.
+    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    const pruned = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'processed transfer pruned after local data disappeared');
+    assert.equal(pruned.meta.transferId, transfer.id);
+    assert.equal(pruned.meta.remoteMissing, true);
+
+    // A second tick has nothing left to say about it.
+    const secondLogs = [];
+    console.log = (line) => secondLogs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(
+      secondLogs.map((line) => JSON.parse(line))
+        .filter((entry) => String(entry.message).includes('processed transfer')).length,
+      0,
+    );
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a transient prune failure is left for the next tick and does not abort the poll', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: profile.id,
+      putio_transfer_id: 42,
+      putio_file_id: 43,
+      save_parent_id: 42,
+      hash: 'transientprunehash',
+      name: 'Transient.Prune.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+    // put.io is having a bad day rather than having lost the transfer, so the
+    // row must survive to be retried.
+    harness.putio.deleteFile = async () => {
+      const error = new Error('put.io is unavailable');
+      error.status = 503;
+      throw error;
+    };
+    harness.putio.remoteTransfers = [
+      { id: 31, fileId: 32, saveParentId: 42, hash: 'stillpollinghash', name: 'Still.Polling.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.ok(harness.store.findTransferByHash('stillpollinghash'));
+    assert.ok(harness.store.findTransferById(transfer.id));
     const logged = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
     assert.equal(logged.meta.transferId, transfer.id);
+    assert.match(logged.meta.stack, /Error/);
   } finally {
     harness.store.close();
   }

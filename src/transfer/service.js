@@ -59,6 +59,22 @@ function remoteDeleteErrorMessage(errors) {
   return `Failed to delete from put.io${messages.length > 0 ? `: ${messages.join('; ')}` : ''}`;
 }
 
+// One error standing for several, without losing what they said. A 404 from
+// put.io is not a failure to retry but an answer — the remote is already gone —
+// and callers branch on that, so the status has to survive the wrapping. It is
+// only carried up when every underlying error agrees: a mixed batch is not a
+// single verdict.
+function remoteDeleteError(errors) {
+  const aggregate = new Error(remoteDeleteErrorMessage(errors));
+  aggregate.causes = errors;
+  const statuses = new Set(errors.map((error) => error?.status));
+  if (statuses.size === 1) {
+    const [status] = statuses;
+    if (status !== undefined) aggregate.status = status;
+  }
+  return aggregate;
+}
+
 function isTransferStillListed(transfer, remoteIds, remoteHashes) {
   return (
     (transfer.putio_transfer_id != null && remoteIds.has(transfer.putio_transfer_id)) ||
@@ -377,6 +393,7 @@ export class TransferService {
           name: remote.name,
           saveParentId: remote.saveParentId,
           error: error.message,
+          stack: error.stack,
         });
       }
     }
@@ -665,7 +682,7 @@ export class TransferService {
       }
     }
     if (errors.length > 0 && throwOnError) {
-      throw new Error(remoteDeleteErrorMessage(errors));
+      throw remoteDeleteError(errors);
     }
     return errors;
   }
@@ -703,7 +720,7 @@ export class TransferService {
       }
     }
     if (errors.length > 0 && throwOnError) {
-      throw new Error(remoteDeleteErrorMessage(errors));
+      throw remoteDeleteError(errors);
     }
     return errors;
   }

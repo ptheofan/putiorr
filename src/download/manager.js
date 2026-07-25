@@ -259,9 +259,9 @@ export class DownloadManager {
 
       if (hasLocalData) continue;
 
-      // A put.io 404 here (the files are gone on both ends) used to propagate
-      // out of pollOnce and abort the whole cycle before it ever reached the
-      // refresh, so one dead row froze every download until a restart.
+      // This used to propagate out of pollOnce and abort the whole cycle, so one
+      // dead row froze every download until a restart.
+      let remoteMissing = false;
       try {
         if (this.service.getPutioToken()) {
           await this.service.deleteDownloadBucket(transfer.id, {
@@ -273,18 +273,32 @@ export class DownloadManager {
           this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
         }
       } catch (error) {
-        logger.warn('failed to prune processed transfer with missing local data', {
-          transferId: transfer.id,
-          putioTransferId: transfer.putio_transfer_id,
-          putioFileId: transfer.putio_file_id,
-          name: transfer.name,
-          error: error.message,
-        });
-        continue;
+        // A 404 says put.io no longer has it either, which is the outcome this
+        // sweep wanted — but deleteDownloadBucket throws before it deletes
+        // anything locally, so the row would otherwise survive and fail exactly
+        // the same way on every tick forever. Finish the job here, the way
+        // prepareTransferSafely already treats a 404, and the way the no-token
+        // branch above does it. Only a genuinely transient error is worth
+        // leaving for the next tick.
+        if (error.status !== 404) {
+          logger.warn('failed to prune processed transfer with missing local data', {
+            transferId: transfer.id,
+            putioTransferId: transfer.putio_transfer_id,
+            putioFileId: transfer.putio_file_id,
+            name: transfer.name,
+            error: error.message,
+            stack: error.stack,
+          });
+          continue;
+        }
+        remoteMissing = true;
+        this.store.deleteTransfer(transfer.id);
+        this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
       }
       logger.info('processed transfer pruned after local data disappeared', {
         transferId: transfer.id,
         name: transfer.name,
+        remoteMissing,
       });
     }
   }
