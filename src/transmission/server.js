@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { downloadPolicyFromStore, saveDownloadPolicyToStore } from '../download/policy.js';
 import { logger } from '../logger.js';
 import { PutioOAuthClient } from '../putio/oauth.js';
-import { normalizeBrowserDomains } from '../transfer/browser-domains.js';
+import { matchProfileByHost, normalizeBrowserDomains } from '../transfer/browser-domains.js';
 import { VersionChecker } from '../version.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
@@ -1065,16 +1065,13 @@ export class TransmissionRpcServer {
       return;
     }
     const body = await readJsonBody(req);
-    const profileId = Number(body.profileId);
-    if (!Number.isInteger(profileId) || profileId <= 0) {
-      jsonResponse(res, 400, { error: 'profileId is required' }, this.sessionId);
+    const pageHost = String(body.pageHost ?? '').trim();
+    const resolved = this.resolveGrabProfile(body, pageHost);
+    if (!resolved.profile) {
+      jsonResponse(res, resolved.status, { error: resolved.error }, this.sessionId);
       return;
     }
-    const profile = this.service.store.findProfileById(profileId);
-    if (!profile) {
-      jsonResponse(res, 404, { error: 'Profile not found' }, this.sessionId);
-      return;
-    }
+    const { profile } = resolved;
     const magnet = String(body.magnet ?? '').trim().replace(/^magnet:/i, 'magnet:');
     const torrentBase64 = String(body.torrentBase64 ?? '').trim();
     if (!torrentBase64 && !magnet.startsWith('magnet:')) {
@@ -1094,9 +1091,11 @@ export class TransmissionRpcServer {
     logger.info('grab from browser', {
       profile: profile.slug,
       sourceType: torrentBase64 ? 'torrent' : 'magnet',
-      // The page URL is attacker-influenced and unbounded; a log line is not the
-      // place to copy an arbitrarily long one.
+      // The page URL and host are attacker-influenced and unbounded; a log line
+      // is not the place to copy an arbitrarily long one.
       sourceUrl: String(body.sourceUrl ?? '').slice(0, 500),
+      // Which site a grab came from is what explains which profile it landed in.
+      pageHost: pageHost.slice(0, 253),
     });
     const args = torrentBase64
       // The upload name goes to put.io as sent; coercing it here keeps a client
@@ -1108,11 +1107,49 @@ export class TransmissionRpcServer {
     this.scheduleWebSocketDownloadsBroadcast('api:grab');
     jsonResponse(res, 200, {
       ok: true,
+      // The caller may not have chosen the profile, so it is told which one
+      // answered rather than left to repeat its own guess back to the user.
+      profile: { id: profile.id, name: profile.name },
       transfer: {
         id: result['torrent-added'].id,
         name: result['torrent-added'].name,
       },
     }, this.sessionId);
+  }
+
+  // Resolution order for a browser grab: the caller's explicit pick, then the
+  // enabled profile that claims the site the grab came from, then the caller's
+  // configured default. Returns either `{ profile }` or the refusal to send.
+  resolveGrabProfile(body, pageHost) {
+    const explicitId = body.profileId;
+    if (explicitId !== undefined && explicitId !== null && String(explicitId) !== '') {
+      // An explicit pick is not silently downgraded to site matching: the
+      // caller named a profile, so a value that is not an id is its own error.
+      const profileId = Number(explicitId);
+      if (!Number.isInteger(profileId) || profileId <= 0) {
+        return { status: 400, error: 'profileId is required' };
+      }
+      // Disabled is deliberately not filtered here — requireProfile refuses it
+      // by name later, which tells the user why their pick did nothing.
+      const profile = this.service.store.findProfileById(profileId);
+      return profile ? { profile } : { status: 404, error: 'Profile not found' };
+    }
+
+    // listProfiles() is enabled-only, so a profile that is switched off does
+    // not claim its sites: routing to it is exactly what the user turned off.
+    const matched = pageHost
+      ? matchProfileByHost(this.service.store.listProfiles(), pageHost)
+      : undefined;
+    if (matched) return { profile: matched };
+
+    const defaultId = Number(body.defaultProfileId);
+    if (!Number.isInteger(defaultId) || defaultId <= 0) {
+      return { status: 400, error: 'no profile matches this site and no default profile is configured' };
+    }
+    // A stale cached default has to surface; routing the grab elsewhere would
+    // put the transfer somewhere the user never chose.
+    const fallback = this.service.store.findProfileById(defaultId);
+    return fallback ? { profile: fallback } : { status: 404, error: 'Profile not found' };
   }
 
   async testClientSettings(input) {

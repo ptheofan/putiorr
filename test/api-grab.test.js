@@ -171,6 +171,9 @@ test('grab with a magnet link adds a put.io transfer for the profile', async (t)
 
   assert.equal(status, 200);
   assert.equal(body.ok, true);
+  // The extension names the profile in its success notification from this,
+  // rather than from what it guessed before sending.
+  assert.deepEqual(body.profile, { id: profile.id, name: profile.name });
   assert.equal(body.transfer.name, 'Example.Release');
   assert.equal(typeof body.transfer.id, 'number');
   assert.equal(harness.putio.added.length, 1);
@@ -257,11 +260,14 @@ test('grab with an unknown profile returns 404', async (t) => {
   assert.equal(body.error, 'Profile not found');
 });
 
-test('grab without a profileId returns 400', async (t) => {
+test('grab with an unusable profileId returns 400', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
 
+  // Sending a profileId means the caller picked one explicitly, so a value that
+  // is not an id is its own mistake — not a cue to start resolving by site.
   const { status, body } = await postGrab(harness, {
+    profileId: 'not-an-id',
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
 
@@ -347,6 +353,156 @@ test('grab rejects metainfo that is not valid base64', async (t) => {
   assert.equal(status, 400);
   assert.equal(body.error, 'torrentBase64 is not a valid .torrent file');
   assert.equal(harness.putio.uploads.length, 0);
+});
+
+// Which profile a browser grab lands in is decided here rather than in the
+// extension, so these cases are the whole resolution order: explicit pick →
+// site match → the extension's default → refusal.
+function createSiteProfile(harness, slug, browserDomains, { enabled = true } = {}) {
+  return harness.store.createProfile({
+    name: slug.toUpperCase(),
+    type: 'custom',
+    slug,
+    putio_folder_name: slug,
+    downloadAt: path.join(harness.config.targetDir, slug),
+    rpc_path: `/${slug}/transmission/rpc`,
+    browser_domains: browserDomains,
+    enabled,
+  });
+}
+
+test('a grab without a profileId lands in the profile that claims the page host', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const site = createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.profile, { id: site.id, name: site.name });
+  assert.equal(body.transfer.name, 'Example.Release');
+  assert.equal(harness.putio.added.length, 1);
+});
+
+test('a page host on a subdomain still matches the site the profile claims', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const site = createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'tracker.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.profile.id, site.id);
+});
+
+test('a page host no profile claims falls back to the extension default', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const fallback = harness.store.listProfiles()[0];
+  createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    defaultProfileId: fallback.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.profile, { id: fallback.id, name: fallback.name });
+});
+
+test('a grab with nothing to resolve is refused with the fix in the message', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  assert.equal(body.error, 'no profile matches this site and no default profile is configured');
+  assert.equal(harness.putio.added.length, 0);
+});
+
+test('a disabled profile does not claim its browser sites', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const fallback = harness.store.listProfiles()[0];
+  // A profile is turned off to stop it receiving transfers; routing a grab to
+  // it by site would be exactly the transfer the user switched off.
+  createSiteProfile(harness, 'browser', ['x.example'], { enabled: false });
+
+  const refused = await postGrab(harness, {
+    pageHost: 'x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.error, 'no profile matches this site and no default profile is configured');
+
+  const fellBack = await postGrab(harness, {
+    pageHost: 'x.example',
+    defaultProfileId: fallback.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+  assert.equal(fellBack.status, 200);
+  assert.equal(fellBack.body.profile.id, fallback.id);
+});
+
+test('an explicit profileId wins over the profile that claims the page host', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const picked = harness.store.listProfiles()[0];
+  createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await postGrab(harness, {
+    profileId: picked.id,
+    pageHost: 'x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.profile.id, picked.id);
+});
+
+test('an explicit profileId that does not exist is a 404 even when the site matches', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await postGrab(harness, {
+    profileId: 9999,
+    pageHost: 'x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 404);
+  assert.equal(body.error, 'Profile not found');
+  assert.equal(harness.putio.added.length, 0);
+});
+
+test('a defaultProfileId that no longer exists is a 404, not a silent grab', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  // The extension caches the default profile id; deleting that profile in
+  // putiorr has to surface, not quietly route the grab somewhere else.
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    defaultProfileId: 9999,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 404);
+  assert.equal(body.error, 'Profile not found');
+  assert.equal(harness.putio.added.length, 0);
 });
 
 // The profile API is where a browser site is actually typed in, so its
