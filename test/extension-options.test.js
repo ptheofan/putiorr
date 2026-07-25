@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { encodeCredentials } from '../extension/lib/auth.js';
+import { matchSiteRuleProfileId } from '../extension/lib/resolve.js';
 import { parseRuleDomains, validateBaseUrl } from '../extension/lib/settings.js';
 
 // options.js is a page script: it wires up listeners at import time and exports
@@ -71,7 +72,7 @@ test('the scheme hint is only offered to input that a scheme would fix', () => {
     assert.match(result.error, /is not a full URL|not a valid URL/, raw);
   }
   // A bare host or IP literal, with or without a port, still gets the hint.
-  for (const raw of ['nas', 'nas:9091', '192.168.1.9:9091', '[::1]:9091']) {
+  for (const raw of ['nas', 'nas:9091', '192.168.1.9:9091', '[::1]:9091', 'media_server:9091']) {
     assert.equal(validateBaseUrl(raw).error, `"${raw}" has no scheme: write http://${raw} instead`, raw);
   }
 });
@@ -125,6 +126,24 @@ test('parseRuleDomains refuses domains that could never match a hostname', () =>
     assert.equal(result.errors.length, 1, entry);
     assert.match(result.errors[0], new RegExp(entry.replace(/[.*\-\\]/g, '\\$&')), entry);
   }
+});
+
+test('parseRuleDomains accepts the underscore hostnames home LANs actually use', () => {
+  // Invalid in public DNS, but Chrome's URL parser keeps the underscore, so a
+  // page served from "media_server.lan" really does match a rule spelled that
+  // way: refusing it here would be a false rejection on exactly putiorr's
+  // audience. The two halves are asserted together so they cannot drift.
+  const result = parseRuleDomains('media_server.lan, _svc.x.example');
+  assert.deepEqual(result, { domains: ['media_server.lan', '_svc.x.example'], errors: [], warnings: [] });
+
+  const rules = [{ domains: result.domains, profileId: 3 }];
+  assert.equal(matchSiteRuleProfileId(rules, 'media_server.lan'), 3);
+  assert.equal(matchSiteRuleProfileId(rules, 'files.media_server.lan'), 3);
+  assert.equal(matchSiteRuleProfileId(rules, new URL('http://media_server.lan:9091/dl').hostname), 3);
+  assert.equal(matchSiteRuleProfileId(rules, 'media_server.example'), undefined);
+
+  // A leading or trailing "-" stays refused: those cannot appear in a hostname.
+  assert.equal(parseRuleDomains('media_server-.lan').domains.length, 0);
 });
 
 test('parseRuleDomains keeps IP literals, which are legitimate rule domains', () => {

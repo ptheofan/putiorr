@@ -7,12 +7,14 @@ import { normalizeDomain } from './resolve.js';
 // What the user most likely meant when they typed a bare host, with or without
 // a port: only these get the "write http:// in front" hint, so a "data:" URL or
 // a mistyped "http:/nas" is not answered with "write http://http:/nas".
-const HOSTISH = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(:\d+)?$/i;
+const HOSTISH = /^(\[[0-9a-f:.]+\]|[a-z0-9._-]+)(:\d+)?$/i;
 
 // A rule domain is compared against a URL hostname, so anything that is not a
-// hostname shape can never match: labels of [a-z0-9-] that neither start nor
-// end with "-", or a bracketed IPv6 literal.
-const LABEL = '[a-z0-9](?:[a-z0-9-]*[a-z0-9])?';
+// hostname shape can never match: labels of [a-z0-9_-] that neither start nor
+// end with "-", or a bracketed IPv6 literal. The underscore is invalid in public
+// DNS but the URL parser keeps it, so "media_server.lan" on a home LAN is a rule
+// that genuinely matches — refusing it would be a false rejection.
+const LABEL = '[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?';
 const MATCHABLE_DOMAIN = new RegExp(`^(?:${LABEL})(?:\\.(?:${LABEL}))*$|^\\[[0-9a-f:.]+\\]$`, 'i');
 
 // The stored baseUrl is only ever used as `new URL('/api/grab', baseUrl)`, which
