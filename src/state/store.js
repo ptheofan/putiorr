@@ -53,10 +53,23 @@ function normalizeFileRow(row) {
   };
 }
 
+// The stored text is JSON written by putiorr itself, but a row can predate the
+// column or have been edited by hand: an unreadable value degrades to "no
+// sites" so listing profiles never throws over a setting this optional.
+function profileBrowserDomains(row) {
+  try {
+    const parsed = JSON.parse(row.browser_domains ?? '[]');
+    return Array.isArray(parsed) ? parsed.filter((domain) => typeof domain === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function normalizeProfileRow(row) {
   if (!row) return undefined;
   const downloadAt = row.download_at ?? row.local_path;
   const autoRemoveCompleted = toBool(row.auto_remove_completed);
+  const browserDomains = profileBrowserDomains(row);
   const {
     local_path: _localPath,
     download_at: _downloadAt,
@@ -65,6 +78,8 @@ function normalizeProfileRow(row) {
   } = row;
   return {
     ...rest,
+    browser_domains: browserDomains,
+    browserDomains,
     download_at: downloadAt,
     downloadAt,
     downloadProfileId: row.download_profile_id,
@@ -108,6 +123,13 @@ function profileDownloadProfileId(input) {
   if (input.download_profile_id !== undefined) return input.download_profile_id;
   if (input.downloadProfileId !== undefined) return input.downloadProfileId;
   return undefined;
+}
+
+// Stored as JSON text in one column rather than a join table: the list is
+// short, only ever read whole, and never queried by domain.
+function profileBrowserDomainsPatch(input) {
+  const domains = input.browser_domains ?? input.browserDomains;
+  return domains === undefined ? undefined : JSON.stringify(domains);
 }
 
 function profileClientHost(input) {
@@ -323,6 +345,7 @@ export class StateStore {
     this.ensureColumn('profiles', 'client_host', "TEXT NOT NULL DEFAULT 'putiorr'");
     this.ensureColumn('profiles', 'client_port', "TEXT NOT NULL DEFAULT '9091'");
     this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('profiles', 'browser_domains', 'TEXT');
     this.ensureColumn('transfers', 'profile_id', 'INTEGER REFERENCES profiles(id) ON DELETE SET NULL');
     this.ensureColumn('transfers', 'completion_percent', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('transfers', 'putio_status_message', "TEXT NOT NULL DEFAULT ''");
@@ -622,9 +645,10 @@ export class StateStore {
     const result = this.db.prepare(`
       INSERT INTO profiles (
         name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
-        download_at, rpc_path, client_host, client_port, client_use_ssl, enabled, created_at, updated_at
+        download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains, enabled,
+        created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.name,
       input.type ?? 'custom',
@@ -638,6 +662,7 @@ export class StateStore {
       profileClientHost(input) ?? 'putiorr',
       profileClientPort(input) ?? '9091',
       profileClientUseSsl(input) ? 1 : 0,
+      profileBrowserDomainsPatch(input) ?? null,
       input.enabled === false ? 0 : 1,
       timestamp,
       timestamp,
@@ -663,6 +688,8 @@ export class StateStore {
     if (nextClientUseSsl !== undefined) normalizedPatch.client_use_ssl = nextClientUseSsl;
     const nextAutoRemoveCompleted = profileAutoRemoveCompleted(patch);
     if (nextAutoRemoveCompleted !== undefined) normalizedPatch.auto_remove_completed = nextAutoRemoveCompleted;
+    const nextBrowserDomains = profileBrowserDomainsPatch(patch);
+    if (nextBrowserDomains !== undefined) normalizedPatch.browser_domains = nextBrowserDomains;
     const allowed = [
       'name',
       'type',
@@ -676,6 +703,7 @@ export class StateStore {
       'client_host',
       'client_port',
       'client_use_ssl',
+      'browser_domains',
       'enabled',
     ];
     const keys = allowed.filter((key) => Object.hasOwn(normalizedPatch, key));

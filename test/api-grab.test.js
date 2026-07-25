@@ -348,3 +348,67 @@ test('grab rejects metainfo that is not valid base64', async (t) => {
   assert.equal(body.error, 'torrentBase64 is not a valid .torrent file');
   assert.equal(harness.putio.uploads.length, 0);
 });
+
+// The profile API is where a browser site is actually typed in, so its
+// normalization is asserted end to end rather than only in the pure module:
+// what the form sends is a string, what the store keeps is a domain list.
+async function postProfile(harness, payload) {
+  const response = await fetch(`${harness.base}/api/profiles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Browser',
+      slug: 'browser',
+      putio_folder_name: 'browser',
+      downloadAt: path.join(harness.config.targetDir, 'browser'),
+      rpc_path: '/browser/transmission/rpc',
+      ...payload,
+    }),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+test('creating a profile normalizes the browser sites the form sends', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, { browserDomains: 'x.example, bücher.example' });
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.browser_domains, ['x.example', 'xn--bcher-kva.example']);
+  assert.deepEqual(created.body.browserDomains, ['x.example', 'xn--bcher-kva.example']);
+  assert.deepEqual(
+    harness.store.findProfileById(created.body.id).browser_domains,
+    ['x.example', 'xn--bcher-kva.example'],
+  );
+});
+
+test('a browser site that could never match is refused, naming the entry', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, { browserDomains: '*.x.example' });
+
+  assert.equal(created.status, 400);
+  assert.match(created.body.error, /\*\.x\.example/);
+  assert.equal(harness.store.findProfileBySlug('browser'), undefined);
+});
+
+test('a profile without browser sites keeps none, and an update replaces them', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, {});
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.browser_domains, []);
+
+  const response = await fetch(`${harness.base}/api/profiles/${created.body.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ browserDomains: ['Z.Example', 'z.example'] }),
+  });
+  const updated = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(updated.browser_domains, ['z.example']);
+});

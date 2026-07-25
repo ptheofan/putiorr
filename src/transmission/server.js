@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { downloadPolicyFromStore, saveDownloadPolicyToStore } from '../download/policy.js';
 import { logger } from '../logger.js';
 import { PutioOAuthClient } from '../putio/oauth.js';
+import { normalizeBrowserDomains } from '../transfer/browser-domains.js';
 import { VersionChecker } from '../version.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
@@ -1216,6 +1217,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const clientHost = input.client_host ?? input.clientHost;
   const clientPort = input.client_port ?? input.clientPort;
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
+  const browserDomains = input.browser_domains ?? input.browserDomains;
 
   if (name !== undefined) output.name = name;
   if (type !== undefined) output.type = type || 'custom';
@@ -1228,6 +1230,14 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (clientHost !== undefined) output.client_host = String(clientHost).trim() || 'putiorr';
   if (clientPort !== undefined) output.client_port = String(clientPort).trim();
   if (clientUseSsl !== undefined) output.client_use_ssl = Boolean(clientUseSsl);
+  if (browserDomains !== undefined) {
+    // The form sends the raw comma-separated text. An entry no hostname can
+    // ever match is a refusal rather than a silent drop: the profile would
+    // otherwise look configured for a site it can never receive a grab from.
+    const { domains, errors } = normalizeBrowserDomains(browserDomains);
+    if (errors.length) throw new Error(errors.join(' '));
+    output.browser_domains = domains;
+  }
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;
   }

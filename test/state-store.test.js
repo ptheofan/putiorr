@@ -406,3 +406,70 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
     store.close();
   }
 });
+
+test('profile browser sites round-trip as a JSON array and default to none', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const withSites = store.createProfile({
+      name: 'Browser',
+      type: 'custom',
+      slug: 'browser',
+      putio_folder_name: 'browser',
+      downloadAt: '/downloads',
+      rpc_path: '/browser/transmission/rpc',
+      browser_domains: ['x.example', 'xn--bcher-kva.example'],
+    });
+    assert.deepEqual(withSites.browser_domains, ['x.example', 'xn--bcher-kva.example']);
+    assert.deepEqual(withSites.browserDomains, ['x.example', 'xn--bcher-kva.example']);
+    assert.deepEqual(store.findProfileById(withSites.id).browser_domains, ['x.example', 'xn--bcher-kva.example']);
+
+    // A profile written before the column existed reads back as "no sites"
+    // rather than null, so callers never have to guard the field.
+    const withoutSites = store.createProfile({
+      name: 'Plain',
+      type: 'custom',
+      slug: 'plain',
+      putio_folder_name: 'plain',
+      downloadAt: '/downloads',
+      rpc_path: '/plain/transmission/rpc',
+    });
+    assert.deepEqual(withoutSites.browser_domains, []);
+    assert.deepEqual(withoutSites.browserDomains, []);
+
+    const updated = store.updateProfile(withSites.id, { browser_domains: ['z.example'] });
+    assert.deepEqual(updated.browser_domains, ['z.example']);
+    assert.deepEqual(store.updateProfile(withSites.id, { browserDomains: [] }).browser_domains, []);
+
+    // An unrelated update must not wipe the sites.
+    store.updateProfile(withSites.id, { browser_domains: ['z.example'] });
+    assert.deepEqual(store.updateProfile(withSites.id, { name: 'Renamed' }).browser_domains, ['z.example']);
+  } finally {
+    store.close();
+  }
+});
+
+test('profile browser sites survive text no JSON parser can read', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = store.createProfile({
+      name: 'Browser',
+      type: 'custom',
+      slug: 'browser',
+      putio_folder_name: 'browser',
+      downloadAt: '/downloads',
+      rpc_path: '/browser/transmission/rpc',
+      browser_domains: ['x.example'],
+    });
+
+    // Nothing in putiorr writes this, which is exactly why it is worth a test:
+    // a hand-edited or half-migrated row must degrade to "no sites" instead of
+    // throwing on every profile listing.
+    for (const corrupt of ['not json', '{"domains":["x.example"]}', 'null', '["x.example", 5]']) {
+      store.db.prepare('UPDATE profiles SET browser_domains = ? WHERE id = ?').run(corrupt, profile.id);
+      const expected = corrupt === '["x.example", 5]' ? ['x.example'] : [];
+      assert.deepEqual(store.findProfileById(profile.id).browser_domains, expected, corrupt);
+    }
+  } finally {
+    store.close();
+  }
+});
