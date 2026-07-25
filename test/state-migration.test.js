@@ -397,3 +397,68 @@ test('an association-era database keeps every association id as the download id'
     store.close();
   }
 });
+
+// F3 — the chain: a pre-association database runs the association migration and
+// then the collapse in one boot, and the ids survive both hops.
+test('a pre-association database migrates through associations keeping its ids', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [profileRow({ id: 1 })],
+    transfers: [transferRow({
+      id: 5,
+      profile_id: 1,
+      putio_transfer_id: 1005,
+      lifecycle: 'downloading',
+      downloaded_ever: 120,
+    })],
+    transferFiles: [{
+      id: 9,
+      transfer_id: 5,
+      putio_file_id: 3005,
+      relative_path: 'Episode.mkv',
+      size: 500,
+      downloaded_bytes: 120,
+      status: 'pending',
+      attempts: 0,
+      error_string: '',
+      created_at: 'now',
+      updated_at: 'now',
+    }],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const row = store.findTransferById(5);
+    assert.equal(row.id, 5);
+    assert.equal(row.putio_transfer_id, 1005);
+    assert.equal(row.profile_id, 1);
+    assert.equal(row.lifecycle, 'downloading');
+    assert.deepEqual(store.listFilesForTransfer(5).map((file) => file.id), [9]);
+  } finally {
+    store.close();
+  }
+});
+
+// F7 — the direct regression test for the deleted COALESCE: a transfer with no
+// owner, in a database with more than one profile, must not come out owned by
+// whichever profile sorted first.
+test('an ownerless transfer is not adopted by the first profile in a multi-profile database', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [
+      profileRow({ id: 1, slug: 'default', name: 'Default', rpc_path: '/transmission/rpc' }),
+      profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/transmission/rpc' }),
+    ],
+    transfers: [transferRow({ id: 3, profile_id: null, putio_transfer_id: 1003 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const owners = store.db.prepare('SELECT profile_id FROM transfer_associations').all();
+    assert.deepEqual(owners.map((row) => row.profile_id), [null]);
+  } finally {
+    store.close();
+  }
+});

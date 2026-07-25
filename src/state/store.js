@@ -390,6 +390,15 @@ export class StateStore {
     ).get(name));
   }
 
+  // The owner is copied, never guessed. This used to read
+  // COALESCE(profile_id, first profile by slug then id), which is the audit's
+  // finding 2 — "the finding most likely to lose files quietly": a transfer
+  // that predates transfers.profile_id came out owned by whichever profile
+  // sorted first, and the staging folder, the download policy and the put.io
+  // folder all follow the owner. A row that stays ownerless here is handled by
+  // exactly one rule, in migrateDownloadsCollapse: one profile in the database
+  // means that profile owns it; otherwise it is quarantined for the user to
+  // reassign from the dashboard.
   migrateTransferAssociations() {
     if (this.getSetting('transfer_associations_migrated_v1') === '1') return;
 
@@ -402,10 +411,7 @@ export class StateStore {
       SELECT
         id,
         id,
-        COALESCE(
-          profile_id,
-          (SELECT id FROM profiles ORDER BY CASE WHEN slug = 'default' THEN 0 ELSE 1 END, id LIMIT 1)
-        ),
+        profile_id,
         category,
         download_dir,
         lifecycle,
