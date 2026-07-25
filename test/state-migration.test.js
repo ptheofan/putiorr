@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { StateStore } from '../src/state/store.js';
@@ -348,51 +348,138 @@ export function associationFileRow(overrides = {}) {
   };
 }
 
+
+function collapseReport(store) {
+  return JSON.parse(store.getSetting('downloads_schema_v1_report'));
+}
+
+function allRows(dbPath, sql) {
+  const db = new DatabaseSync(dbPath);
+  try {
+    return db.prepare(sql).all();
+  } finally {
+    db.close();
+  }
+}
+
 // F1
-test('a fresh database gets the current schema and no legacy tables', async () => {
+test('a fresh database gets only the collapsed schema', async () => {
   const dbPath = await tempDbPath();
   const store = new StateStore(dbPath);
   try {
     assert.equal(store.db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+    assert.equal(store.getSetting('downloads_schema_v1'), '1');
+    // A fresh database has nothing to collapse, so it records no report.
+    assert.equal(store.getSetting('downloads_schema_v1_report'), undefined);
+    assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
+
+    const downloadColumns = store.getColumns('downloads');
+    const byName = new Map(downloadColumns.map((column) => [column.name, column]));
+    assert.equal(byName.get('profile_id').notnull, 1);
+    assert.equal(byName.get('putio_transfer_id').notnull, 1);
+    assert.equal(byName.has('download_dir'), false);
+    assert.equal(byName.has('remote_id'), false);
+    assert.ok(store.getColumns('download_files').some((column) => column.name === 'download_id'));
   } finally {
     store.close();
   }
 
   const tables = tableNames(dbPath);
-  assert.ok(tables.includes('profiles'));
-  assert.ok(tables.includes('download_profiles'));
-  assert.ok(tables.includes('settings'));
+  for (const legacy of ['transfers', 'transfer_files', 'transfer_associations', 'association_files']) {
+    assert.equal(tables.includes(legacy), false, `${legacy} should never be created`);
+  }
+  assert.ok(tables.includes('downloads'));
+  assert.ok(tables.includes('download_files'));
+  assert.ok(tables.includes('orphaned_downloads'));
 });
 
 // F2
-test('an association-era database keeps every association id as the download id', async () => {
+test('an association-era database collapses keeping every id and column', async () => {
   const dbPath = await tempDbPath();
   writeLegacyDb(dbPath, {
     era: 'association',
     downloadProfiles: [{
-      id: 1,
-      name: 'Default',
-      slug: 'default',
-      created_at: 'now',
-      updated_at: 'now',
+      id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now',
     }],
     profiles: [profileRow({ id: 1, download_profile_id: 1 })],
-    transfers: [transferRow({ id: 7, putio_transfer_id: 1007 })],
-    associations: [associationRow({ id: 7, transfer_id: 7 })],
+    transfers: [
+      transferRow({ id: 7, putio_transfer_id: 1007, total_size: 900, uploaded_ever: 12, upload_speed: 3 }),
+      transferRow({
+        id: 8,
+        putio_transfer_id: 1008,
+        hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        name: 'Second.Release',
+        total_size: 700,
+      }),
+    ],
+    associations: [
+      associationRow({ id: 7, transfer_id: 7, total_size: 500 }),
+      // A null association total_size falls back to the transfer's.
+      associationRow({ id: 8, transfer_id: 8, total_size: null, category: 'movies' }),
+    ],
     associationFiles: [associationFileRow({ id: 11, transfer_id: 7 })],
   });
 
   const store = new StateStore(dbPath);
   try {
-    const row = store.findTransferById(7);
-    assert.equal(row.id, 7);
-    assert.equal(row.putio_transfer_id, 1007);
-    assert.equal(row.profile_id, 1);
-    assert.equal(row.category, 'tv');
-    assert.equal(row.lifecycle, 'downloading');
-    assert.equal(row.total_size, 500);
-    assert.equal(row.downloaded_ever, 250);
-    assert.deepEqual(store.listFilesForTransfer(7).map((file) => file.id), [11]);
+    const first = store.findTransferById(7);
+    assert.equal(first.id, 7);
+    assert.equal(first.putio_transfer_id, 1007);
+    assert.equal(first.profile_id, 1);
+    assert.equal(first.hash, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    assert.equal(first.name, 'Example.Release');
+    assert.equal(first.category, 'tv');
+    assert.equal(first.lifecycle, 'downloading');
+    assert.equal(first.putio_status, 'COMPLETED');
+    assert.equal(first.total_size, 500);
+    assert.equal(first.downloaded_ever, 250);
+    assert.equal(first.uploaded_ever, 12);
+    assert.equal(first.upload_speed, 3);
+    assert.equal(first.eta, 25);
+    assert.equal(first.created_at, '2026-01-01T00:00:00.000Z');
+    assert.equal(store.findTransferById(8).total_size, 700);
+
+    const files = store.listFilesForTransfer(7);
+    assert.deepEqual(files.map((file) => file.id), [11]);
+    assert.equal(files[0].download_id, 7);
+    assert.equal(files[0].downloaded_bytes, 250);
+
+    const report = collapseReport(store);
+    assert.equal(report.migrated, 2);
+    assert.equal(report.adoptedBySoleProfile, 0);
+    assert.deepEqual(report.extraAssociations, []);
+    assert.deepEqual(report.noPutioId, []);
+    assert.deepEqual(report.ownerless, []);
+    assert.equal(report.droppedFiles, 0);
+  } finally {
+    store.close();
+  }
+
+  const tables = tableNames(dbPath);
+  for (const legacy of ['transfers', 'transfer_files', 'transfer_associations', 'association_files']) {
+    assert.equal(tables.includes(legacy), false, `${legacy} should have been dropped`);
+  }
+});
+
+// F2b — a new download's id cannot collide with one an *arr is still holding.
+test('the collapse leaves AUTOINCREMENT above the highest migrated id', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 17, putio_transfer_id: 1017 })],
+    associations: [associationRow({ id: 17, transfer_id: 17 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const created = store.createOrUpdateTransfer({
+      profile_id: 1,
+      putio_transfer_id: 2000,
+      hash: 'cccccccccccccccccccccccccccccccccccccccc',
+      name: 'Fresh.Release',
+    });
+    assert.equal(created.id, 18);
   } finally {
     store.close();
   }
@@ -400,18 +487,29 @@ test('an association-era database keeps every association id as the download id'
 
 // F3 — the chain: a pre-association database runs the association migration and
 // then the collapse in one boot, and the ids survive both hops.
-test('a pre-association database migrates through associations keeping its ids', async () => {
+test('a pre-association database migrates through associations into downloads', async () => {
   const dbPath = await tempDbPath();
   writeLegacyDb(dbPath, {
     era: 'pre-association',
     profiles: [profileRow({ id: 1 })],
-    transfers: [transferRow({
-      id: 5,
-      profile_id: 1,
-      putio_transfer_id: 1005,
-      lifecycle: 'downloading',
-      downloaded_ever: 120,
-    })],
+    transfers: [
+      transferRow({
+        id: 5,
+        profile_id: 1,
+        putio_transfer_id: 1005,
+        lifecycle: 'downloading',
+        downloaded_ever: 120,
+      }),
+      // No owner, but there is exactly one profile in the database — which is
+      // determinism, not inference.
+      transferRow({
+        id: 6,
+        profile_id: null,
+        putio_transfer_id: 1006,
+        hash: 'dddddddddddddddddddddddddddddddddddddddd',
+        name: 'Adopted.Release',
+      }),
+    ],
     transferFiles: [{
       id: 9,
       transfer_id: 5,
@@ -435,15 +533,121 @@ test('a pre-association database migrates through associations keeping its ids',
     assert.equal(row.profile_id, 1);
     assert.equal(row.lifecycle, 'downloading');
     assert.deepEqual(store.listFilesForTransfer(5).map((file) => file.id), [9]);
+
+    assert.equal(store.findTransferById(6).profile_id, 1);
+    const report = collapseReport(store);
+    assert.equal(report.migrated, 2);
+    assert.equal(report.adoptedBySoleProfile, 1);
   } finally {
     store.close();
   }
 });
 
-// F7 — the direct regression test for the deleted COALESCE: a transfer with no
-// owner, in a database with more than one profile, must not come out owned by
-// whichever profile sorted first.
-test('an ownerless transfer is not adopted by the first profile in a multi-profile database', async () => {
+// F4
+test('only the oldest association of a put.io transfer becomes the download', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [
+      profileRow({ id: 1, download_profile_id: 1 }),
+      profileRow({
+        id: 2,
+        name: 'Radarr',
+        slug: 'radarr',
+        rpc_path: '/radarr/transmission/rpc',
+        download_at: '/movies',
+        download_profile_id: 1,
+      }),
+    ],
+    transfers: [transferRow({ id: 4, putio_transfer_id: 1004 })],
+    associations: [
+      associationRow({ id: 4, transfer_id: 4, profile_id: 1, created_at: '2026-01-01T00:00:00.000Z' }),
+      associationRow({
+        id: 5,
+        transfer_id: 4,
+        profile_id: 2,
+        category: 'films',
+        created_at: '2026-02-01T00:00:00.000Z',
+      }),
+    ],
+    associationFiles: [
+      associationFileRow({ id: 20, transfer_id: 4 }),
+      associationFileRow({ id: 21, transfer_id: 5, putio_file_id: 3002 }),
+    ],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.findTransferById(4).profile_id, 1);
+    assert.equal(store.findTransferById(5), undefined);
+    assert.deepEqual(store.listFilesForTransfer(4).map((file) => file.id), [20]);
+    assert.equal(
+      allRows(dbPath, 'SELECT id FROM download_files').some((row) => row.id === 21),
+      false,
+    );
+
+    const report = collapseReport(store);
+    assert.equal(report.migrated, 1);
+    assert.equal(report.droppedFiles, 1);
+    assert.equal(report.extraAssociations.length, 1);
+    assert.equal(report.extraAssociations[0].associationId, 5);
+    assert.equal(report.extraAssociations[0].profileName, 'Radarr');
+    assert.equal(report.extraAssociations[0].localPath, path.join('/movies', 'films', 'Example.Release'));
+    assert.equal(report.extraAssociations[0].fileCount, 1);
+
+    const quarantined = store.db.prepare('SELECT * FROM orphaned_downloads').all();
+    assert.equal(quarantined.length, 1);
+    assert.equal(quarantined[0].reason, 'extra association');
+    assert.equal(quarantined[0].putio_transfer_id, 1004);
+    assert.equal(quarantined[0].legacy_download_dir, path.join('/movies', 'films', 'Example.Release'));
+  } finally {
+    store.close();
+  }
+});
+
+// F5
+test('a transfer with no put.io id is quarantined and the unique index survives', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 3, putio_transfer_id: null })],
+    associations: [associationRow({ id: 3, transfer_id: 3 })],
+    associationFiles: [associationFileRow({ id: 30, transfer_id: 3 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.listActiveTransfers().length, 0);
+    const report = collapseReport(store);
+    assert.equal(report.migrated, 0);
+    assert.equal(report.noPutioId.length, 1);
+    assert.equal(report.noPutioId[0].associationId, 3);
+    assert.equal(report.noPutioId[0].profileName, 'Sonarr');
+    assert.equal(report.droppedFiles, 1);
+
+    const quarantined = store.db.prepare('SELECT * FROM orphaned_downloads').all();
+    assert.equal(quarantined.length, 1);
+    assert.equal(quarantined[0].reason, 'no put.io transfer id');
+    assert.equal(quarantined[0].putio_transfer_id, null);
+
+    store.createOrUpdateTransfer({
+      profile_id: 1, putio_transfer_id: 55, hash: 'e'.repeat(40), name: 'One',
+    });
+    assert.throws(
+      () => store.db.prepare(`
+        INSERT INTO downloads (profile_id, putio_transfer_id, name, created_at, updated_at)
+        VALUES (1, 55, 'Duplicate', 'now', 'now')
+      `).run(),
+      /UNIQUE constraint failed: downloads.putio_transfer_id/,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+// F7 — the direct regression test for the deleted COALESCE.
+test('an ownerless transfer in a multi-profile database is quarantined, not adopted', async () => {
   const dbPath = await tempDbPath();
   writeLegacyDb(dbPath, {
     era: 'pre-association',
@@ -456,9 +660,119 @@ test('an ownerless transfer is not adopted by the first profile in a multi-profi
 
   const store = new StateStore(dbPath);
   try {
-    const owners = store.db.prepare('SELECT profile_id FROM transfer_associations').all();
-    assert.deepEqual(owners.map((row) => row.profile_id), [null]);
+    assert.equal(store.listActiveTransfers().length, 0);
+    const report = collapseReport(store);
+    assert.equal(report.adoptedBySoleProfile, 0);
+    assert.equal(report.ownerless.length, 1);
+    assert.equal(report.ownerless[0].putioTransferId, 1003);
+
+    const quarantined = store.db.prepare('SELECT * FROM orphaned_downloads').all();
+    assert.equal(quarantined.length, 1);
+    assert.equal(quarantined[0].reason, 'no owner');
+    assert.equal(quarantined[0].name, 'Example.Release');
   } finally {
     store.close();
+  }
+});
+
+// F8
+test('the collapse is idempotent and does not back up again on the second boot', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 2, putio_transfer_id: 1002 })],
+    associations: [associationRow({ id: 2, transfer_id: 2 })],
+  });
+
+  const first = new StateStore(dbPath);
+  const firstReport = first.getSetting('downloads_schema_v1_report');
+  first.close();
+  const backupsAfterFirst = (await readdir(path.dirname(dbPath)))
+    .filter((name) => name.includes('.pre-downloads-'));
+
+  const second = new StateStore(dbPath);
+  try {
+    assert.equal(second.getSetting('downloads_schema_v1_report'), firstReport);
+    assert.equal(second.findTransferById(2).id, 2);
+  } finally {
+    second.close();
+  }
+  const backupsAfterSecond = (await readdir(path.dirname(dbPath)))
+    .filter((name) => name.includes('.pre-downloads-'));
+  assert.equal(backupsAfterFirst.length, 1);
+  assert.deepEqual(backupsAfterSecond, backupsAfterFirst);
+});
+
+// F9 — a half-migrated database must be impossible.
+test('a failure during the collapse rolls the whole database back', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 2, putio_transfer_id: 1002 })],
+    associations: [associationRow({ id: 2, transfer_id: 2 })],
+    associationFiles: [associationFileRow({ id: 40, transfer_id: 2 })],
+  });
+
+  class ExplodingStore extends StateStore {
+    collapseTransfersIntoDownloads() {
+      const report = super.collapseTransfersIntoDownloads();
+      throw new Error(`boom after migrating ${report.migrated}`);
+    }
+  }
+
+  assert.throws(() => new ExplodingStore(dbPath), /boom after migrating 1/);
+
+  const tables = tableNames(dbPath);
+  assert.ok(tables.includes('transfers'));
+  assert.ok(tables.includes('transfer_associations'));
+  assert.ok(tables.includes('association_files'));
+  assert.equal(allRows(dbPath, 'SELECT id FROM transfer_associations').length, 1);
+  assert.equal(allRows(dbPath, 'SELECT id FROM association_files').length, 1);
+  assert.equal(allRows(dbPath, 'SELECT id FROM downloads').length, 0);
+  assert.equal(
+    allRows(dbPath, "SELECT value FROM settings WHERE key = 'downloads_schema_v1'").length,
+    0,
+  );
+
+  // The next boot finishes the job.
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.findTransferById(2).id, 2);
+    assert.equal(store.getSetting('downloads_schema_v1'), '1');
+  } finally {
+    store.close();
+  }
+});
+
+// F11
+test('the collapse backs the database up first, and never for :memory:', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 2, putio_transfer_id: 1002 })],
+    associations: [associationRow({ id: 2, transfer_id: 2 })],
+  });
+
+  const store = new StateStore(dbPath);
+  store.close();
+
+  const backups = (await readdir(path.dirname(dbPath)))
+    .filter((name) => name.includes('.pre-downloads-') && name.endsWith('.bak'));
+  assert.equal(backups.length, 1);
+  const backup = new DatabaseSync(path.join(path.dirname(dbPath), backups[0]));
+  try {
+    assert.equal(backup.prepare('SELECT COUNT(*) AS total FROM transfer_associations').get().total, 1);
+  } finally {
+    backup.close();
+  }
+
+  const memory = new StateStore(':memory:');
+  try {
+    assert.equal(memory.backupBeforeCollapse(), undefined);
+  } finally {
+    memory.close();
   }
 });

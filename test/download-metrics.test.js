@@ -67,7 +67,7 @@ function createDownloadingTransfer(store) {
     eta: -1,
   });
   const file = store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 81,
     relative_path: 'movie.mkv',
     size: 1_000,
@@ -160,7 +160,7 @@ test('dashboard reports multi-file progress details', async () => {
 
     for (let index = 1; index <= 15; index += 1) {
       harness.store.upsertTransferFile({
-        transfer_id: transfer.id,
+        download_id: transfer.id,
         putio_file_id: 1_000 + index,
         relative_path: `Feature/file-${String(index).padStart(2, '0')}.mkv`,
         size: 600,
@@ -171,7 +171,7 @@ test('dashboard reports multi-file progress details', async () => {
 
     for (let index = 1; index <= 6; index += 1) {
       harness.store.upsertTransferFile({
-        transfer_id: transfer.id,
+        download_id: transfer.id,
         putio_file_id: 2_000 + index,
         relative_path: `Extras/extra-${String(index).padStart(2, '0')}.mkv`,
         size: 500,
@@ -181,7 +181,7 @@ test('dashboard reports multi-file progress details', async () => {
     }
 
     const activeFile = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 3_001,
       relative_path: 'Feature/currently-copying.mkv',
       size: 1_700,
@@ -263,7 +263,6 @@ test('poll prunes processed transfers after local staging data disappears', asyn
       hash: 'prunemissinglocalhash',
       name: 'Prune.Missing.Local.Release',
       category: 'radarr',
-      download_dir: path.join(harness.config.targetDir, 'radarr'),
       lifecycle: 'processed',
       putio_status: 'COMPLETED',
       percent_done: 100,
@@ -271,7 +270,7 @@ test('poll prunes processed transfers after local staging data disappears', asyn
       downloaded_ever: 5,
     });
     harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 24,
       relative_path: 'movie.mkv',
       size: 5,
@@ -313,31 +312,20 @@ test('poll prunes processed transfers after local staging data disappears', asyn
 // downloads forward, so anything that throws inside it stops every download on
 // the box. Both sweeps below used to propagate out of pollOnce on their first
 // bad row and take the whole cycle with them, every tick, forever.
-test('a put.io transfer that collides with a stored row does not stop the refresh', async () => {
+test('one put.io transfer that fails to refresh does not stop the poll', async () => {
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    // A row that already owns the hash put.io is about to report for a
-    // different transfer id...
-    harness.store.createOrUpdateTransfer({
-      profile_id: profile.id,
-      putio_transfer_id: 5,
-      save_parent_id: 42,
-      hash: 'collidinghash',
-      name: 'Colliding.Release',
-      lifecycle: 'remote',
-    });
-    // ...and an orphaned remote row that already owns that transfer id, so
-    // adopting the remote transfer trips transfers.putio_transfer_id UNIQUE.
-    const orphan = harness.store.createOrUpdateTransfer({
-      profile_id: profile.id,
-      putio_transfer_id: 6,
-      save_parent_id: 42,
-      hash: 'orphanedhash',
-      name: 'Orphaned.Release',
-      lifecycle: 'remote',
-    });
-    harness.store.deleteTransfer(orphan.id);
+    // The reproducible case used to be a hash colliding with another row's
+    // put.io id. Phase 3 removed UNIQUE(hash) and resolves rows by put.io id
+    // alone, so that particular collision is gone — but the poll is still the
+    // only thing that advances every download on the box, and any row that
+    // throws must stay one row's problem.
+    const upsert = harness.store.createOrUpdateTransfer.bind(harness.store);
+    harness.store.createOrUpdateTransfer = (input) => {
+      if (input.putio_transfer_id === 6) throw new Error('UNIQUE constraint failed: downloads.putio_transfer_id');
+      return upsert(input);
+    };
 
     harness.putio.remoteTransfers = [
       { id: 6, fileId: 61, saveParentId: 42, hash: 'collidinghash', name: 'Colliding.Release', status: 'COMPLETED', percentDone: 100 },
@@ -352,11 +340,14 @@ test('a put.io transfer that collides with a stored row does not stop the refres
       rows = await harness.service.refreshRemoteTransfers();
     } finally {
       console.log = originalLog;
+      harness.store.createOrUpdateTransfer = upsert;
     }
 
     // The healthy transfer behind the bad one still gets processed.
     assert.ok(rows.some((row) => row.hash === 'healthyhash'));
     assert.ok(harness.store.findTransferByHash('healthyhash'));
+    assert.equal(harness.store.findTransferByPutioId(6), undefined);
+    assert.equal(profile.id > 0, true);
     const logged = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'skipped put.io transfer that failed to refresh');
     assert.equal(logged.meta.putioTransferId, 6);
@@ -494,8 +485,17 @@ test('a transient prune failure is left for the next tick and does not abort the
 // whichever profile sorted first — which is not type-filtered, so a Putiorr
 // Grab profile could become the fallback owner of an *arr download and stage
 // its files into a folder no *arr imports from, with no error and no log line.
+//
+// Phase 3 makes downloads.profile_id NOT NULL REFERENCES profiles(id) ON DELETE
+// RESTRICT, so this state is no longer reachable through the store's API — the
+// upsert refuses it and the profile delete is refused while it exists. It is
+// still reachable by hand-editing the database, which is what the checks below
+// are now defending against, so the fixture reaches for the same back door a
+// user with sqlite3 would.
 function createOwnerlessTransfer(store, patch = {}) {
-  return store.createOrUpdateTransfer({
+  const owner = store.findProfileBySlug('default');
+  const row = store.createOrUpdateTransfer({
+    profile_id: owner.id,
     putio_transfer_id: 55,
     putio_file_id: 56,
     save_parent_id: 42,
@@ -506,6 +506,10 @@ function createOwnerlessTransfer(store, patch = {}) {
     percent_done: 100,
     ...patch,
   });
+  store.db.exec('PRAGMA foreign_keys = OFF');
+  store.db.prepare('UPDATE downloads SET profile_id = 999999 WHERE id = ?').run(row.id);
+  store.db.exec('PRAGMA foreign_keys = ON');
+  return store.findTransferById(row.id);
 }
 
 test('preparing a download with no owning profile fails loudly instead of borrowing one', async () => {

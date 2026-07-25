@@ -9,6 +9,129 @@ import {
   normalizeDownloadPolicy,
 } from '../download/policy.js';
 import { normalizeBrowserDomains } from '../transfer/browser-domains.js';
+import { logger } from '../logger.js';
+
+// One download item, one owning profile, one put.io transfer (design rules 1
+// and 3). This replaced the transfers/transfer_associations split, whose only
+// job was to let one put.io transfer belong to several profiles at once —
+// something the ownership rules make unrepresentable. `id` is the id
+// torrent-add handed the *arr apps, so the collapse copies it across verbatim.
+const DOWNLOADS_DDL = `
+  CREATE TABLE IF NOT EXISTS downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_id INTEGER NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+    putio_transfer_id INTEGER NOT NULL UNIQUE,
+    putio_file_id INTEGER,
+    save_parent_id INTEGER,
+    hash TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    source_type TEXT NOT NULL DEFAULT 'unknown',
+    category TEXT NOT NULL DEFAULT '',
+    lifecycle TEXT NOT NULL DEFAULT 'remote',
+    putio_status TEXT NOT NULL DEFAULT 'UNKNOWN',
+    putio_status_message TEXT NOT NULL DEFAULT '',
+    putio_peers INTEGER NOT NULL DEFAULT 0,
+    putio_availability INTEGER NOT NULL DEFAULT 0,
+    percent_done INTEGER NOT NULL DEFAULT 0,
+    completion_percent INTEGER NOT NULL DEFAULT 0,
+    total_size INTEGER NOT NULL DEFAULT 0,
+    downloaded_ever INTEGER NOT NULL DEFAULT 0,
+    uploaded_ever INTEGER NOT NULL DEFAULT 0,
+    download_speed INTEGER NOT NULL DEFAULT 0,
+    upload_speed INTEGER NOT NULL DEFAULT 0,
+    eta INTEGER NOT NULL DEFAULT -1,
+    error INTEGER NOT NULL DEFAULT 0,
+    error_string TEXT NOT NULL DEFAULT '',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    removed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_downloads_profile_id ON downloads(profile_id);
+  CREATE INDEX IF NOT EXISTS idx_downloads_lifecycle ON downloads(lifecycle);
+  CREATE INDEX IF NOT EXISTS idx_downloads_hash ON downloads(hash);
+
+  CREATE TABLE IF NOT EXISTS download_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    download_id INTEGER NOT NULL REFERENCES downloads(id) ON DELETE CASCADE,
+    putio_file_id INTEGER NOT NULL,
+    relative_path TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+    download_speed INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error_string TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(download_id, putio_file_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_download_files_download_id ON download_files(download_id);
+  CREATE INDEX IF NOT EXISTS idx_download_files_status ON download_files(status);
+
+  CREATE TABLE IF NOT EXISTS orphaned_downloads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    putio_transfer_id INTEGER,
+    hash TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',
+    source_type TEXT NOT NULL DEFAULT 'unknown',
+    category TEXT NOT NULL DEFAULT '',
+    lifecycle TEXT NOT NULL DEFAULT 'remote',
+    total_size INTEGER NOT NULL DEFAULT 0,
+    downloaded_ever INTEGER NOT NULL DEFAULT 0,
+    putio_file_id INTEGER,
+    save_parent_id INTEGER,
+    legacy_download_dir TEXT NOT NULL DEFAULT '',
+    quarantined_at TEXT NOT NULL,
+    reason TEXT NOT NULL
+  );
+`;
+
+// Created by the one-shot transfers -> transfer_associations migration rather
+// than by migrate(), because a database that has never seen them must never
+// gain them: they exist only as the middle hop of the chain
+// (pre-association DB -> associations -> downloads) that runs in a single boot.
+const LEGACY_ASSOCIATIONS_DDL = `
+  CREATE TABLE IF NOT EXISTS transfer_associations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_id INTEGER NOT NULL REFERENCES transfers(id) ON DELETE CASCADE,
+    profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
+    category TEXT NOT NULL DEFAULT '',
+    download_dir TEXT NOT NULL DEFAULT '',
+    lifecycle TEXT NOT NULL DEFAULT 'remote',
+    total_size INTEGER,
+    downloaded_ever INTEGER NOT NULL DEFAULT 0,
+    download_speed INTEGER NOT NULL DEFAULT 0,
+    eta INTEGER NOT NULL DEFAULT -1,
+    error INTEGER NOT NULL DEFAULT 0,
+    error_string TEXT NOT NULL DEFAULT '',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    removed_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(transfer_id, profile_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS association_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_id INTEGER NOT NULL REFERENCES transfer_associations(id) ON DELETE CASCADE,
+    putio_file_id INTEGER NOT NULL,
+    relative_path TEXT NOT NULL,
+    size INTEGER NOT NULL DEFAULT 0,
+    downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+    download_speed INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error_string TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(transfer_id, putio_file_id)
+  );
+`;
 
 function nowIso() {
   return new Date().toISOString();
@@ -250,109 +373,7 @@ export class StateStore {
         updated_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS transfers (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
-        putio_transfer_id INTEGER UNIQUE,
-        putio_file_id INTEGER,
-        save_parent_id INTEGER,
-        hash TEXT NOT NULL UNIQUE,
-        name TEXT NOT NULL,
-        source TEXT,
-        source_type TEXT NOT NULL DEFAULT 'unknown',
-        category TEXT NOT NULL DEFAULT '',
-        download_dir TEXT NOT NULL DEFAULT '',
-        lifecycle TEXT NOT NULL DEFAULT 'remote',
-        putio_status TEXT NOT NULL DEFAULT 'UNKNOWN',
-        putio_status_message TEXT NOT NULL DEFAULT '',
-        putio_peers INTEGER NOT NULL DEFAULT 0,
-        putio_availability INTEGER NOT NULL DEFAULT 0,
-        percent_done INTEGER NOT NULL DEFAULT 0,
-        completion_percent INTEGER NOT NULL DEFAULT 0,
-        total_size INTEGER NOT NULL DEFAULT 0,
-        downloaded_ever INTEGER NOT NULL DEFAULT 0,
-        uploaded_ever INTEGER NOT NULL DEFAULT 0,
-        download_speed INTEGER NOT NULL DEFAULT 0,
-        upload_speed INTEGER NOT NULL DEFAULT 0,
-        eta INTEGER NOT NULL DEFAULT -1,
-        error INTEGER NOT NULL DEFAULT 0,
-        error_string TEXT NOT NULL DEFAULT '',
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        removed_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_transfers_hash ON transfers(hash);
-      CREATE INDEX IF NOT EXISTS idx_transfers_profile_id ON transfers(profile_id);
-      CREATE INDEX IF NOT EXISTS idx_transfers_putio_status ON transfers(putio_status);
-      CREATE INDEX IF NOT EXISTS idx_transfers_lifecycle ON transfers(lifecycle);
-
-      CREATE TABLE IF NOT EXISTS transfer_files (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        transfer_id INTEGER NOT NULL REFERENCES transfers(id) ON DELETE CASCADE,
-        putio_file_id INTEGER NOT NULL UNIQUE,
-        relative_path TEXT NOT NULL,
-        size INTEGER NOT NULL DEFAULT 0,
-        downloaded_bytes INTEGER NOT NULL DEFAULT 0,
-        download_speed INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'pending',
-        attempts INTEGER NOT NULL DEFAULT 0,
-        error_string TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_transfer_files_transfer_id ON transfer_files(transfer_id);
-      CREATE INDEX IF NOT EXISTS idx_transfer_files_status ON transfer_files(status);
-
-      CREATE TABLE IF NOT EXISTS transfer_associations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        transfer_id INTEGER NOT NULL REFERENCES transfers(id) ON DELETE CASCADE,
-        profile_id INTEGER REFERENCES profiles(id) ON DELETE SET NULL,
-        category TEXT NOT NULL DEFAULT '',
-        download_dir TEXT NOT NULL DEFAULT '',
-        lifecycle TEXT NOT NULL DEFAULT 'remote',
-        total_size INTEGER,
-        downloaded_ever INTEGER NOT NULL DEFAULT 0,
-        download_speed INTEGER NOT NULL DEFAULT 0,
-        eta INTEGER NOT NULL DEFAULT -1,
-        error INTEGER NOT NULL DEFAULT 0,
-        error_string TEXT NOT NULL DEFAULT '',
-        retry_count INTEGER NOT NULL DEFAULT 0,
-        removed_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(transfer_id, profile_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_transfer_associations_transfer_id
-        ON transfer_associations(transfer_id);
-      CREATE INDEX IF NOT EXISTS idx_transfer_associations_profile_id
-        ON transfer_associations(profile_id);
-      CREATE INDEX IF NOT EXISTS idx_transfer_associations_lifecycle
-        ON transfer_associations(lifecycle);
-
-      CREATE TABLE IF NOT EXISTS association_files (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        transfer_id INTEGER NOT NULL REFERENCES transfer_associations(id) ON DELETE CASCADE,
-        putio_file_id INTEGER NOT NULL,
-        relative_path TEXT NOT NULL,
-        size INTEGER NOT NULL DEFAULT 0,
-        downloaded_bytes INTEGER NOT NULL DEFAULT 0,
-        download_speed INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'pending',
-        attempts INTEGER NOT NULL DEFAULT 0,
-        error_string TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(transfer_id, putio_file_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_association_files_transfer_id
-        ON association_files(transfer_id);
-      CREATE INDEX IF NOT EXISTS idx_association_files_status
-        ON association_files(status);
+      ${DOWNLOADS_DDL}
     `);
     this.migrateProfileDownloadAt();
     this.migrateProfileAutoRemoveCompleted();
@@ -376,12 +397,13 @@ export class StateStore {
     if (this.hasTable('transfer_files')) {
       this.ensureColumn('transfer_files', 'download_speed', 'INTEGER NOT NULL DEFAULT 0');
     }
-    if (this.hasTable('transfers') && this.hasTable('transfer_files')) {
-      this.migrateTransferAssociations();
-    }
     if (this.hasTable('transfers')) {
+      this.migrateTransferAssociations();
+      // Must run before the collapse: it rewrites transfers.hash in place, and
+      // after the collapse there is no transfers table left to rewrite.
       this.migrateMagnetTransferHashes();
     }
+    this.migrateDownloadsCollapse();
   }
 
   hasTable(name) {
@@ -402,6 +424,7 @@ export class StateStore {
   migrateTransferAssociations() {
     if (this.getSetting('transfer_associations_migrated_v1') === '1') return;
 
+    this.db.exec(LEGACY_ASSOCIATIONS_DDL);
     this.db.exec(`
       INSERT OR IGNORE INTO transfer_associations (
         id, transfer_id, profile_id, category, download_dir, lifecycle,
@@ -426,7 +449,12 @@ export class StateStore {
         created_at,
         updated_at
       FROM transfers;
-
+    `);
+    if (!this.hasTable('transfer_files')) {
+      this.setSetting('transfer_associations_migrated_v1', '1');
+      return;
+    }
+    this.db.exec(`
       INSERT OR IGNORE INTO association_files (
         id, transfer_id, putio_file_id, relative_path, size, downloaded_bytes,
         download_speed, status, attempts, error_string, created_at, updated_at
@@ -448,6 +476,302 @@ export class StateStore {
       JOIN transfer_associations ta ON ta.transfer_id = tf.transfer_id;
     `);
     this.setSetting('transfer_associations_migrated_v1', '1');
+  }
+
+  // The only safe way to back up a WAL database from inside the process: copying
+  // the .sqlite file alone loses whatever is still in the write-ahead log.
+  // VACUUM INTO cannot run inside a transaction and refuses an existing target,
+  // hence the timestamp. Never deleted automatically — a NAS user who discovers
+  // a problem a week later still has it.
+  backupBeforeCollapse() {
+    if (this.filePath === ':memory:') return undefined;
+    const target = `${this.filePath}.pre-downloads-${Date.now()}.bak`;
+    this.db.exec(`VACUUM INTO '${target.replace(/'/g, "''")}'`);
+    logger.info('database backed up before the downloads schema migration', { target });
+    return target;
+  }
+
+  // transfers + transfer_associations -> downloads, in one transaction.
+  //
+  // Both settings writes are inside it. The older association migration writes
+  // its key outside and gets away with it because INSERT OR IGNORE makes it
+  // idempotent; this one drops tables, so a crash between the commit and the
+  // key write would re-run it against a database that no longer has the source
+  // tables. DDL is transactional in SQLite, so there are exactly two outcomes:
+  // the whole collapse commits, or the database is byte-identical to before and
+  // the next boot retries.
+  //
+  // The foreign_keys toggle brackets the transaction rather than sitting inside
+  // it: PRAGMA foreign_keys is a no-op while a transaction is open. It is
+  // restored in a finally, because leaving foreign keys off for the process
+  // lifetime would turn ON DELETE RESTRICT into decoration.
+  migrateDownloadsCollapse() {
+    if (this.getSetting('downloads_schema_v1') === '1') return;
+    if (!this.hasTable('transfer_associations')) {
+      this.setSetting('downloads_schema_v1', '1');
+      return;
+    }
+
+    this.backupBeforeCollapse();
+    this.db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const report = this.collapseTransfersIntoDownloads();
+        const dangling = this.db.prepare('PRAGMA foreign_key_check').all();
+        if (dangling.length > 0) {
+          throw new Error(
+            `downloads schema migration left ${dangling.length} dangling reference(s): `
+            + `${JSON.stringify(dangling)}`,
+          );
+        }
+        this.setSetting('downloads_schema_v1', '1');
+        this.setSetting('downloads_schema_v1_report', JSON.stringify(report));
+        this.db.exec('COMMIT');
+        this.logCollapseReport(report);
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
+
+  // Row by row in JS rather than one INSERT ... SELECT. The tables hold
+  // hundreds of rows on a real install, and the loop is what makes the report —
+  // which profile, which local path, which put.io id — possible at all.
+  //
+  // Nothing on disk is touched. Every row this cannot represent is moved to
+  // orphaned_downloads for the user to reassign or delete from the dashboard;
+  // its files stay exactly where they are.
+  collapseTransfersIntoDownloads() {
+    const timestamp = nowIso();
+    const profiles = this.db.prepare('SELECT id, name, download_at FROM profiles').all();
+    const profilesById = new Map(profiles.map((profile) => [profile.id, profile]));
+    // Not a guess: "the database has exactly one profile" is the same
+    // determinism the shared RPC endpoint uses. Anything less certain is
+    // quarantined instead.
+    const soleProfileId = profiles.length === 1 ? profiles[0].id : null;
+
+    const associations = this.db.prepare(`
+      SELECT
+        a.id, a.transfer_id, a.profile_id, a.category, a.download_dir, a.lifecycle,
+        a.total_size, a.downloaded_ever, a.download_speed, a.eta, a.error,
+        a.error_string, a.retry_count, a.removed_at, a.created_at, a.updated_at,
+        r.putio_transfer_id, r.putio_file_id, r.save_parent_id, r.hash, r.name,
+        r.source, r.source_type, r.putio_status, r.putio_status_message,
+        r.putio_peers, r.putio_availability, r.percent_done, r.completion_percent,
+        r.total_size AS remote_total_size, r.uploaded_ever, r.upload_speed
+      FROM transfer_associations a
+      JOIN transfers r ON r.id = a.transfer_id
+      ORDER BY a.transfer_id ASC, a.created_at ASC, a.id ASC
+    `).all();
+
+    const countFiles = this.db.prepare(
+      'SELECT COUNT(*) AS total FROM association_files WHERE transfer_id = ?',
+    );
+    const insertDownload = this.db.prepare(`
+      INSERT INTO downloads (
+        id, profile_id, putio_transfer_id, putio_file_id, save_parent_id, hash, name,
+        source, source_type, category, lifecycle, putio_status, putio_status_message,
+        putio_peers, putio_availability, percent_done, completion_percent, total_size,
+        downloaded_ever, uploaded_ever, download_speed, upload_speed, eta, error,
+        error_string, retry_count, removed_at, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const copyFiles = this.db.prepare(`
+      INSERT INTO download_files (
+        id, download_id, putio_file_id, relative_path, size, downloaded_bytes,
+        download_speed, status, attempts, error_string, created_at, updated_at
+      )
+      SELECT
+        id, transfer_id, putio_file_id, relative_path, size, downloaded_bytes,
+        download_speed, status, attempts, error_string, created_at, updated_at
+      FROM association_files
+      WHERE transfer_id = ?
+    `);
+    const quarantine = this.db.prepare(`
+      INSERT INTO orphaned_downloads (
+        putio_transfer_id, hash, name, source, source_type, category, lifecycle,
+        total_size, downloaded_ever, putio_file_id, save_parent_id,
+        legacy_download_dir, quarantined_at, reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const report = {
+      version: 1,
+      at: timestamp,
+      migrated: 0,
+      adoptedBySoleProfile: 0,
+      extraAssociations: [],
+      noPutioId: [],
+      ownerless: [],
+      droppedFiles: 0,
+    };
+    const claimedTransferIds = new Set();
+
+    for (const row of associations) {
+      const fileCount = Number(countFiles.get(row.id)?.total ?? 0);
+      const owner = row.profile_id == null ? undefined : profilesById.get(row.profile_id);
+      const localPath = this.legacyLocalPath(row, owner);
+
+      // The oldest association of a put.io transfer is the download; rule 1
+      // makes the rest unrepresentable, so they are quarantined rather than
+      // silently merged into the survivor.
+      if (claimedTransferIds.has(row.transfer_id)) {
+        report.extraAssociations.push({
+          associationId: row.id,
+          transferId: row.transfer_id,
+          putioTransferId: row.putio_transfer_id,
+          profileId: row.profile_id,
+          profileName: owner?.name ?? null,
+          name: row.name,
+          localPath,
+          fileCount,
+        });
+        this.quarantineLegacyRow(quarantine, row, localPath, 'extra association', timestamp);
+        report.droppedFiles += fileCount;
+        continue;
+      }
+      claimedTransferIds.add(row.transfer_id);
+
+      // Rule 3: put.io's transfer id is the download's identity. A row without
+      // one cannot be matched against put.io ever again.
+      if (row.putio_transfer_id == null) {
+        report.noPutioId.push({
+          associationId: row.id,
+          profileId: row.profile_id,
+          profileName: owner?.name ?? null,
+          name: row.name,
+          localPath,
+          fileCount,
+        });
+        this.quarantineLegacyRow(quarantine, row, localPath, 'no put.io transfer id', timestamp);
+        report.droppedFiles += fileCount;
+        continue;
+      }
+
+      // A profile_id pointing at a row that is gone should be impossible — the
+      // old FK was ON DELETE SET NULL — but foreign keys have been off during
+      // at least one legacy ALTER in this codebase's history, and the check is
+      // the difference between a report line and a constraint failure that
+      // aborts the whole upgrade.
+      let profileId = owner?.id ?? null;
+      if (profileId == null && soleProfileId != null) {
+        profileId = soleProfileId;
+        report.adoptedBySoleProfile += 1;
+      }
+      if (profileId == null) {
+        report.ownerless.push({
+          associationId: row.id,
+          putioTransferId: row.putio_transfer_id,
+          name: row.name,
+          localPath,
+          fileCount,
+        });
+        this.quarantineLegacyRow(quarantine, row, localPath, 'no owner', timestamp);
+        report.droppedFiles += fileCount;
+        continue;
+      }
+
+      insertDownload.run(
+        row.id,
+        profileId,
+        row.putio_transfer_id,
+        row.putio_file_id ?? null,
+        row.save_parent_id ?? null,
+        row.hash ?? '',
+        row.name,
+        row.source ?? '',
+        row.source_type ?? 'unknown',
+        row.category ?? '',
+        row.lifecycle ?? 'remote',
+        row.putio_status ?? 'UNKNOWN',
+        row.putio_status_message ?? '',
+        row.putio_peers ?? 0,
+        row.putio_availability ?? 0,
+        row.percent_done ?? 0,
+        row.completion_percent ?? 0,
+        row.total_size ?? row.remote_total_size ?? 0,
+        row.downloaded_ever ?? 0,
+        row.uploaded_ever ?? 0,
+        row.download_speed ?? 0,
+        row.upload_speed ?? 0,
+        row.eta ?? -1,
+        row.error ?? 0,
+        row.error_string ?? '',
+        row.retry_count ?? 0,
+        row.removed_at ?? null,
+        row.created_at,
+        row.updated_at,
+      );
+      copyFiles.run(row.id);
+      report.migrated += 1;
+    }
+
+    // Dependency order, with foreign keys already off. Load-bearing if anyone
+    // ever turns them back on inside this block: dropping a parent performs an
+    // implicit DELETE FROM, which cascades into the children.
+    this.db.exec(`
+      DROP TABLE IF EXISTS association_files;
+      DROP TABLE IF EXISTS transfer_associations;
+      DROP TABLE IF EXISTS transfer_files;
+      DROP TABLE IF EXISTS transfers;
+    `);
+    return report;
+  }
+
+  // The design asks the log to name the profile and the local path so a user
+  // can find the files a quarantined row left behind. The stored download_dir
+  // is what the *arr asked for, which is the right answer when the owner is
+  // unknown; when it is known, the folder the files actually staged into is
+  // the profile's own.
+  legacyLocalPath(row, owner) {
+    if (owner?.download_at) {
+      return path.join(owner.download_at, row.category ?? '', row.name ?? '');
+    }
+    if (row.download_dir) return path.join(row.download_dir, row.name ?? '');
+    return row.name ?? '';
+  }
+
+  quarantineLegacyRow(statement, row, localPath, reason, timestamp) {
+    statement.run(
+      row.putio_transfer_id ?? null,
+      row.hash ?? '',
+      row.name ?? '',
+      row.source ?? '',
+      row.source_type ?? 'unknown',
+      row.category ?? '',
+      row.lifecycle ?? 'remote',
+      row.total_size ?? row.remote_total_size ?? 0,
+      row.downloaded_ever ?? 0,
+      row.putio_file_id ?? null,
+      row.save_parent_id ?? null,
+      localPath,
+      timestamp,
+      reason,
+    );
+  }
+
+  logCollapseReport(report) {
+    for (const entry of report.extraAssociations) {
+      logger.warn('download quarantined: its put.io transfer already belongs to another profile', entry);
+    }
+    for (const entry of report.noPutioId) {
+      logger.warn('download quarantined: no put.io transfer id to identify it by', entry);
+    }
+    for (const entry of report.ownerless) {
+      logger.warn('download quarantined: no owning RR profile', entry);
+    }
+    logger.info('downloads schema migration completed', {
+      migrated: report.migrated,
+      adoptedBySoleProfile: report.adoptedBySoleProfile,
+      quarantined: report.extraAssociations.length + report.noPutioId.length + report.ownerless.length,
+      droppedFiles: report.droppedFiles,
+    });
   }
 
   getColumns(table) {
@@ -753,8 +1077,11 @@ export class StateStore {
   }
 
   deleteProfile(id) {
+    // Kept alongside ON DELETE RESTRICT rather than replaced by it: the bare
+    // constraint yields "FOREIGN KEY constraint failed", and this sentence is
+    // what the dashboard shows.
     const linked = this.db.prepare(`
-      SELECT 1 FROM transfer_associations WHERE profile_id = ? LIMIT 1
+      SELECT 1 FROM downloads WHERE profile_id = ? LIMIT 1
     `).get(id);
     if (linked) throw new Error('RR profile cannot be deleted while downloads still reference it');
     this.db.prepare('DELETE FROM profiles WHERE id = ?').run(id);
@@ -794,27 +1121,35 @@ export class StateStore {
     }
   }
 
+  // One put.io transfer, one download row (design rule 3), so the put.io
+  // transfer id is the only thing this resolves on. The old hash-first lookup
+  // is gone with UNIQUE(hash): across a non-unique column it would return an
+  // arbitrary row, and the hash is informational from here on.
   createOrUpdateTransfer(input) {
     const timestamp = nowIso();
-    const hash = normalizeHash(input.hash);
-    if (!hash) throw new Error('transfer hash is required');
-    let remote = this.findRemoteTransferByHash(hash)
-      ?? (input.putio_transfer_id ? this.findRemoteTransferByPutioId(input.putio_transfer_id) : undefined);
+    const putioTransferId = input.putio_transfer_id;
+    // Without an id from put.io the row can never be matched against put.io
+    // again — it is one of the un-prunable zombies the collapse just removed,
+    // and admitting a new one re-opens the hole.
+    if (putioTransferId == null) throw new Error('put.io transfer id is required');
+    const existing = this.db.prepare('SELECT * FROM downloads WHERE putio_transfer_id = ?')
+      .get(putioTransferId);
 
-    if (!remote) {
+    if (!existing) {
+      if (input.profile_id == null) throw new Error('profile id is required');
+      const hash = normalizeHash(input.hash);
       const result = this.db.prepare(`
-        INSERT INTO transfers (
+        INSERT INTO downloads (
           profile_id, putio_transfer_id, putio_file_id, save_parent_id, hash, name, source,
-          source_type, category, download_dir, lifecycle, putio_status,
-          putio_status_message, putio_peers, putio_availability, percent_done, completion_percent,
-          total_size, downloaded_ever, uploaded_ever,
-          download_speed, upload_speed, eta, error, error_string,
-          created_at, updated_at
+          source_type, category, lifecycle, putio_status, putio_status_message,
+          putio_peers, putio_availability, percent_done, completion_percent,
+          total_size, downloaded_ever, uploaded_ever, download_speed, upload_speed,
+          eta, error, error_string, retry_count, created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        input.profile_id ?? null,
-        input.putio_transfer_id ?? null,
+        input.profile_id,
+        putioTransferId,
         input.putio_file_id ?? null,
         input.save_parent_id ?? null,
         hash,
@@ -822,7 +1157,6 @@ export class StateStore {
         input.source ?? '',
         input.source_type ?? 'unknown',
         input.category ?? '',
-        input.download_dir ?? '',
         input.lifecycle ?? 'remote',
         input.putio_status ?? 'UNKNOWN',
         input.putio_status_message ?? '',
@@ -838,78 +1172,6 @@ export class StateStore {
         input.eta ?? -1,
         input.error ? 1 : 0,
         input.error_string ?? '',
-        timestamp,
-        timestamp,
-      );
-      remote = this.findRemoteTransferById(Number(result.lastInsertRowid));
-    } else {
-      const merged = {
-        putio_transfer_id: input.putio_transfer_id ?? remote.putio_transfer_id,
-        putio_file_id: input.putio_file_id ?? remote.putio_file_id,
-        save_parent_id: input.save_parent_id ?? remote.save_parent_id,
-        name: input.name ?? remote.name,
-        source: input.source ?? remote.source,
-        source_type: input.source_type ?? remote.source_type,
-        putio_status: input.putio_status ?? remote.putio_status,
-        putio_status_message: input.putio_status_message ?? remote.putio_status_message,
-        putio_peers: input.putio_peers ?? remote.putio_peers,
-        putio_availability: input.putio_availability ?? remote.putio_availability,
-        percent_done: input.percent_done ?? remote.percent_done,
-        completion_percent: input.completion_percent ?? remote.completion_percent,
-        total_size: input.total_size ?? input.size ?? remote.total_size,
-        uploaded_ever: input.uploaded_ever ?? remote.uploaded_ever,
-        upload_speed: input.upload_speed ?? remote.upload_speed,
-      };
-      this.db.prepare(`
-        UPDATE transfers
-        SET putio_transfer_id = ?, putio_file_id = ?, save_parent_id = ?, name = ?,
-            source = ?, source_type = ?, putio_status = ?, putio_status_message = ?,
-            putio_peers = ?, putio_availability = ?, percent_done = ?, completion_percent = ?,
-            total_size = ?, uploaded_ever = ?, upload_speed = ?,
-            updated_at = ?
-        WHERE id = ?
-      `).run(
-        merged.putio_transfer_id,
-        merged.putio_file_id,
-        merged.save_parent_id,
-        merged.name,
-        merged.source,
-        merged.source_type,
-        merged.putio_status,
-        merged.putio_status_message,
-        merged.putio_peers,
-        merged.putio_availability,
-        merged.percent_done,
-        merged.completion_percent,
-        merged.total_size,
-        merged.uploaded_ever,
-        merged.upload_speed,
-        timestamp,
-        remote.id,
-      );
-    }
-
-    const association = this.findTransferAssociation(remote.id, input.profile_id ?? null);
-    if (!association) {
-      const result = this.db.prepare(`
-        INSERT INTO transfer_associations (
-          transfer_id, profile_id, category, download_dir, lifecycle, total_size,
-          downloaded_ever, download_speed, eta, error, error_string, retry_count,
-          created_at, updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        remote.id,
-        input.profile_id ?? null,
-        input.category ?? '',
-        input.download_dir ?? '',
-        input.lifecycle ?? 'remote',
-        input.total_size ?? input.size ?? remote.total_size ?? 0,
-        input.downloaded_ever ?? 0,
-        input.download_speed ?? 0,
-        input.eta ?? -1,
-        input.error ? 1 : 0,
-        input.error_string ?? '',
         input.retry_count ?? 0,
         timestamp,
         timestamp,
@@ -917,36 +1179,64 @@ export class StateStore {
       return this.findTransferById(Number(result.lastInsertRowid));
     }
 
+    // The owner is frozen at creation (design rule 4). The poll passes the
+    // row's own profile_id back in, so this only fires when a second profile
+    // tries to claim a put.io transfer the first already owns — and answering
+    // with the first profile's row would hand profile B a download owned by
+    // profile A, which is the state this whole phase exists to remove.
+    if (input.profile_id != null && input.profile_id !== existing.profile_id) {
+      const owner = this.findProfileById(existing.profile_id);
+      throw new Error(
+        `Download ${existing.name} already belongs to RR profile ${owner?.name ?? existing.profile_id}`,
+      );
+    }
+
     this.db.prepare(`
-      UPDATE transfer_associations
-      SET category = ?, download_dir = ?, lifecycle = ?, total_size = ?,
-          downloaded_ever = ?, download_speed = ?, eta = ?, error = ?, error_string = ?,
-          retry_count = ?,
-          removed_at = CASE WHEN ? THEN NULL ELSE removed_at END, updated_at = ?
+      UPDATE downloads
+      SET putio_file_id = ?, save_parent_id = ?, name = ?, source = ?, source_type = ?,
+          category = ?, lifecycle = ?, putio_status = ?, putio_status_message = ?,
+          putio_peers = ?, putio_availability = ?, percent_done = ?, completion_percent = ?,
+          total_size = ?, downloaded_ever = ?, uploaded_ever = ?, download_speed = ?,
+          upload_speed = ?, eta = ?, error = ?, error_string = ?, retry_count = ?,
+          removed_at = CASE WHEN ? THEN NULL ELSE removed_at END,
+          updated_at = ?
       WHERE id = ?
     `).run(
-      input.category ?? association.category,
-      input.download_dir ?? association.download_dir,
-      input.lifecycle ?? association.lifecycle,
-      input.total_size ?? input.size ?? association.total_size,
-      input.downloaded_ever ?? association.downloaded_ever,
-      input.download_speed ?? association.download_speed,
-      input.eta ?? association.eta,
-      (input.error ?? association.error) ? 1 : 0,
-      input.error_string ?? association.error_string,
-      input.retry_count ?? association.retry_count,
+      input.putio_file_id ?? existing.putio_file_id,
+      input.save_parent_id ?? existing.save_parent_id,
+      input.name ?? existing.name,
+      input.source ?? existing.source,
+      input.source_type ?? existing.source_type,
+      input.category ?? existing.category,
+      input.lifecycle ?? existing.lifecycle,
+      input.putio_status ?? existing.putio_status,
+      input.putio_status_message ?? existing.putio_status_message,
+      input.putio_peers ?? existing.putio_peers,
+      input.putio_availability ?? existing.putio_availability,
+      input.percent_done ?? existing.percent_done,
+      input.completion_percent ?? existing.completion_percent,
+      input.total_size ?? input.size ?? existing.total_size,
+      input.downloaded_ever ?? existing.downloaded_ever,
+      input.uploaded_ever ?? existing.uploaded_ever,
+      input.download_speed ?? existing.download_speed,
+      input.upload_speed ?? existing.upload_speed,
+      input.eta ?? existing.eta,
+      (input.error ?? existing.error) ? 1 : 0,
+      input.error_string ?? existing.error_string,
+      input.retry_count ?? existing.retry_count,
       input.reactivate !== false ? 1 : 0,
       timestamp,
-      association.id,
+      existing.id,
     );
-    return this.findTransferById(association.id);
+    return this.findTransferById(existing.id);
   }
 
   updateTransfer(id, patch) {
     const existing = this.findTransferById(id);
     if (!existing) return undefined;
-    const remoteAllowed = [
-      'putio_transfer_id',
+    // profile_id is deliberately absent: the owner is resolved once, at
+    // ingestion, and frozen (design rule 4). Nothing in src/ patches it.
+    const allowed = [
       'putio_file_id',
       'save_parent_id',
       'name',
@@ -958,11 +1248,7 @@ export class StateStore {
       'completion_percent',
       'uploaded_ever',
       'upload_speed',
-    ];
-    const associationAllowed = [
-      'profile_id',
       'category',
-      'download_dir',
       'lifecycle',
       'total_size',
       'downloaded_ever',
@@ -972,109 +1258,38 @@ export class StateStore {
       'error_string',
       'retry_count',
     ];
-    const remoteKeys = remoteAllowed.filter((key) => Object.hasOwn(patch, key));
-    const associationKeys = associationAllowed.filter((key) => Object.hasOwn(patch, key));
-    const timestamp = nowIso();
-    if (remoteKeys.length > 0) {
-      const assignments = remoteKeys.map((key) => `${key} = ?`).join(', ');
-      const values = remoteKeys.map((key) => patch[key]);
-      values.push(timestamp, existing.remote_id);
-      this.db.prepare(`UPDATE transfers SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
-    }
-    if (associationKeys.length > 0) {
-      const assignments = associationKeys.map((key) => `${key} = ?`).join(', ');
-      const values = associationKeys.map((key) => (key === 'error' ? (patch[key] ? 1 : 0) : patch[key]));
-      values.push(timestamp, id);
-      this.db.prepare(`UPDATE transfer_associations SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
-    }
+    const keys = allowed.filter((key) => Object.hasOwn(patch, key));
+    if (keys.length === 0) return existing;
+    const assignments = keys.map((key) => `${key} = ?`).join(', ');
+    const values = keys.map((key) => (key === 'error' ? (patch[key] ? 1 : 0) : patch[key]));
+    values.push(nowIso(), id);
+    this.db.prepare(`UPDATE downloads SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
     return this.findTransferById(id);
   }
 
-  transferSelect(where = '') {
-    return `
-      SELECT
-        a.id,
-        a.transfer_id AS remote_id,
-        a.profile_id,
-        r.putio_transfer_id,
-        r.putio_file_id,
-        r.save_parent_id,
-        r.hash,
-        r.name,
-        r.source,
-        r.source_type,
-        a.category,
-        a.download_dir,
-        a.lifecycle,
-        r.putio_status,
-        r.putio_status_message,
-        r.putio_peers,
-        r.putio_availability,
-        r.percent_done,
-        r.completion_percent,
-        COALESCE(a.total_size, r.total_size) AS total_size,
-        a.downloaded_ever,
-        r.uploaded_ever,
-        a.download_speed,
-        r.upload_speed,
-        a.eta,
-        a.error,
-        a.error_string,
-        a.retry_count,
-        a.removed_at,
-        a.created_at,
-        a.updated_at
-      FROM transfer_associations a
-      JOIN transfers r ON r.id = a.transfer_id
-      ${where}
-    `;
-  }
-
-  findRemoteTransferById(id) {
-    return this.db.prepare('SELECT * FROM transfers WHERE id = ?').get(id);
-  }
-
-  findRemoteTransferByHash(hash) {
-    return this.db.prepare('SELECT * FROM transfers WHERE lower(hash) = lower(?)').get(normalizeHash(hash));
-  }
-
-  findRemoteTransferByPutioId(putioTransferId) {
-    return this.db.prepare('SELECT * FROM transfers WHERE putio_transfer_id = ?').get(putioTransferId);
-  }
-
-  findTransferAssociation(remoteId, profileId) {
-    const row = this.db.prepare(this.transferSelect(`
-      WHERE a.transfer_id = ? AND a.profile_id IS ?
-      ORDER BY a.id ASC
-      LIMIT 1
-    `)).get(remoteId, profileId);
-    return normalizeTransferRow(row);
-  }
-
   findTransferById(id) {
-    const row = this.db.prepare(this.transferSelect('WHERE a.id = ?')).get(id);
-    return normalizeTransferRow(row);
+    return normalizeTransferRow(this.db.prepare('SELECT * FROM downloads WHERE id = ?').get(id));
   }
 
   findTransferByHash(hash, { profileId } = {}) {
     const params = [normalizeHash(hash)];
-    let where = 'WHERE lower(r.hash) = lower(?)';
+    let where = 'WHERE lower(hash) = lower(?)';
     if (profileId != null) {
-      where += ' AND a.profile_id = ?';
+      where += ' AND profile_id = ?';
       params.push(profileId);
     }
-    const row = this.db.prepare(this.transferSelect(`${where} ORDER BY a.id ASC LIMIT 1`)).get(...params);
+    const row = this.db.prepare(`SELECT * FROM downloads ${where} ORDER BY id ASC LIMIT 1`).get(...params);
     return normalizeTransferRow(row);
   }
 
   findTransferByPutioId(putioTransferId, { profileId } = {}) {
     const params = [putioTransferId];
-    let where = 'WHERE r.putio_transfer_id = ?';
+    let where = 'WHERE putio_transfer_id = ?';
     if (profileId != null) {
-      where += ' AND a.profile_id = ?';
+      where += ' AND profile_id = ?';
       params.push(profileId);
     }
-    const row = this.db.prepare(this.transferSelect(`${where} ORDER BY a.id ASC LIMIT 1`)).get(...params);
+    const row = this.db.prepare(`SELECT * FROM downloads ${where} LIMIT 1`).get(...params);
     return normalizeTransferRow(row);
   }
 
@@ -1095,111 +1310,68 @@ export class StateStore {
 
   listActiveTransfers({ profileId } = {}) {
     const params = [];
-    let where = 'a.removed_at IS NULL';
+    let where = 'removed_at IS NULL';
     if (profileId != null) {
-      where += ' AND a.profile_id = ?';
+      where += ' AND profile_id = ?';
       params.push(profileId);
     }
-    return this.db.prepare(this.transferSelect(`
-      WHERE ${where}
-      ORDER BY a.id ASC
-    `)).all(...params).map(normalizeTransferRow);
-  }
-
-  listTransfersForRemote(remoteId, { includeRemoved = true } = {}) {
-    const where = includeRemoved
-      ? 'WHERE a.transfer_id = ?'
-      : 'WHERE a.transfer_id = ? AND a.removed_at IS NULL';
-    return this.db.prepare(this.transferSelect(`${where} ORDER BY a.id ASC`))
-      .all(remoteId)
+    return this.db.prepare(`SELECT * FROM downloads WHERE ${where} ORDER BY id ASC`)
+      .all(...params)
       .map(normalizeTransferRow);
   }
 
-  hasOtherActiveAssociations(transfer) {
-    const row = this.db.prepare(`
-      SELECT 1
-      FROM transfer_associations
-      WHERE transfer_id = ? AND id != ? AND removed_at IS NULL
-      LIMIT 1
-    `).get(transfer.remote_id, transfer.id);
-    return Boolean(row);
-  }
-
-  allActiveAssociationsProcessed(remoteId) {
-    const row = this.db.prepare(`
-      SELECT COUNT(*) AS total,
-             SUM(CASE WHEN lifecycle = 'processed' THEN 1 ELSE 0 END) AS processed
-      FROM transfer_associations
-      WHERE transfer_id = ? AND removed_at IS NULL
-    `).get(remoteId);
-    return Number(row.total) > 0 && Number(row.total) === Number(row.processed);
+  listRemovedTransfers() {
+    return this.db.prepare('SELECT * FROM downloads WHERE removed_at IS NOT NULL ORDER BY id ASC')
+      .all()
+      .map(normalizeTransferRow);
   }
 
   markTransferRemoved(id) {
     this.db.prepare(`
-      UPDATE transfer_associations
+      UPDATE downloads
       SET removed_at = ?, lifecycle = 'removed', updated_at = ?
       WHERE id = ?
     `).run(nowIso(), nowIso(), id);
   }
 
+  // The only delete. There is no separate remote record to orphan any more:
+  // the download row is the remote row.
   deleteTransfer(id) {
-    this.db.prepare('DELETE FROM transfer_associations WHERE id = ?').run(id);
-  }
-
-  deleteRemoteTransferIfOrphaned(remoteId) {
-    const result = this.db.prepare(`
-      DELETE FROM transfers
-      WHERE id = ?
-        AND NOT EXISTS (
-          SELECT 1 FROM transfer_associations WHERE transfer_id = transfers.id
-        )
-    `).run(remoteId);
-    return result.changes > 0;
-  }
-
-  deleteRemoteTransferRecord(remoteId) {
-    this.db.prepare('DELETE FROM transfers WHERE id = ?').run(remoteId);
+    this.db.prepare('DELETE FROM downloads WHERE id = ?').run(id);
   }
 
   deleteTransferFile(id) {
-    this.db.prepare('DELETE FROM association_files WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM download_files WHERE id = ?').run(id);
   }
 
   // A file deleted from the dashboard but kept on put.io is tombstoned (status='deleted')
-  // so the downloader does not re-fetch it. Once its transfer is 'processed' the download
+  // so the downloader does not re-fetch it. Once its download is 'processed' the download
   // path never revisits it (see pollOnce / prepareTransfer), so the tombstone is dead weight
   // and is hard-deleted here to keep the table from accumulating rows over time.
   purgeDeletedFilesForProcessedTransfers() {
     const result = this.db.prepare(`
-      DELETE FROM association_files
+      DELETE FROM download_files
       WHERE status = 'deleted'
-        AND transfer_id IN (
-          SELECT id FROM transfer_associations
+        AND download_id IN (
+          SELECT id FROM downloads
           WHERE lifecycle = 'processed' AND removed_at IS NULL
         )
     `).run();
     return result.changes;
   }
 
-  listRemovedTransfers() {
-    return this.db.prepare(this.transferSelect('WHERE a.removed_at IS NOT NULL ORDER BY a.id ASC'))
-      .all()
-      .map(normalizeTransferRow);
-  }
-
   upsertTransferFile(input) {
     const timestamp = nowIso();
-    const existing = this.findTransferFileByPutioId(input.putio_file_id, input.transfer_id);
+    const existing = this.findTransferFileByPutioId(input.putio_file_id, input.download_id);
     if (!existing) {
       const result = this.db.prepare(`
-        INSERT INTO association_files (
-          transfer_id, putio_file_id, relative_path, size, downloaded_bytes, download_speed,
+        INSERT INTO download_files (
+          download_id, putio_file_id, relative_path, size, downloaded_bytes, download_speed,
           status, attempts, error_string, created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
-        input.transfer_id,
+        input.download_id,
         input.putio_file_id,
         input.relative_path,
         input.size ?? 0,
@@ -1215,8 +1387,8 @@ export class StateStore {
     }
 
     this.db.prepare(`
-      UPDATE association_files
-      SET transfer_id = ?, relative_path = ?, size = ?,
+      UPDATE download_files
+      SET download_id = ?, relative_path = ?, size = ?,
           downloaded_bytes = CASE
             WHEN status IN ('complete', 'deleted') THEN downloaded_bytes
             ELSE ?
@@ -1232,7 +1404,7 @@ export class StateStore {
           updated_at = ?
       WHERE id = ?
     `).run(
-      input.transfer_id,
+      input.download_id,
       input.relative_path,
       input.size ?? existing.size,
       input.downloaded_bytes ?? existing.downloaded_bytes,
@@ -1245,35 +1417,37 @@ export class StateStore {
   }
 
   findTransferFileById(id) {
-    const row = this.db.prepare('SELECT * FROM association_files WHERE id = ?').get(id);
+    const row = this.db.prepare('SELECT * FROM download_files WHERE id = ?').get(id);
     return normalizeFileRow(row);
   }
 
-  findTransferFileByPutioId(putioFileId, transferId) {
-    const row = transferId == null
-      ? this.db.prepare('SELECT * FROM association_files WHERE putio_file_id = ? ORDER BY id ASC LIMIT 1').get(putioFileId)
-      : this.db.prepare('SELECT * FROM association_files WHERE putio_file_id = ? AND transfer_id = ?').get(putioFileId, transferId);
+  // putio_file_id is unique only within a download, so the id-less branch can
+  // legitimately match several rows. It is a test and debug affordance; every
+  // caller in src/ passes the download id.
+  findTransferFileByPutioId(putioFileId, downloadId) {
+    const row = downloadId == null
+      ? this.db.prepare('SELECT * FROM download_files WHERE putio_file_id = ? ORDER BY id ASC LIMIT 1').get(putioFileId)
+      : this.db.prepare('SELECT * FROM download_files WHERE putio_file_id = ? AND download_id = ?').get(putioFileId, downloadId);
     return normalizeFileRow(row);
   }
 
-  listFilesForTransfer(transferId) {
+  listFilesForTransfer(downloadId) {
     return this.db.prepare(`
-      SELECT * FROM association_files
-      WHERE transfer_id = ?
+      SELECT * FROM download_files
+      WHERE download_id = ?
         AND status != 'deleted'
       ORDER BY relative_path ASC
-    `).all(transferId).map(normalizeFileRow);
+    `).all(downloadId).map(normalizeFileRow);
   }
 
   listPendingFiles(limit = 100) {
     return this.db.prepare(`
-      SELECT tf.*, t.category, t.name AS transfer_name, t.hash AS transfer_hash
-      FROM association_files tf
-      JOIN transfer_associations a ON a.id = tf.transfer_id
-      JOIN transfers t ON t.id = a.transfer_id
-      WHERE tf.status IN ('pending', 'failed')
-        AND a.removed_at IS NULL
-      ORDER BY tf.id ASC
+      SELECT f.*, d.category, d.name AS transfer_name, d.hash AS transfer_hash
+      FROM download_files f
+      JOIN downloads d ON d.id = f.download_id
+      WHERE f.status IN ('pending', 'failed')
+        AND d.removed_at IS NULL
+      ORDER BY f.id ASC
       LIMIT ?
     `).all(limit).map(normalizeFileRow);
   }
@@ -1289,7 +1463,7 @@ export class StateStore {
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
     const values = keys.map((key) => patch[key]);
     values.push(nowIso(), id);
-    this.db.prepare(`UPDATE association_files SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
+    this.db.prepare(`UPDATE download_files SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
     return this.findTransferFileById(id);
   }
 
@@ -1302,7 +1476,7 @@ export class StateStore {
     });
   }
 
-  getTransferFileStats(transferId) {
+  getTransferFileStats(downloadId) {
     return this.db.prepare(`
       SELECT
         COUNT(*) AS total_files,
@@ -1310,9 +1484,9 @@ export class StateStore {
         SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) AS failed_files,
         COALESCE(SUM(size), 0) AS total_size,
         COALESCE(SUM(downloaded_bytes), 0) AS downloaded_size
-      FROM association_files
-      WHERE transfer_id = ?
+      FROM download_files
+      WHERE download_id = ?
         AND status != 'deleted'
-    `).get(transferId);
+    `).get(downloadId);
   }
 }

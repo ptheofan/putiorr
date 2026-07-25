@@ -225,7 +225,7 @@ export class DownloadManager {
       const exists = await fileExistsWithSize(targetPath, size);
       const partSize = exists ? size : Math.min(await sizeOf(`${targetPath}.part`), size);
       this.store.upsertTransferFile({
-        transfer_id: updated.id,
+        download_id: updated.id,
         putio_file_id: remoteFile.id,
         relative_path: relativePath,
         size,
@@ -274,7 +274,6 @@ export class DownloadManager {
           });
         } else {
           this.store.deleteTransfer(transfer.id);
-          this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
         }
       } catch (error) {
         // A 404 says put.io no longer has it either, which is the outcome this
@@ -297,7 +296,6 @@ export class DownloadManager {
         }
         remoteMissing = true;
         this.store.deleteTransfer(transfer.id);
-        this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
       }
       logger.info('processed transfer pruned after local data disappeared', {
         transferId: transfer.id,
@@ -393,10 +391,10 @@ export class DownloadManager {
           download_speed: 0,
           error_string: error.message,
         });
-        const transfer = this.store.findTransferById(job.transfer_id);
+        const transfer = this.store.findTransferById(job.download_id);
         logger.warn('file download failed', {
           worker: index,
-          transferId: job.transfer_id,
+          transferId: job.download_id,
           name: transfer?.name ?? job.transfer_name,
           fileId: job.id,
           putioFileId: job.putio_file_id,
@@ -406,7 +404,7 @@ export class DownloadManager {
         });
       } finally {
         this.activeFileRates.delete(job.id);
-        this.refreshTransferLocalMetrics(job.transfer_id);
+        this.refreshTransferLocalMetrics(job.download_id);
         this.activeFileIds.delete(job.id);
       }
     }
@@ -426,7 +424,7 @@ export class DownloadManager {
   }
 
   async processFile(file) {
-    const transfer = this.store.findTransferById(file.transfer_id);
+    const transfer = this.store.findTransferById(file.download_id);
     if (!transfer || transfer.removed_at) return;
     const profile = this.service.requireTransferProfile(transfer);
 
@@ -476,7 +474,7 @@ export class DownloadManager {
   }
 
   isFileDeletedOrTransferRemoved(file) {
-    const transfer = this.store.findTransferById(file.transfer_id);
+    const transfer = this.store.findTransferById(file.download_id);
     if (!transfer || transfer.removed_at) return true;
     return this.store.findTransferFileById(file.id)?.status === 'deleted';
   }
@@ -696,10 +694,10 @@ export class DownloadManager {
   }
 
   downloadPolicyForFile(file) {
-    const transfer = this.store.findTransferById(file.transfer_id);
-    // Through the one resolver, so phase 3 has a single place to change when
-    // profile_id stops being nullable. A missing owner falls back to the
-    // server-wide policy rather than another profile's.
+    const transfer = this.store.findTransferById(file.download_id);
+    // Through the one resolver. profile_id is NOT NULL now, so a missing owner
+    // means the row was edited by hand; it falls back to the server-wide policy
+    // rather than to another profile's.
     const profile = this.service.findTransferProfile(transfer);
     return downloadPolicyForContext(this.store, this.config, { profile });
   }
@@ -717,10 +715,10 @@ export class DownloadManager {
       return;
     }
     this.activeFileRates.set(file.id, {
-      transferId: file.transfer_id,
+      transferId: file.download_id,
       bytesPerSecond: 0,
     });
-    this.refreshTransferLocalMetrics(file.transfer_id);
+    this.refreshTransferLocalMetrics(file.download_id);
     logger.warn('slow file download reset', {
       fileId: file.id,
       putioFileId: file.putio_file_id,
@@ -743,10 +741,10 @@ export class DownloadManager {
       return;
     }
     this.activeFileRates.set(file.id, {
-      transferId: file.transfer_id,
+      transferId: file.download_id,
       bytesPerSecond: Math.max(0, Math.round(Number(bytesPerSecond ?? 0))),
     });
-    this.refreshTransferLocalMetrics(file.transfer_id);
+    this.refreshTransferLocalMetrics(file.download_id);
   }
 
   refreshTransferLocalMetrics(transferId) {
@@ -794,11 +792,10 @@ export class DownloadManager {
       return;
     }
 
-    if (
-      this.config.cleanupRemoteFiles
-      && transfer.putio_file_id
-      && this.store.allActiveAssociationsProcessed(transfer.remote_id)
-    ) {
+    // The third predicate this used to carry — "every active association of the
+    // remote transfer is processed" — is structurally always true now that one
+    // put.io transfer has exactly one download.
+    if (this.config.cleanupRemoteFiles && transfer.putio_file_id) {
       try {
         await this.service.getPutio().deleteFile(transfer.putio_file_id);
       } catch (error) {

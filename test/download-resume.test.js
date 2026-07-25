@@ -206,7 +206,7 @@ test('downloadToPath resumes an existing part file with a Range request', async 
   try {
     const transfer = createTransfer(harness.store, { total_size: 10 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 902,
       relative_path: 'movie.mkv',
       size: 10,
@@ -246,7 +246,7 @@ test('downloadToPath restarts bad partial downloads and records size mismatch', 
   try {
     const transfer = createTransfer(harness.store, { total_size: 4 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 908,
       relative_path: 'movie.mkv',
       size: 4,
@@ -281,7 +281,7 @@ test('downloadToPath restarts when the remote rejects a range request', async ()
   try {
     const transfer = createTransfer(harness.store, { total_size: 6 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 909,
       relative_path: 'movie.mkv',
       size: 6,
@@ -322,7 +322,7 @@ test('slow-speed reset keeps the part file and resumes without a failed attempt'
   try {
     const transfer = createTransfer(harness.store, { total_size: 6 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 903,
       relative_path: 'movie.mkv',
       size: 6,
@@ -397,7 +397,7 @@ test('slow-speed guard uses the download profile attached to the RR profile', as
 
     const transfer = createTransfer(harness.store, { total_size: 10 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 904,
       relative_path: 'movie.mkv',
       size: 10,
@@ -436,7 +436,7 @@ test('processFile downloads a pending file, finalizes the transfer, and cleans u
   try {
     const transfer = createTransfer(harness.store, { total_size: 4 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 905,
       relative_path: 'movie.mkv',
       size: 4,
@@ -467,7 +467,7 @@ test('processFile completes an already downloaded file without fetching it', asy
   try {
     const transfer = createTransfer(harness.store, { total_size: 4 });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 910,
       relative_path: 'movie.mkv',
       size: 4,
@@ -500,7 +500,7 @@ test('processFile discards locally deleted files and nextPendingFile skips activ
   try {
     const transfer = createTransfer(harness.store, { total_size: 8 });
     const pending = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 906,
       relative_path: 'pending.mkv',
       size: 4,
@@ -508,7 +508,7 @@ test('processFile discards locally deleted files and nextPendingFile skips activ
       status: 'pending',
     });
     const deleted = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 907,
       relative_path: 'season/deleted.mkv',
       size: 4,

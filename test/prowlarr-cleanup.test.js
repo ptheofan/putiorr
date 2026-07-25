@@ -79,7 +79,7 @@ async function seedCompleteTransfer(harness, profile, patch = {}) {
     ...patch,
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 20,
     relative_path: 'movie.mkv',
     size: 10,
@@ -196,7 +196,7 @@ test('processFile removes a completed download for a profile with auto-remove en
     assert.equal(transfer.profile_id, profile.id);
     harness.store.updateTransfer(transfer.id, { lifecycle: 'downloading' });
     const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 30,
       relative_path: 'movie.mkv',
       size: 4,
@@ -282,7 +282,6 @@ test('processed auto-remove uses the stored RPC profile, not category inference'
     });
     const { transfer, filePath } = await seedCompleteTransfer(harness, lidarr, {
       category: 'prowlarr',
-      download_dir: path.join(harness.config.targetDir, 'prowlarr'),
       lifecycle: 'processed',
     });
 

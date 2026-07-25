@@ -427,7 +427,7 @@ test('dashboard bucket delete can leave put.io data and tombstone the download',
     total_size: 5,
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Bucket.Delete.mkv',
     size: 5,
@@ -494,7 +494,7 @@ test('dashboard file delete removes one file locally and optionally from put.io'
     total_size: 11,
   });
   const firstFile = harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Episode.One.mkv',
     size: 5,
@@ -502,7 +502,7 @@ test('dashboard file delete removes one file locally and optionally from put.io'
     status: 'complete',
   });
   const secondFile = harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 201,
     relative_path: 'Episode.Two.mkv',
     size: 6,
@@ -558,7 +558,7 @@ test('dashboard deleting all selected files deletes the whole bucket', async (t)
     total_size: 11,
   });
   const firstFile = harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Disc.One.flac',
     size: 5,
@@ -566,7 +566,7 @@ test('dashboard deleting all selected files deletes the whole bucket', async (t)
     status: 'complete',
   });
   const secondFile = harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 201,
     relative_path: 'Disc.Two.flac',
     size: 6,
@@ -618,7 +618,7 @@ test('dashboard bucket delete keeps local files when deleteLocal is omitted', as
     total_size: 5,
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Keep.Local.mkv',
     size: 5,
@@ -669,7 +669,7 @@ test('dashboard can delete multiple selected buckets through mocked put.io', asy
       total_size: 5,
     });
     harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+      download_id: transfer.id,
       putio_file_id: 200 + index,
       relative_path: `Bulk.Delete.${index}.mkv`,
       size: 5,
@@ -720,7 +720,7 @@ test('dashboard file delete keeps local files when deleteLocal is omitted', asyn
     total_size: 11,
   });
   const firstFile = harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Episode.One.mkv',
     size: 5,
@@ -728,7 +728,7 @@ test('dashboard file delete keeps local files when deleteLocal is omitted', asyn
     status: 'complete',
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 201,
     relative_path: 'Episode.Two.mkv',
     size: 6,
@@ -781,7 +781,7 @@ test('tombstoned transfer kept on put.io is physically pruned once put.io drops 
     total_size: 5,
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Prune.Me.mkv',
     size: 5,
@@ -900,7 +900,7 @@ test('tombstoned files under a processed transfer are physically purged; active 
     total_size: 11,
   });
   const keptFile = harness.store.upsertTransferFile({
-    transfer_id: processed.id,
+    download_id: processed.id,
     putio_file_id: 200,
     relative_path: 'Kept.mkv',
     size: 5,
@@ -908,7 +908,7 @@ test('tombstoned files under a processed transfer are physically purged; active 
     status: 'complete',
   });
   const deletedFile = harness.store.upsertTransferFile({
-    transfer_id: processed.id,
+    download_id: processed.id,
     putio_file_id: 201,
     relative_path: 'Deleted.mkv',
     size: 6,
@@ -932,7 +932,7 @@ test('tombstoned files under a processed transfer are physically purged; active 
     total_size: 6,
   });
   const downloadingDeleted = harness.store.upsertTransferFile({
-    transfer_id: downloading.id,
+    download_id: downloading.id,
     putio_file_id: 202,
     relative_path: 'StillThere.mkv',
     size: 6,
@@ -1026,7 +1026,7 @@ test('torrent-get reports weighted progress consistently for Sonarr', async (t) 
     eta: 25,
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Episode.One.mkv',
     size: 400,
@@ -1034,7 +1034,7 @@ test('torrent-get reports weighted progress consistently for Sonarr', async (t) 
     status: 'complete',
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 201,
     relative_path: 'Episode.Two.mkv',
     size: 600,
@@ -1101,7 +1101,6 @@ test('processed torrents report seed goal reached for Radarr cleanup', async (t)
     hash: 'processedhash',
     name: 'Processed.Release',
     category: 'radarr',
-    download_dir: path.join(harness.config.targetDir, 'radarr'),
     lifecycle: 'processed',
     putio_status: 'COMPLETED',
     percent_done: 100,
@@ -1110,7 +1109,7 @@ test('processed torrents report seed goal reached for Radarr cleanup', async (t)
     eta: -1,
   });
   harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+    download_id: transfer.id,
     putio_file_id: 200,
     relative_path: 'Processed.Release.mkv',
     size: 1000,
@@ -1189,7 +1188,6 @@ test('RPC listing is scoped to the profile selected by the request path', async 
     hash: 'defaulthash',
     name: 'Default.Release',
     category: 'default',
-    download_dir: path.join(harness.config.targetDir, 'default'),
     lifecycle: 'downloading',
     putio_status: 'COMPLETED',
     percent_done: 100,
@@ -1202,7 +1200,6 @@ test('RPC listing is scoped to the profile selected by the request path', async 
     hash: 'sonarrhash',
     name: 'Sonarr.Release',
     category: 'sonarr',
-    download_dir: path.join(harness.config.targetDir, 'sonarr'),
     lifecycle: 'downloading',
     putio_status: 'COMPLETED',
     percent_done: 100,
@@ -1262,7 +1259,6 @@ test('unowned generic RPC endpoint answers session-get but refuses cross-profile
     hash: 'defaulthash',
     name: 'Default.Release',
     category: 'default',
-    download_dir: path.join(harness.config.targetDir, 'default'),
     lifecycle: 'downloading',
   });
   harness.store.createOrUpdateTransfer({
@@ -1272,7 +1268,6 @@ test('unowned generic RPC endpoint answers session-get but refuses cross-profile
     hash: 'sonarrhash',
     name: 'Sonarr.Release',
     category: 'sonarr',
-    download_dir: path.join(harness.config.targetDir, 'sonarr'),
     lifecycle: 'downloading',
   });
   const first = await fetch(harness.url, { method: 'POST' });
@@ -1602,7 +1597,12 @@ test('put.io refresh preserves the RPC-selected profile association', async (t) 
   assert.notEqual(transfer.profile_id, sonarr.id);
 });
 
-test('two profiles adding the same magnet share one put.io transfer with independent associations', async (t) => {
+// Design rule 3: one put.io transfer belongs to one download item, and rule 1
+// gives that item one owner. Two *arr apps grabbing the same release used to
+// produce two associations over one transfer, which is exactly the state phase
+// 3 removes — so the second profile's add is refused, naming the profile that
+// holds it, rather than silently handing profile B a download owned by A.
+test('a second profile grabbing an already-owned release is refused by name', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -1628,9 +1628,6 @@ test('two profiles adding the same magnet share one put.io transfer with indepen
     enabled: true,
   });
 
-  // Each profile speaks on the RPC path it owns. This used to route by the
-  // client's User-Agent over the shared endpoint, which is what made a header
-  // enough to reach another profile's downloads.
   async function rpc(rpcPath, method, args) {
     const url = harness.url.replace('/transmission/rpc', rpcPath);
     const handshake = await fetch(url, { method: 'POST' });
@@ -1650,71 +1647,70 @@ test('two profiles adding the same magnet share one put.io transfer with indepen
   const sonarrAdd = await rpc(sonarr.rpc_path, 'torrent-add', {
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'sonarr'),
-    labels: ['sonarr'],
   });
+  const sonarrId = sonarrAdd.arguments['torrent-added'].id;
+  assert.equal(typeof sonarrId, 'number');
+
   const radarrAdd = await rpc(radarr.rpc_path, 'torrent-add', {
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'radarr'),
-    labels: ['radarr'],
   });
+  assert.match(radarrAdd.result, /already belongs to RR profile Sonarr/);
+  assert.equal(harness.store.listActiveTransfers({ profileId: radarr.id }).length, 0);
+
+  // The owner re-grabbing its own release is still idempotent.
   const sonarrAgain = await rpc(sonarr.rpc_path, 'torrent-add', {
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'sonarr'),
-    labels: ['sonarr'],
   });
-
-  const sonarrId = sonarrAdd.arguments['torrent-added'].id;
-  const radarrId = radarrAdd.arguments['torrent-added'].id;
-  assert.notEqual(sonarrId, radarrId);
   assert.equal(sonarrAgain.arguments['torrent-added'].id, sonarrId);
   assert.equal(harness.store.listActiveTransfers({ profileId: sonarr.id }).length, 1);
-  assert.equal(harness.store.listActiveTransfers({ profileId: radarr.id }).length, 1);
-  assert.equal(harness.store.findTransferById(sonarrId).remote_id, harness.store.findTransferById(radarrId).remote_id);
-  assert.equal(harness.store.findRemoteTransferByPutioId(77).putio_file_id, 88);
-
-  const sonarrFile = harness.store.upsertTransferFile({
-    transfer_id: sonarrId,
-    putio_file_id: 200,
-    relative_path: 'Shared.Release.mkv',
-    size: 5,
-  });
-  const radarrFile = harness.store.upsertTransferFile({
-    transfer_id: radarrId,
-    putio_file_id: 200,
-    relative_path: 'Shared.Release.mkv',
-    size: 5,
-  });
-  assert.notEqual(sonarrFile.id, radarrFile.id);
 
   const transferName = harness.store.findTransferById(sonarrId).name;
   const sonarrPath = path.join(harness.config.targetDir, 'sonarr', transferName);
-  const radarrPath = path.join(harness.config.targetDir, 'radarr', transferName);
   await mkdir(sonarrPath, { recursive: true });
-  await mkdir(radarrPath, { recursive: true });
   await writeFile(path.join(sonarrPath, 'Shared.Release.mkv'), 'movie');
-  await writeFile(path.join(radarrPath, 'Shared.Release.mkv'), 'movie');
 
+  // Removing it removes the put.io side too: nobody else holds a claim on it.
   const sonarrRemove = await rpc(sonarr.rpc_path, 'torrent-remove', {
     ids: [sonarrAdd.arguments['torrent-added'].hashString],
     'delete-local-data': true,
   });
   assert.equal(sonarrRemove.result, 'success');
   assert.equal(harness.store.findTransferById(sonarrId), undefined);
-  assert.ok(harness.store.findTransferById(radarrId));
-  assert.deepEqual(harness.putio.deletedFiles, []);
-  assert.deepEqual(harness.putio.deletedTransfers, []);
-  await assert.rejects(() => stat(sonarrPath), { code: 'ENOENT' });
-  await stat(radarrPath);
-
-  const radarrList = await rpc(radarr.rpc_path, 'torrent-get', { fields: ['id', 'hashString'] });
-  assert.deepEqual(radarrList.arguments.torrents, [{ id: radarrId, hashString: 'abcdef' }]);
-
-  await rpc(radarr.rpc_path, 'torrent-remove', {
-    ids: [radarrAdd.arguments['torrent-added'].hashString],
-  });
   assert.deepEqual(harness.putio.deletedFiles, [88]);
   assert.deepEqual(harness.putio.deletedTransfers, [77]);
-  assert.equal(harness.store.findRemoteTransferByPutioId(77), undefined);
+  await assert.rejects(() => stat(sonarrPath), { code: 'ENOENT' });
+});
+
+// Design rule 3 again, on the ingestion side: put.io's transfer id is the
+// download's identity, so an add that comes back without one is an error rather
+// than a row with a generated identity that nothing can ever match or prune.
+test('an add whose put.io response carries no transfer id is refused', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  harness.putio.addTransfer = async () => ({ id: null, name: 'Nameless.Release', status: 'IN_QUEUE' });
+
+  const handshake = await fetch(harness.url, { method: 'POST' });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  const response = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: { filename: 'magnet:?xt=urn:btih:abcdef&dn=Nameless.Release' },
+    }),
+  });
+  const body = await response.json();
+  assert.match(body.result, /returned no transfer id/);
+  assert.equal(harness.store.listActiveTransfers().length, 0);
 });
 
 test('web API exposes settings and profile CRUD', async (t) => {
@@ -2329,7 +2325,15 @@ test('an *arr add is never routed into a grab profile', async (t) => {
   assert.equal(transfer.profile_id, harness.store.findProfileBySlug('default').id);
   assert.equal(harness.store.listActiveTransfers({ profileId: grab.id }).length, 0);
 
-  // The extension names the profile it means, so that path is unaffected.
+  // The extension names the profile it means, so that path is unaffected — but
+  // it is a genuinely different release, and one put.io transfer belongs to one
+  // download, so the fake has to answer with a different transfer id.
+  const originalAdd = harness.putio.addTransfer.bind(harness.putio);
+  harness.putio.addTransfer = async (source, folderId) => ({
+    ...(await originalAdd(source, folderId)),
+    id: 78,
+    fileId: 89,
+  });
   const grabbed = await fetch(harness.url.replace('/transmission/rpc', '/api/grab'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Putiorr-Grab': '1' },
@@ -2660,10 +2664,11 @@ test('a grab profile parked on the shared path cannot take that endpoint down', 
   assert.equal(harness.store.findTransferById(added.arguments['torrent-added'].id).profile_id, seeded.id);
 });
 
-// Two profiles can legitimately hold associations to one put.io transfer, so a
-// hash names a set of rows rather than a row. The cross-profile refusal must
-// only fire on something that identifies exactly one association — a numeric
-// id — or it starts refusing correctly-configured clients.
+// The hash is informational and not unique — put.io can report one infohash for
+// more than one transfer — so a hash names a set of downloads rather than one.
+// The cross-profile refusal must only fire on something that identifies exactly
+// one download, a numeric id, or it starts refusing correctly-configured
+// clients.
 async function profileRpc(harness, rpcPath, method, args) {
   const url = harness.url.replace('/transmission/rpc', rpcPath);
   const handshake = await fetch(url, { method: 'POST' });
@@ -2692,11 +2697,17 @@ test('removing the same hash twice stays a no-op when another profile still hold
     filename: magnet,
     'download-dir': path.join(harness.config.targetDir, 'sonarr'),
   });
-  await profileRpc(harness, radarr.rpc_path, 'torrent-add', {
-    filename: magnet,
-    'download-dir': path.join(harness.config.targetDir, 'radarr'),
-  });
   const hash = sonarrAdd.arguments['torrent-added'].hashString;
+  // Radarr's own download, carrying the same hash on a different put.io
+  // transfer. Rule 3 forbids sharing the transfer; nothing forbids the hash.
+  harness.store.createOrUpdateTransfer({
+    profile_id: radarr.id,
+    putio_transfer_id: 91,
+    hash,
+    name: 'Shared.Release',
+    category: 'radarr',
+    lifecycle: 'downloading',
+  });
 
   const first = await profileRpc(harness, sonarr.rpc_path, 'torrent-remove', { ids: [hash] });
   assert.equal(first.result, 'success');
@@ -2739,13 +2750,20 @@ test('the cross-profile refusal names no owner when the row it found has none', 
     await harness.rpcServer.stop();
     harness.store.close();
   });
-  const { sonarr } = createTwoArrProfiles(harness);
+  const { sonarr, radarr } = createTwoArrProfiles(harness);
   const orphan = harness.store.createOrUpdateTransfer({
+    profile_id: radarr.id,
     putio_transfer_id: 92,
     hash: 'noownerhash',
     name: 'Orphan.Release',
     lifecycle: 'downloading',
   });
+  // downloads.profile_id is NOT NULL now, so this state only exists on a
+  // hand-edited database — which is exactly what the "(none)" branch defends
+  // against, and it must still not send the user to another profile's endpoint.
+  harness.store.db.exec('PRAGMA foreign_keys = OFF');
+  harness.store.db.prepare('UPDATE downloads SET profile_id = 999999 WHERE id = ?').run(orphan.id);
+  harness.store.db.exec('PRAGMA foreign_keys = ON');
 
   const response = await profileRpc(harness, sonarr.rpc_path, 'torrent-remove', { ids: [orphan.id] });
 

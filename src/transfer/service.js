@@ -100,7 +100,6 @@ function putioTransferToStoreInput(transfer, fallback = {}) {
     source: fallback.source ?? transfer.magnetUri ?? '',
     source_type: fallback.source_type ?? 'remote',
     category: fallback.category,
-    download_dir: fallback.download_dir,
     lifecycle,
     putio_status: transfer.status,
     putio_status_message: transfer.statusMessage,
@@ -259,13 +258,20 @@ export class TransferService {
       putioTransfer = await this.getPutio().addTransfer(source, currentProfile.putio_folder_id);
     }
 
+    // put.io's transfer id is the download's identity (design rule 3). An add
+    // that comes back without one used to be stored anyway, under a random
+    // 20-byte fake hash, producing a row nothing could ever match against
+    // put.io again and nothing could prune.
+    if (putioTransfer?.id == null) {
+      throw new Error('put.io accepted the torrent but returned no transfer id; nothing was recorded');
+    }
+
     const row = this.store.createOrUpdateTransfer(putioTransferToStoreInput(putioTransfer, {
       profile_id: currentProfile.id,
       hash: deriveHashFromSource(source),
       source,
       source_type: sourceType,
       category,
-      download_dir: downloadDir,
       lifecycle: 'remote',
       save_parent_id: currentProfile.putio_folder_id,
     }));
@@ -334,30 +340,30 @@ export class TransferService {
   // One put.io transfer's worth of work, extracted so the caller can isolate a
   // failure to the row that caused it. Appends the refreshed rows to `rows`.
   refreshRemoteTransfer(remote, byFolderId, rows) {
-    const remoteRow = remote.id ? this.store.findRemoteTransferByPutioId(remote.id) : undefined;
-    const associations = remoteRow
-      ? this.store.listTransfersForRemote(remoteRow.id)
-      : [];
+    const existing = remote.id ? this.store.findTransferByPutioId(remote.id) : undefined;
 
-    if (associations.length > 0) {
-      for (const existing of associations) {
-        const updated = this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
-          profile_id: existing.profile_id,
-          hash: existing.hash,
-          category: existing.category,
-          download_dir: existing.download_dir,
-          lifecycle: existing.lifecycle,
-          download_speed: existing.download_speed,
-          eta: existing.eta,
-          source: existing.source ?? remote.magnetUri ?? '',
-          source_type: existing.source_type ?? 'remote',
-          reactivate: !existing.removed_at,
-        }));
-        if (!existing.removed_at) rows.push(updated);
-      }
+    if (existing) {
+      // The row's own profile_id is passed back in, so the store's
+      // already-belongs-to refusal can never fire on the poll path.
+      const updated = this.store.createOrUpdateTransfer(putioTransferToStoreInput(remote, {
+        profile_id: existing.profile_id,
+        hash: existing.hash,
+        category: existing.category,
+        lifecycle: existing.lifecycle,
+        download_speed: existing.download_speed,
+        eta: existing.eta,
+        source: existing.source ?? remote.magnetUri ?? '',
+        source_type: existing.source_type ?? 'remote',
+        reactivate: !existing.removed_at,
+      }));
+      if (!existing.removed_at) rows.push(updated);
       return;
     }
 
+    // Adoption of a transfer putiorr did not create. profile_id is mandatory
+    // now, so this early return is load-bearing rather than cosmetic: a folder
+    // that maps to no profile, or to more than one, has no answer, and phase 4
+    // turns the silence into a log line and a dashboard notice.
     const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
     if (folderProfiles.length !== 1) return;
     const [profile] = folderProfiles;
@@ -373,7 +379,6 @@ export class TransferService {
       if (transfer.lifecycle !== 'remote' || transfer.putio_transfer_id == null) continue;
       if (isTransferStillListed(transfer, remoteIds, remoteHashes)) continue;
       this.store.deleteTransfer(transfer.id);
-      this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
       logger.info('pruned remote transfer no longer on put.io', {
         id: transfer.id,
         putioTransferId: transfer.putio_transfer_id,
@@ -391,7 +396,6 @@ export class TransferService {
     for (const removed of this.store.listRemovedTransfers()) {
       if (!isTransferStillListed(removed, remoteIds, remoteHashes)) {
         this.store.deleteTransfer(removed.id);
-        this.store.deleteRemoteTransferIfOrphaned(removed.remote_id);
         logger.info('pruned tombstoned transfer no longer on put.io', {
           id: removed.id,
           hash: removed.hash,
@@ -459,20 +463,16 @@ export class TransferService {
         continue;
       }
 
-      const hasOtherAssociations = this.store.hasOtherActiveAssociations(transfer);
-      const remoteDeleted = !hasOtherAssociations
-        || this.store.allActiveAssociationsProcessed(transfer.remote_id);
-      if (remoteDeleted) await this.removeRemoteTransfer(transfer);
+      // One download owns its put.io transfer outright, so removing it always
+      // removes the remote side too; there is no second profile left holding a
+      // claim on it.
+      await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
         // The row was found scoped to this profile, so this is that profile.
         const targetDir = path.join(currentProfile.download_at, transfer.category ?? '');
         await deleteLocalData(targetDir, transfer.name);
       }
-      if (remoteDeleted && !hasOtherAssociations) {
-        this.store.deleteRemoteTransferRecord(transfer.remote_id);
-      } else {
-        this.store.deleteTransfer(transfer.id);
-      }
+      this.store.deleteTransfer(transfer.id);
       logger.info('torrent removed', {
         id: transfer.id,
         hash: transfer.hash,
@@ -498,10 +498,7 @@ export class TransferService {
       ? path.join(this.requireTransferProfile(transfer).download_at, transfer.category ?? '')
       : undefined;
 
-    const hasOtherAssociations = this.store.hasOtherActiveAssociations(transfer);
-    const remoteDeleted = deleteRemote && (
-      !hasOtherAssociations || this.store.allActiveAssociationsProcessed(transfer.remote_id)
-    );
+    const remoteDeleted = deleteRemote;
     if (remoteDeleted) {
       await this.removeRemoteTransfer(transfer, { throwOnError: true });
     }
@@ -510,12 +507,10 @@ export class TransferService {
     if (deleteLocal) {
       await deleteLocalData(localTarget, transfer.name);
     }
-    // A profile association can be hard-deleted after requested remote cleanup.
-    // If put.io is intentionally kept, retain a tombstone so refresh cannot
-    // recreate the association from the remote transfer.
-    if (remoteDeleted && !hasOtherAssociations) {
-      this.store.deleteRemoteTransferRecord(transfer.remote_id);
-    } else if (deleteRemote) {
+    // The row can be hard-deleted once put.io has been cleaned up. If put.io is
+    // intentionally kept, a tombstone stays behind so the next refresh cannot
+    // recreate the download from the remote transfer.
+    if (deleteRemote) {
       this.store.deleteTransfer(transfer.id);
     } else {
       this.store.markTransferRemoved(transfer.id);
@@ -564,10 +559,7 @@ export class TransferService {
       ? path.join(this.requireTransferProfile(transfer).download_at, transfer.category ?? '')
       : undefined;
 
-    const remoteDeleted = deleteRemote && (
-      !this.store.hasOtherActiveAssociations(transfer)
-      || this.store.allActiveAssociationsProcessed(transfer.remote_id)
-    );
+    const remoteDeleted = deleteRemote;
     if (remoteDeleted) {
       await this.removeRemoteFiles(files, { throwOnError: true });
     }
@@ -654,10 +646,6 @@ export class TransferService {
   }
 
   async removeRemoteTransfer(transfer, { throwOnError = false } = {}) {
-    if (
-      this.store.hasOtherActiveAssociations(transfer)
-      && !this.store.allActiveAssociationsProcessed(transfer.remote_id)
-    ) return [];
     const errors = [];
     const putio = this.getPutio();
     if (transfer.putio_file_id) {

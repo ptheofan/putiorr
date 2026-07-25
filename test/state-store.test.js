@@ -7,10 +7,27 @@ import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 
+// downloads.profile_id is NOT NULL, so every download in these tests needs a
+// profile to own it. The owner is resolved once, at ingestion, and frozen.
+function seedProfile(store, overrides = {}) {
+  return store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: '/downloads',
+    rpc_path: '/sonarr/transmission/rpc',
+    enabled: true,
+    ...overrides,
+  });
+}
+
 test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
   const store = new StateStore(':memory:');
   try {
+    const profile = seedProfile(store);
     const first = store.createOrUpdateTransfer({
+      profile_id: profile.id,
       putio_transfer_id: 10,
       putio_file_id: 20,
       hash: 'temporaryhash',
@@ -19,6 +36,7 @@ test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
     });
 
     const second = store.createOrUpdateTransfer({
+      profile_id: profile.id,
       putio_transfer_id: 10,
       putio_file_id: 20,
       hash: 'realhashfromputio',
@@ -28,6 +46,9 @@ test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
     });
 
     assert.equal(second.id, first.id);
+    // The row is resolved by put.io id alone; the hash is informational and
+    // still write-once. Phase 4 makes it correctable on a later refresh that
+    // reports a different one.
     assert.equal(second.hash, 'temporaryhash');
     assert.equal(second.name, 'Updated Name');
     assert.equal(second.putio_status, 'DOWNLOADING');
@@ -41,7 +62,9 @@ test('createOrUpdateTransfer matches later remote updates by put.io id', () => {
 test('createOrUpdateTransfer persists put.io completion_percent across updates', () => {
   const store = new StateStore(':memory:');
   try {
+    const profile = seedProfile(store);
     const created = store.createOrUpdateTransfer({
+      profile_id: profile.id,
       putio_transfer_id: 11,
       hash: 'completinghash',
       name: 'Completing Transfer',
@@ -52,6 +75,7 @@ test('createOrUpdateTransfer persists put.io completion_percent across updates',
     assert.equal(created.completion_percent, 67);
 
     const updated = store.createOrUpdateTransfer({
+      profile_id: profile.id,
       putio_transfer_id: 11,
       hash: 'completinghash',
       putio_status: 'COMPLETING',
@@ -68,7 +92,9 @@ test('createOrUpdateTransfer persists put.io completion_percent across updates',
 test('createOrUpdateTransfer persists put.io status details across updates', () => {
   const store = new StateStore(':memory:');
   try {
+    const profile = seedProfile(store);
     const created = store.createOrUpdateTransfer({
+      profile_id: profile.id,
       putio_transfer_id: 12,
       hash: 'statusmessagehash',
       name: 'Waiting Transfer',
@@ -80,6 +106,7 @@ test('createOrUpdateTransfer persists put.io status details across updates', () 
     assert.equal(created.putio_status_message, 'Waiting for torrent details from the network...');
 
     const updated = store.createOrUpdateTransfer({
+      profile_id: profile.id,
       putio_transfer_id: 12,
       hash: 'statusmessagehash',
       putio_status_message: '',
@@ -193,6 +220,12 @@ test('profiles with linked downloads cannot be deleted', () => {
     assert.throws(
       () => store.deleteProfile(profile.id),
       /cannot be deleted while downloads still reference it/,
+    );
+    // The pre-check carries the sentence the dashboard shows; ON DELETE
+    // RESTRICT is what makes the rule true even for a raw statement.
+    assert.throws(
+      () => store.db.prepare('DELETE FROM profiles WHERE id = ?').run(profile.id),
+      /FOREIGN KEY constraint failed/,
     );
     assert.equal(store.findProfileById(profile.id).id, profile.id);
   } finally {
@@ -400,7 +433,9 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
       'abcdef1234567890abcdef1234567890abcdef12',
     );
     assert.equal(store.findTransferById(1).profile_id, 1);
-    assert.equal(store.findTransferById(1).remote_id, 1);
+    // The transfer id, the association id and the download id are all 1: the
+    // chain copies the id at every hop so the ids the *arr apps hold survive.
+    assert.equal(store.findTransferById(1).id, 1);
     assert.deepEqual(store.listFilesForTransfer(1).map((file) => file.putio_file_id), [789]);
   } finally {
     store.close();
@@ -637,7 +672,10 @@ test('updating a profile normalizes the preset the same way creating one does', 
 // whichever profile sorted first, which is a silent change of owner — and the
 // filesystem path, the download policy and the put.io folder all follow the
 // owner, so the files went somewhere nobody asked for.
-test('seeding never assigns an owner to a download that has none', () => {
+//
+// Phase 3 makes the state unrepresentable rather than merely unrewritten:
+// downloads.profile_id is NOT NULL, so the store refuses the row outright.
+test('a download cannot be stored without an owning profile', () => {
   const root = process.cwd();
   const config = loadConfig({
     PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
@@ -646,18 +684,26 @@ test('seeding never assigns an owner to a download that has none', () => {
   const store = new StateStore(':memory:');
   try {
     store.seedFromConfig(config);
-    const transfer = store.createOrUpdateTransfer({
-      putio_transfer_id: 91,
-      hash: 'ownerlesshash',
-      name: 'Ownerless.Release',
-      lifecycle: 'remote',
+    assert.throws(
+      () => store.createOrUpdateTransfer({
+        putio_transfer_id: 91,
+        hash: 'ownerlesshash',
+        name: 'Ownerless.Release',
+        lifecycle: 'remote',
+      }),
+      /profile id is required/,
+    );
+
+    // And seeding still never rewrites the owner of a download that has one.
+    const owner = store.listProfiles()[0];
+    const stored = store.createOrUpdateTransfer({
+      profile_id: owner.id,
+      putio_transfer_id: 92,
+      hash: 'ownedhash',
+      name: 'Owned.Release',
     });
-    assert.equal(transfer.profile_id, null);
-
-    // A second boot is where the reassignment used to happen.
     store.seedFromConfig(config);
-
-    assert.equal(store.findTransferById(transfer.id).profile_id, null);
+    assert.equal(store.findTransferById(stored.id).profile_id, owner.id);
   } finally {
     store.close();
   }
