@@ -77,6 +77,28 @@ test('a profile download folder is stored absolute', () => {
   }
 });
 
+test('an upgrade freezes a relative profile download folder as absolute', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-download-at-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new StateStore(dbPath);
+  try {
+    const profile = seedProfile(first);
+    // Written before profiles stored their folder absolute. Left alone it
+    // would fail every download of that profile, because a relative root is
+    // refused outright now.
+    first.db.prepare('UPDATE profiles SET download_at = ? WHERE id = ?').run('media/downloads', profile.id);
+  } finally {
+    first.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    assert.equal(reopened.findProfileBySlug('sonarr').download_at, path.resolve('media/downloads'));
+  } finally {
+    reopened.close();
+  }
+});
+
 test('upsertDownload keeps the known hash when put.io reports none', () => {
   const store = new StateStore(':memory:');
   try {

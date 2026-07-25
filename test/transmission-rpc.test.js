@@ -229,13 +229,22 @@ test('torrent-add persists category and torrent-get returns Transmission shape',
   const getBody = await getResponse.json();
   assert.equal(getBody.result, 'success');
   assert.equal(getBody.arguments.torrents.length, 1);
+  // Every *arr resolves the files as downloadDir + name (Sonarr's
+  // TransmissionBase.GetOutputPath), so the name reported over RPC is the
+  // folder the files are staged into — id prefix and all — rather than the
+  // put.io name it is built from. Reporting the put.io name would point every
+  // completed-download import at a path that does not exist.
   assert.deepEqual(getBody.arguments.torrents[0], {
     id: 1,
     hashString: 'abcdef',
-    name: 'Example.Release',
+    name: '1-Example.Release',
     downloadDir: path.join(harness.config.targetDir, 'tv'),
     percentDone: 0,
   });
+  assert.equal(
+    path.join(getBody.arguments.torrents[0].downloadDir, getBody.arguments.torrents[0].name),
+    path.join(harness.config.targetDir, 'tv', downloadFolderName(harness.store.findDownloadById(1))),
+  );
 });
 
 test('failed RPC surfaces the real error in the Transmission result field', async (t) => {
@@ -1301,7 +1310,7 @@ test('RPC listing is scoped to the profile selected by the request path', async 
   assert.deepEqual(getBody.arguments.torrents, [{
     id: 1,
     hashString: 'defaulthash',
-    name: 'Default.Release',
+    name: '1-Default.Release',
     downloadDir: path.join(harness.config.targetDir, 'default'),
   }]);
 });

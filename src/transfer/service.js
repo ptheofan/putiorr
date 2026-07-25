@@ -548,7 +548,10 @@ export class TransferService {
       ? requestedIds.map((id) => this.store.findDownload(id, { profileId: currentProfile.id })).filter(Boolean)
       : this.store.listActiveDownloads({ profileId: currentProfile.id });
 
-    const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
+    const torrents = [];
+    for (const row of rows) {
+      torrents.push(this.toTransmissionTorrent(row, fields, await this.localFolderName(currentProfile, row)));
+    }
     return { torrents };
   }
 
@@ -802,7 +805,22 @@ export class TransferService {
     return errors;
   }
 
-  toTransmissionTorrent(row, requestedFields = []) {
+  // Every *arr resolves a download's files as `downloadDir + name` — Sonarr's
+  // TransmissionBase.GetOutputPath, which Radarr and Lidarr share — so the
+  // name reported over RPC is the folder the files are actually in, not the
+  // put.io name it is built from. Reporting the put.io name while staging into
+  // `<id>-<name>` would point every completed-download import at a path that
+  // does not exist. It is also what Transmission itself reports: a multi-file
+  // torrent's name is its directory.
+  async localFolderName(profile, row) {
+    try {
+      return path.basename(await resolveDownloadRoot(profile, row));
+    } catch {
+      return row.name;
+    }
+  }
+
+  toTransmissionTorrent(row, requestedFields = [], localFolderName = undefined) {
     // Rows reach here only from getTorrents, which selects them scoped to a
     // resolved profile, so an ownerless one is a bug rather than a state to
     // render around.
@@ -817,7 +835,7 @@ export class TransferService {
     const torrent = {
       id: row.id,
       hashString: row.hash,
-      name: row.name,
+      name: localFolderName || row.name,
       eta: row.eta ?? -1,
       status: progress.status,
       downloadDir: path.join(profile.download_at, row.category ?? ''),

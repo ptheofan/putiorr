@@ -448,8 +448,30 @@ export class StateStore {
     }
     this.migrateDownloadsCollapse();
     this.migrateProfilesSchema();
+    this.absolutizeProfileDownloadFolders();
     this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
     this.warnAboutDowngradedWrites();
+  }
+
+  // Rows written before profiles stored their folder absolute. Every local
+  // path a download resolves is built on this column, and phase 4 refuses a
+  // relative root outright rather than resolving it against whatever the
+  // process has as its working directory — so a profile seeded with a relative
+  // folder would fail every download instead of quietly writing next to the
+  // process. Frozen here to the same directory it has been resolving to.
+  absolutizeProfileDownloadFolders() {
+    const rows = this.db.prepare("SELECT id, name, download_at FROM profiles WHERE download_at <> ''").all();
+    for (const row of rows) {
+      if (path.isAbsolute(row.download_at)) continue;
+      const resolved = path.resolve(row.download_at);
+      this.db.prepare('UPDATE profiles SET download_at = ?, updated_at = ? WHERE id = ?')
+        .run(resolved, nowIso(), row.id);
+      logger.warn('rewrote a relative RR profile download folder as absolute', {
+        profile: row.name,
+        from: row.download_at,
+        to: resolved,
+      });
+    }
   }
 
   // The migration is one-way. A user who rolls back to 2.0.x runs an older
