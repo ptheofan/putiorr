@@ -906,3 +906,82 @@ test('deleting a download profile in use reassigns the profiles that reference i
     store.close();
   }
 });
+
+// The owner's ruling: an ownerless legacy row is quarantined for the user to
+// reassign from the dashboard, not dropped. This is that repair path — it never
+// runs automatically, so rule 4 (the owner is frozen at creation) is untouched
+// for every download that has one.
+test('a quarantined download can be reassigned to a profile', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [
+      profileRow({ id: 1, slug: 'default', name: 'Default', rpc_path: '/transmission/rpc' }),
+      profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/transmission/rpc' }),
+    ],
+    transfers: [transferRow({ id: 3, profile_id: null, putio_transfer_id: 1003 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const [orphan] = store.listOrphanedDownloads();
+    assert.equal(orphan.reason, 'no owner');
+
+    const created = store.assignOrphanedDownload(orphan.id, 2);
+    assert.equal(created.profile_id, 2);
+    assert.equal(created.putio_transfer_id, 1003);
+    assert.equal(created.name, 'Example.Release');
+    // Back to 'remote' so the poll re-prepares it from put.io: the quarantine
+    // carries no file rows, and re-preparing is what repairs a drifted list.
+    assert.equal(created.lifecycle, 'remote');
+    assert.deepEqual(store.listOrphanedDownloads(), []);
+  } finally {
+    store.close();
+  }
+});
+
+test('a quarantined download with no identity or a claimed one cannot be reassigned', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [
+      profileRow({ id: 1, download_profile_id: 1 }),
+      profileRow({
+        id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/rpc', download_profile_id: 1,
+      }),
+    ],
+    transfers: [
+      transferRow({ id: 3, putio_transfer_id: null }),
+      transferRow({
+        id: 4, putio_transfer_id: 1004, hash: 'f'.repeat(40), name: 'Claimed.Release',
+      }),
+    ],
+    associations: [
+      associationRow({ id: 3, transfer_id: 3 }),
+      associationRow({ id: 4, transfer_id: 4, profile_id: 1, created_at: '2026-01-01T00:00:00.000Z' }),
+      associationRow({ id: 5, transfer_id: 4, profile_id: 2, created_at: '2026-02-01T00:00:00.000Z' }),
+    ],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const byReason = new Map(store.listOrphanedDownloads().map((row) => [row.reason, row]));
+
+    // Rule 3: no put.io transfer id, no identity to reattach.
+    assert.throws(
+      () => store.assignOrphanedDownload(byReason.get('no put.io transfer id').id, 1),
+      /cannot be reassigned; delete it instead/,
+    );
+    // Rule 3 again from the other side: the transfer is already a download.
+    assert.throws(
+      () => store.assignOrphanedDownload(byReason.get('extra association').id, 2),
+      /already belongs to RR profile Sonarr; delete this entry instead/,
+    );
+    assert.equal(store.listOrphanedDownloads().length, 2);
+
+    store.deleteOrphanedDownload(byReason.get('extra association').id);
+    assert.equal(store.listOrphanedDownloads().length, 1);
+  } finally {
+    store.close();
+  }
+});

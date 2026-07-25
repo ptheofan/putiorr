@@ -695,7 +695,9 @@ test('dashboard can delete multiple selected buckets through mocked put.io', asy
 
   const downloadsResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/downloads'));
   assert.equal(downloadsResponse.status, 200);
-  assert.deepEqual(await downloadsResponse.json(), []);
+  // The quarantine is its own array so the dashboard can render it as a
+  // separate needs-attention section rather than interleaving it.
+  assert.deepEqual(await downloadsResponse.json(), { downloads: [], orphaned: [] });
 });
 
 test('dashboard file delete keeps local files when deleteLocal is omitted', async (t) => {
@@ -2776,4 +2778,63 @@ test('the cross-profile refusal names no owner when the row it found has none', 
   assert.match(response.result, /\(none\)/);
   assert.doesNotMatch(response.result, /; use /);
   assert.ok(harness.store.findDownloadById(orphan.id));
+});
+
+// The owner's ruling on phase 3: legacy rows the collapse could not represent
+// are quarantined rather than dropped, and the dashboard is where the user
+// repairs them. GET /api/downloads keeps them out of the working list so the
+// dashboard can render a distinct needs-attention section.
+test('the dashboard can reassign and delete a quarantined download', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const profile = harness.store.findProfileBySlug('default');
+  const insert = harness.store.db.prepare(`
+    INSERT INTO orphaned_downloads (
+      putio_transfer_id, hash, name, category, lifecycle, total_size,
+      legacy_download_dir, quarantined_at, reason
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insert.run(4242, 'quarantinedhash', 'Quarantined.Release', 'tv', 'remote', 100, '/downloads/tv/Quarantined.Release', 'now', 'no owner');
+  insert.run(null, '', 'Identityless.Release', '', 'remote', 0, '', 'now', 'no put.io transfer id');
+
+  const listed = await (await fetch(harness.url.replace('/transmission/rpc', '/api/downloads'))).json();
+  assert.deepEqual(listed.downloads, []);
+  assert.equal(listed.orphaned.length, 2);
+  assert.equal(listed.orphaned[0].reason, 'no owner');
+  assert.equal(listed.orphaned[0].localPath, '/downloads/tv/Quarantined.Release');
+  assert.equal(listed.orphaned[0].assignable, true);
+  assert.equal(listed.orphaned[1].assignable, false);
+
+  const assigned = await fetch(
+    harness.url.replace('/transmission/rpc', `/api/downloads/orphaned/${listed.orphaned[0].id}/assign`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ profileId: profile.id }),
+    },
+  );
+  assert.equal(assigned.status, 200);
+  const assignedBody = await assigned.json();
+  assert.equal(assignedBody.downloads.length, 1);
+  assert.equal(assignedBody.downloads[0].profileId, profile.id);
+  assert.equal(assignedBody.orphaned.length, 1);
+  assert.equal(harness.store.findDownloadByPutioTransferId(4242).profile_id, profile.id);
+
+  // The identityless one is delete-only, and deleting it touches nothing on
+  // put.io unless asked.
+  const deleted = await fetch(
+    harness.url.replace('/transmission/rpc', `/api/downloads/orphaned/${listed.orphaned[1].id}`),
+    {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    },
+  );
+  assert.equal(deleted.status, 200);
+  assert.deepEqual((await deleted.json()).orphaned, []);
+  assert.deepEqual(harness.putio.deletedTransfers, []);
 });

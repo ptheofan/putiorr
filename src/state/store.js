@@ -1614,6 +1614,65 @@ export class StateStore {
     });
   }
 
+  // The quarantine: rows the collapse could not represent, parked where the
+  // dashboard can show them and the user can reassign or delete each one. This
+  // is a repair path, never a re-derivation path — nothing here runs
+  // automatically, and rule 4 is untouched for every download that has an owner.
+  listOrphanedDownloads() {
+    return this.db.prepare('SELECT * FROM orphaned_downloads ORDER BY id ASC').all();
+  }
+
+  findOrphanedDownloadById(id) {
+    return this.db.prepare('SELECT * FROM orphaned_downloads WHERE id = ?').get(id);
+  }
+
+  deleteOrphanedDownload(id) {
+    this.db.prepare('DELETE FROM orphaned_downloads WHERE id = ?').run(id);
+  }
+
+  // The quarantined row's files are deliberately not carried over: a reassigned
+  // download re-prepares from put.io, which is also what repairs any file list
+  // that drifted while it was parked.
+  assignOrphanedDownload(id, profileId) {
+    const row = this.findOrphanedDownloadById(id);
+    if (!row) throw new Error('Quarantined download not found');
+    // Rule 3 gives a row without a put.io transfer id no identity at all, so
+    // there is nothing to reassign it to; it is delete-only.
+    if (row.putio_transfer_id == null) {
+      throw new Error('This download has no put.io transfer id and cannot be reassigned; delete it instead');
+    }
+    const profile = this.findProfileById(profileId);
+    if (!profile) throw new Error('Profile not found');
+    const claimed = this.findDownloadByPutioTransferId(row.putio_transfer_id);
+    if (claimed) {
+      const owner = this.findProfileById(claimed.profile_id);
+      throw new Error(
+        `Put.io transfer ${row.putio_transfer_id} already belongs to RR profile `
+        + `${owner?.name ?? claimed.profile_id}; delete this entry instead`,
+      );
+    }
+
+    return this.transaction(() => {
+      const created = this.upsertDownload({
+        profile_id: profile.id,
+        putio_transfer_id: row.putio_transfer_id,
+        putio_file_id: row.putio_file_id,
+        save_parent_id: row.save_parent_id,
+        hash: row.hash,
+        name: row.name,
+        source: row.source,
+        source_type: row.source_type,
+        category: row.category,
+        // Back to 'remote' so the poll re-prepares it from put.io rather than
+        // trusting a file list that has no rows behind it.
+        lifecycle: 'remote',
+        total_size: row.total_size,
+      });
+      this.deleteOrphanedDownload(id);
+      return created;
+    });
+  }
+
   getDownloadFileStats(downloadId) {
     return this.db.prepare(`
       SELECT

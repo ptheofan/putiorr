@@ -770,7 +770,34 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'GET' && requestPath === '/api/downloads') {
-        jsonResponse(res, 200, this.service.listDownloads(), this.sessionId);
+        jsonResponse(res, 200, this.downloadsResponse(), this.sessionId);
+        return;
+      }
+
+      // Quarantined legacy rows, kept out of the working list on purpose: the
+      // dashboard renders them as a needs-attention section, not interleaved
+      // with downloads that are actually running.
+      const orphanAssignMatch = requestPath.match(/^\/api\/downloads\/orphaned\/(\d+)\/assign$/);
+      if (orphanAssignMatch && method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = this.service.assignOrphanedDownload(
+          Number(orphanAssignMatch[1]),
+          normalizeOptionalId(body.profileId ?? body.profile_id),
+        );
+        this.scheduleWebSocketDownloadsBroadcast('downloads:orphan-assign');
+        jsonResponse(res, 200, { ...result, ...this.downloadsResponse() }, this.sessionId);
+        return;
+      }
+
+      const orphanDeleteMatch = requestPath.match(/^\/api\/downloads\/orphaned\/(\d+)$/);
+      if (orphanDeleteMatch && method === 'DELETE') {
+        const body = await readJsonBody(req);
+        const result = await this.service.deleteOrphanedDownload(Number(orphanDeleteMatch[1]), {
+          deleteRemote: body.deleteRemote === true,
+          deleteLocal: body.deleteLocal === true,
+        });
+        this.scheduleWebSocketDownloadsBroadcast('downloads:orphan-delete');
+        jsonResponse(res, 200, { ...result, ...this.downloadsResponse() }, this.sessionId);
         return;
       }
 
@@ -781,7 +808,7 @@ export class TransmissionRpcServer {
         this.scheduleWebSocketDownloadsBroadcast('downloads:start');
         jsonResponse(res, 200, {
           ...result,
-          downloads: this.service.listDownloads(),
+          ...this.downloadsResponse(),
         }, this.sessionId);
         return;
       }
@@ -1076,12 +1103,19 @@ export class TransmissionRpcServer {
     }, 100);
   }
 
+  downloadsResponse() {
+    return {
+      downloads: this.service.listDownloads(),
+      orphaned: this.service.listOrphanedDownloads(),
+    };
+  }
+
   webDownloadsState(reason) {
     return {
       type: 'downloads',
       reason,
       sentAt: new Date().toISOString(),
-      downloads: this.service.listDownloads(),
+      ...this.downloadsResponse(),
     };
   }
 

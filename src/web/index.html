@@ -148,6 +148,19 @@
           </div>
 
           <div id="downloadsList" class="downloads-list"></div>
+
+          <div id="orphanedDownloads" class="orphaned-downloads" data-testid="orphaned-downloads" hidden>
+            <div class="section-head">
+              <div class="section-title-row">
+                <h3>Needs attention</h3>
+              </div>
+              <p>
+                Downloads the schema upgrade could not attach to a profile. Their files are
+                untouched on disk. Assign each one to a profile, or delete it.
+              </p>
+            </div>
+            <div id="orphanedDownloadsList" class="downloads-list"></div>
+          </div>
         </section>
 
         <section id="topology" class="panel topo-panel" data-route-view="topology" hidden>

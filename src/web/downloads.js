@@ -24,18 +24,114 @@ import {
 import { renderTopology } from './topology.js';
 
 export async function refreshDownloads() {
-  state.downloads = await api('/api/downloads');
+  applyDownloadsPayload(await api('/api/downloads'));
   renderDownloads();
   renderTopology();
 }
 
+// The quarantine arrives as its own array rather than interleaved with the
+// working downloads: a row that needs a decision from the user is not a row
+// that is making progress, and mixing them buries it.
+export function applyDownloadsPayload(payload) {
+  if (Array.isArray(payload?.downloads)) state.downloads = payload.downloads;
+  if (Array.isArray(payload?.orphaned)) state.orphanedDownloads = payload.orphaned;
+}
+
 export function applyDownloadsUpdate(message) {
-  if (Array.isArray(message.downloads)) state.downloads = message.downloads;
+  applyDownloadsPayload(message);
+  renderDownloads();
+  renderTopology();
+}
+
+const ORPHAN_REASON_LABELS = {
+  'no owner': 'No owning RR profile',
+  'extra association': 'Its put.io transfer already belongs to another profile',
+  'no put.io transfer id': 'No put.io transfer id',
+};
+
+export function renderOrphanedDownloads() {
+  const orphans = Array.isArray(state.orphanedDownloads) ? state.orphanedDownloads : [];
+  setHidden(el.orphanedDownloads, orphans.length === 0);
+  el.orphanedDownloadsList.replaceChildren();
+  if (orphans.length === 0) return;
+
+  for (const orphan of orphans) {
+    const card = document.createElement('article');
+    card.className = 'download-card orphaned-download';
+    card.setAttribute('data-testid', 'orphaned-download');
+    card.dataset.orphanId = String(orphan.id);
+    card.innerHTML = `
+      <div class="download-head">
+        <span class="download-name" data-role="name"></span>
+        <span class="download-status" data-role="reason"></span>
+      </div>
+      <div class="download-facts">
+        <span data-role="local-path"></span>
+      </div>
+      <div class="download-actions">
+        <select data-role="profile" data-testid="orphaned-download-profile"></select>
+        <button data-action="assign" class="button compact-button" type="button" data-testid="orphaned-download-assign">Assign</button>
+        <button data-action="delete" class="button danger compact-button" type="button" data-testid="orphaned-download-delete">Delete</button>
+      </div>
+    `;
+    setText(card.querySelector('[data-role="name"]'), orphan.name || '(unnamed)');
+    setText(card.querySelector('[data-role="reason"]'), ORPHAN_REASON_LABELS[orphan.reason] ?? orphan.reason);
+    setText(card.querySelector('[data-role="local-path"]'), orphan.localPath || 'Local path unknown');
+
+    const select = card.querySelector('[data-role="profile"]');
+    for (const profile of state.profiles ?? []) {
+      const option = document.createElement('option');
+      option.value = String(profile.id);
+      option.textContent = profile.name;
+      select.appendChild(option);
+    }
+    // Rule 3: no put.io transfer id means no identity to reattach, so the only
+    // thing on offer is delete.
+    select.disabled = !orphan.assignable;
+    const assign = card.querySelector('[data-action="assign"]');
+    assign.disabled = !orphan.assignable;
+    assign.addEventListener('click', () => {
+      runOrphanAction(card, () => assignOrphanedDownload(orphan.id, Number(select.value)));
+    });
+    card.querySelector('[data-action="delete"]').addEventListener('click', () => {
+      runOrphanAction(card, () => deleteOrphanedDownload(orphan.id, { deleteRemote: false, deleteLocal: false }));
+    });
+    el.orphanedDownloadsList.appendChild(card);
+  }
+}
+
+// The refusals here are the whole point of the section — "put.io transfer N
+// already belongs to RR profile X" is the answer the user needs — so a failure
+// is written onto the card rather than swallowed.
+async function runOrphanAction(card, action) {
+  try {
+    await action();
+    requestStateRefresh();
+  } catch (error) {
+    setText(card.querySelector('[data-role="reason"]'), error.message);
+  }
+}
+
+export async function assignOrphanedDownload(orphanId, profileId) {
+  applyDownloadsPayload(await api(`/api/downloads/orphaned/${orphanId}/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ profileId }),
+  }));
+  renderDownloads();
+  renderTopology();
+}
+
+export async function deleteOrphanedDownload(orphanId, { deleteRemote = false, deleteLocal = false } = {}) {
+  applyDownloadsPayload(await api(`/api/downloads/orphaned/${orphanId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ deleteRemote, deleteLocal }),
+  }));
   renderDownloads();
   renderTopology();
 }
 
 export function renderDownloads() {
+  renderOrphanedDownloads();
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();
   pruneDownloadUiState();

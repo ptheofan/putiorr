@@ -58,6 +58,7 @@ import {
   closeDeleteConfirm,
   handleDeleteOptionChange,
   updateDeleteConfirmButtonState,
+  applyDownloadsPayload,
 } from './downloads.js';
 import { initTheme } from './theme.js';
 import { initRouter } from './router.js';
@@ -73,7 +74,7 @@ export async function loadAll() {
   state.settings = settings;
   state.profiles = profiles;
   state.downloadProfiles = downloadProfiles;
-  state.downloads = downloads;
+  applyDownloadsPayload(downloads);
   render();
   if (!consumeOAuthLanding()) promptForMissingPutioConnection();
 }

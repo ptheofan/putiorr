@@ -761,6 +761,69 @@ export class TransferService {
     return clampUnit(remoteProgress + localProgress);
   }
 
+  // The needs-attention list. These are legacy rows the schema collapse could
+  // not represent — no owner, no put.io transfer id, or a put.io transfer an
+  // older sibling already claimed — parked so the user can reassign or delete
+  // each one rather than having them disappear on upgrade.
+  listOrphanedDownloads() {
+    return this.store.listOrphanedDownloads().map((row) => ({
+      id: row.id,
+      putioTransferId: row.putio_transfer_id,
+      hash: row.hash,
+      name: row.name,
+      category: row.category,
+      reason: row.reason,
+      quarantinedAt: row.quarantined_at,
+      localPath: row.legacy_download_dir,
+      totalSize: row.total_size,
+      downloadedSize: row.downloaded_ever,
+      // Rule 3: without a put.io transfer id there is no identity to reattach,
+      // so the dashboard offers delete only.
+      assignable: row.putio_transfer_id != null,
+    }));
+  }
+
+  assignOrphanedDownload(orphanId, profileId) {
+    const profile = this.store.findProfileById(profileId);
+    if (!profile) throw new Error('Profile not found');
+    const created = this.store.assignOrphanedDownload(orphanId, profile.id);
+    logger.info('quarantined download reassigned', {
+      orphanId,
+      downloadId: created.id,
+      profile: profile.slug,
+      putioTransferId: created.putio_transfer_id,
+    });
+    return { ok: true, downloadId: created.id };
+  }
+
+  async deleteOrphanedDownload(orphanId, { deleteRemote = false, deleteLocal = false } = {}) {
+    const row = this.store.findOrphanedDownloadById(orphanId);
+    if (!row) throw new Error('Quarantined download not found');
+
+    if (deleteRemote) {
+      await this.removeRemoteTransfer({
+        id: row.id,
+        name: row.name,
+        putio_file_id: row.putio_file_id,
+        putio_transfer_id: row.putio_transfer_id,
+      }, { throwOnError: true });
+    }
+    // legacy_download_dir already ends in the download's own folder, which is
+    // the only thing the quarantine knows about where the files went.
+    if (deleteLocal && row.legacy_download_dir) {
+      await deleteLocalData(path.dirname(row.legacy_download_dir), path.basename(row.legacy_download_dir));
+    }
+    this.store.deleteOrphanedDownload(orphanId);
+    logger.info('quarantined download deleted', {
+      orphanId,
+      name: row.name,
+      reason: row.reason,
+      deleteRemote,
+      deleteLocal,
+    });
+    return { ok: true };
+  }
+
   listDownloads() {
     return this.store.listActiveDownloads().map((row) => {
       // The dashboard is where an ownerless download has to become visible, so
