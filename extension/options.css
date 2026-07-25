@@ -22,7 +22,6 @@
   --panel: #ffffff;
   --panel-2: #f1f0fa;
   --surface: #f6f5fc;
-  --surface-2: #eceaf6;
   --text: #1a1a2e;
   --muted: #6b6b85;
   --line: #e4e2f0;
@@ -47,7 +46,6 @@
     --panel: #14141f;
     --panel-2: #1e1e2e;
     --surface: #1a1a28;
-    --surface-2: #24243a;
     --text: #f3f3f8;
     --muted: #9a9ab2;
     --line: #2b2b3d;
@@ -146,7 +144,7 @@ h2 {
 }
 
 .callout {
-  border-color: rgba(183, 121, 31, 0.35);
+  border-color: color-mix(in srgb, var(--amber) 35%, transparent);
   background: var(--panel);
   border-left: 4px solid var(--amber);
 }
@@ -269,6 +267,10 @@ select:focus {
   font-weight: 700;
   line-height: 1.5;
   white-space: pre-line;
+}
+
+#status.ok {
+  color: var(--ok);
 }
 
 #status.error {

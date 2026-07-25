@@ -22,6 +22,12 @@ async function settle(ms = 60) {
   await wait(ms);
 }
 
+function onlyRequested(defaults, stored) {
+  return Object.fromEntries(
+    Object.entries(defaults).map(([key, value]) => [key, stored?.[key] ?? value]),
+  );
+}
+
 function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, sendMessage } = {}) {
   const log = [];
   const notifications = [];
@@ -44,10 +50,12 @@ function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, se
         get: async (defaults) => {
           const index = Math.min(getCall++, values.length - 1);
           await wait(delays.get?.[index] ?? 0);
-          return { ...defaults, ...values[index] };
+          return onlyRequested(defaults, values[index]);
         },
       },
-      local: { get: async (defaults) => ({ ...defaults, ...local }) },
+      // chrome.storage.get answers the keys it was asked for and no others, so
+      // a key the worker stopped defaulting is a key it can no longer see.
+      local: { get: async (defaults) => onlyRequested(defaults, local) },
       onChanged: register('storage'),
     },
     contextMenus: {
@@ -201,8 +209,6 @@ test('a captured grab hands putiorr the page host and the configured default', a
       baseUrl: 'http://putiorr.test',
       defaultProfileId: 2,
       profiles: [{ id: 2, name: 'Movies' }],
-      // A rules key left over from an older version must not route anything.
-      rules: [{ domains: ['tracker.x.example'], profileId: 99 }],
     },
     fetch: async (url, init) => {
       body = JSON.parse(init.body);
@@ -339,6 +345,50 @@ test('a grab with nothing to route it is refused by putiorr, not by the worker',
   assert.equal(called, true, 'the grab must reach putiorr');
   assert.deepEqual(response, { ok: false, error: 'no profile matches this site and no default profile is configured' });
   assert.equal(harness.notifications[0].message, 'no profile matches this site and no default profile is configured');
+});
+
+test('a default profile deleted in putiorr is named as the default, not as a bare 404', async () => {
+  // The only id this grab carried is the stored default, so "Profile not found"
+  // on its own would send the user looking for a profile they never picked.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 4, name: 'Movies' }] },
+    fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Profile not found' }) }),
+  });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.match(harness.notifications[0].message, /no longer has the default profile \(#4\)/);
+  assert.match(harness.notifications[0].message, /load profiles again in the options/);
+  // The fix is on the options page, so the notification has to be able to reach it.
+  assert.equal(harness.notifications[0].id, 'putiorr-configure');
+  assert.match(response.error, /no longer has the default profile/);
+
+  harness.listeners.notificationClicked('putiorr-configure');
+  assert.ok(harness.log.includes('openOptionsPage'));
+});
+
+test('a 404 on a profile the user picked by hand stays putiorr\'s own answer', async () => {
+  // Here the id came from the menu, not from storage: rewriting this as a stale
+  // default would name the wrong setting.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Profile not found' }) }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.equal(harness.notifications[0].message, 'Profile not found');
+  assert.equal(harness.notifications[0].id, undefined);
 });
 
 test('credentials outside Latin-1 are encodable rather than fatal', async () => {

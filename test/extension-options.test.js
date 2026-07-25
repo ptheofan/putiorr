@@ -183,9 +183,13 @@ function createHarness({ sync = {}, local = {}, fetch: fetchStub } = {}) {
   // chrome.storage.get answers only the keys it was asked for, defaults
   // included. Handing back everything stored would hide a page that forgot to
   // ask for a key — which is exactly how the retired `rules` key is read now.
-  const read = (area) => async (defaults) => Object.fromEntries(
-    Object.entries(defaults).map(([key, value]) => [key, stored[area][key] ?? value]),
-  );
+  const reads = { sync: [], local: [] };
+  const read = (area) => async (defaults) => {
+    reads[area].push(Object.keys(defaults).sort());
+    return Object.fromEntries(
+      Object.entries(defaults).map(([key, value]) => [key, stored[area][key] ?? value]),
+    );
+  };
 
   globalThis.document = {
     getElementById: (id) => fields[id],
@@ -223,7 +227,10 @@ function createHarness({ sync = {}, local = {}, fetch: fetchStub } = {}) {
     fields,
     stored,
     writes,
+    reads,
     status: () => fields.status.textContent,
+    // A real element's className is '' until something sets it.
+    tone: () => fields.status.className ?? '',
     lastSync: () => writes.filter((write) => write.area === 'sync' && write.values).at(-1)?.values,
     // Each rendered profile row is [name, sites]; the empty state is a single
     // node with no cells of its own.
@@ -647,6 +654,63 @@ test('an empty rules array is not worth a notice', async () => {
   assert.equal(harness.legacyShown(), false);
 });
 
+test('the retired key is read with the settings, not in front of them', async () => {
+  // The notice is optional and cosmetic; the form is not. Awaiting a second
+  // read for it would let its failure leave every field empty — which looks
+  // like a first run and would overwrite the stored settings on the next Save.
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091', defaultProfileId: 7, profiles: [{ id: 7, name: 'TV' }] },
+  });
+
+  assert.deepEqual(harness.reads.sync, [['autoCapture', 'baseUrl', 'defaultProfileId', 'profiles', 'rules']]);
+  // Storage that never held the key still produces a populated form.
+  assert.equal(harness.fields.baseUrl.value, 'http://nas:9091');
+  assert.equal(harness.fields.defaultProfile.value, '7');
+  assert.equal(harness.legacyShown(), false);
+});
+
+test('a storage read that fails leaves the form empty but says so', async () => {
+  // The one case where the fields cannot be populated has to be unmistakable:
+  // a silent empty form is the state that overwrites real settings on Save.
+  const harness = createHarness({ sync: { baseUrl: 'http://nas:9091' } });
+  chrome.storage.sync.get = async () => {
+    throw new Error('storage is not available');
+  };
+  const url = new URL(OPTIONS_URL);
+  url.search = `?load=${++optionsLoad}`;
+  await import(url.href);
+  await settle();
+
+  assert.match(harness.status(), /Could not read the stored settings: storage is not available/);
+  assert.equal(harness.tone(), 'error');
+});
+
+test('progress, success and refusal do not all read the same', async () => {
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091', defaultProfileId: 7, profiles: [{ id: 7, name: 'TV' }] },
+    fetch: async () => ({ ok: true, status: 200, json: async () => [{ id: 7, name: 'TV', enabled: 1 }] }),
+  });
+
+  assert.equal(harness.tone(), '', 'a clean restore says nothing at all');
+
+  harness.fields.save.click();
+  await settle();
+  assert.equal(harness.status(), 'Saved');
+  assert.equal(harness.tone(), 'ok');
+
+  harness.fields.loadProfiles.click();
+  assert.equal(harness.status(), 'Contacting putiorr…');
+  assert.equal(harness.tone(), '', 'a request in flight is not good news yet');
+  await settle();
+  assert.match(harness.status(), /^Loaded 1 profile\(s\)/);
+  assert.equal(harness.tone(), 'ok');
+
+  harness.fields.baseUrl.value = 'https://nas/putiorr';
+  harness.fields.save.click();
+  await settle();
+  assert.equal(harness.tone(), 'error');
+});
+
 test('a dismiss that cannot remove the key says so instead of hiding the notice', async () => {
   const harness = await loadOptions({
     sync: { baseUrl: 'http://nas:9091', rules: [{ domains: ['x.example'], profileId: 7 }] },
@@ -658,7 +722,7 @@ test('a dismiss that cannot remove the key says so instead of hiding the notice'
   harness.fields.dismissLegacy.click();
   await settle();
 
-  assert.match(harness.status(), /storage is not available/);
+  assert.match(harness.status(), /The old site rules could not be removed: storage is not available/);
   assert.equal(harness.legacyShown(), true, 'a notice hidden without the key would come back on reload');
 });
 
@@ -711,4 +775,21 @@ test('the extension stylesheet carries its own tokens and both themes', () => {
   assert.match(css, /--accent:/);
   // Web Awesome is a dashboard runtime dependency; the extension ships none.
   assert.doesNotMatch(css, /wa-[a-z]+::part|<wa-/);
+});
+
+test('every token the stylesheet uses is one it also defines', () => {
+  // The tokens are a hand-picked copy of the dashboard's: one left behind
+  // renders as nothing at all (an unresolved var() falls back to the initial
+  // value), and one copied but never used is dead weight pretending to be
+  // theming. Both directions are checked so the copy cannot drift either way.
+  const css = readFileSync(OPTIONS_CSS, 'utf8');
+  const defined = new Set();
+  for (const [, block] of css.matchAll(/:root\s*\{([^}]*)\}/g)) {
+    for (const [, name] of block.matchAll(/(--[a-z0-9-]+)\s*:/g)) defined.add(name);
+  }
+  const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/g)].map(([, name]) => name));
+
+  assert.ok(defined.size > 0, 'the stylesheet must carry its own :root tokens');
+  assert.deepEqual([...used].filter((name) => !defined.has(name)), [], 'used but never defined');
+  assert.deepEqual([...defined].filter((name) => !used.has(name)), [], 'defined but never used');
 });

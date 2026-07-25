@@ -19,11 +19,16 @@ let profiles = [];
 // someone edits a profile there.
 let profileSites = [];
 
-function setStatus(message, ok = true) {
+// Three tones, because "Saved" and "Contacting putiorr…" are not the same
+// news: a save that landed has to be distinguishable at a glance from a
+// request that is still in flight.
+const STATUS_TONES = { note: '', ok: 'ok', error: 'error' };
+
+function setStatus(message, tone = 'note') {
   const status = el('status');
   const lines = Array.isArray(message) ? message.filter(Boolean) : [message];
   status.textContent = lines.join('\n');
-  status.className = ok ? '' : 'error';
+  status.className = STATUS_TONES[tone] ?? '';
   // The status line sits with the connection card and Save at the bottom:
   // without this, a refused save looks like a button that does nothing at all.
   status.scrollIntoView?.({ block: 'nearest' });
@@ -48,20 +53,18 @@ function renderDefaultProfileSelect(selectedId) {
   select.value = profiles.some((profile) => profile.id === selectedId) ? String(selectedId) : '';
 }
 
+// Domains reach this page from putiorr and from storage written by an older
+// version of the extension; neither is guaranteed to be a list of strings.
+function cleanDomains(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((domain) => String(domain ?? '').trim())
+    .filter(Boolean);
+}
+
 // /api/profiles answers with both key styles; either one is the mapping, and a
 // row written by an older putiorr has neither.
 function browserSitesOf(row) {
-  const raw = Array.isArray(row?.browser_domains)
-    ? row.browser_domains
-    : Array.isArray(row?.browserDomains) ? row.browserDomains : [];
-  return raw.map((domain) => String(domain ?? '').trim()).filter(Boolean);
-}
-
-function createRow(className, ...cells) {
-  const row = document.createElement('div');
-  row.className = className;
-  row.append(...cells);
-  return row;
+  return cleanDomains(Array.isArray(row?.browser_domains) ? row.browser_domains : row?.browserDomains);
 }
 
 function createCell(tagName, className, text) {
@@ -81,11 +84,19 @@ function renderProfileSites() {
     return;
   }
 
-  list.replaceChildren(...profileSites.map(({ name, sites }) => createRow(
-    'profile-row',
-    createCell('span', 'profile-row-name', name),
-    createCell('span', sites.length ? 'profile-row-sites' : 'profile-row-sites is-empty', sites.length ? sites.join(', ') : 'no sites'),
-  )));
+  list.replaceChildren(...profileSites.map(({ name, sites }) => {
+    const row = document.createElement('div');
+    row.className = 'profile-row';
+    row.append(
+      createCell('span', 'profile-row-name', name),
+      createCell(
+        'span',
+        sites.length ? 'profile-row-sites' : 'profile-row-sites is-empty',
+        sites.length ? sites.join(', ') : 'no sites',
+      ),
+    );
+    return row;
+  }));
 }
 
 // Rules stored by an older version are shown once and then dropped. They are
@@ -93,9 +104,7 @@ function renderProfileSites() {
 // what they want, and a profile there may not even exist any more.
 function renderLegacyRules(rules) {
   el('legacyRules').replaceChildren(...rules.map((rule) => {
-    const domains = (Array.isArray(rule?.domains) ? rule.domains : [])
-      .map((domain) => String(domain ?? '').trim())
-      .filter(Boolean);
+    const domains = cleanDomains(rule?.domains);
     const profileId = Number(rule?.profileId) || 0;
     const name = profiles.find((profile) => profile.id === profileId)?.name
       ?? (profileId ? `#${profileId}` : 'no profile');
@@ -107,7 +116,11 @@ function renderLegacyRules(rules) {
 // The notice is only hidden once the key is actually gone: hiding it on a
 // failed remove would bring it straight back on the next reload.
 async function dismissLegacyRules() {
-  await chrome.storage.sync.remove('rules');
+  try {
+    await chrome.storage.sync.remove('rules');
+  } catch (error) {
+    throw new Error(`The old site rules could not be removed: ${error.message}`);
+  }
   el('legacyRules').replaceChildren();
   el('legacyNotice').hidden = true;
 }
@@ -115,7 +128,7 @@ async function dismissLegacyRules() {
 async function save() {
   const url = validateBaseUrl(el('baseUrl').value);
   if (!url.ok) {
-    setStatus(url.error, false);
+    setStatus(url.error, 'error');
     return;
   }
 
@@ -136,7 +149,7 @@ async function save() {
       password: el('password').value,
     });
   } catch (error) {
-    setStatus(`The username and password could not be stored: ${error.message}`, false);
+    setStatus(`The username and password could not be stored: ${error.message}`, 'error');
     return;
   }
 
@@ -150,7 +163,7 @@ async function save() {
       profiles: sanitizeProfiles(profiles),
     });
   } catch (error) {
-    setStatus(`The username and password were saved, but the settings were not: ${error.message}`, false);
+    setStatus(`The username and password were saved, but the settings were not: ${error.message}`, 'error');
     return;
   }
 
@@ -162,7 +175,7 @@ async function save() {
   } else if (!defaultProfileId) {
     notes.push('No default profile: only sites configured in putiorr and the right-click menu will grab');
   }
-  setStatus(['Saved', ...notes]);
+  setStatus(['Saved', ...notes], 'ok');
 }
 
 async function fetchProfiles(baseUrl, headers) {
@@ -196,7 +209,7 @@ async function fetchProfiles(baseUrl, headers) {
 async function loadProfilesFromPutiorr() {
   const url = validateBaseUrl(el('baseUrl').value);
   if (!url.ok) {
-    setStatus(url.error, false);
+    setStatus(url.error, 'error');
     return;
   }
   el('baseUrl').value = url.baseUrl;
@@ -211,7 +224,7 @@ async function loadProfilesFromPutiorr() {
   try {
     rows = await fetchProfiles(url.baseUrl, headers);
   } catch (error) {
-    setStatus(error.message, false);
+    setStatus(error.message, 'error');
     return;
   }
 
@@ -222,7 +235,7 @@ async function loadProfilesFromPutiorr() {
   // a green "Saved" — including to the worker's context menu. A putiorr with no
   // enabled profiles and a URL pointing at the wrong host look identical here.
   if (!loaded.length) {
-    setStatus(`putiorr at ${url.baseUrl} has no enabled profiles; create one there first`, false);
+    setStatus(`putiorr at ${url.baseUrl} has no enabled profiles; create one there first`, 'error');
     return;
   }
 
@@ -240,14 +253,17 @@ async function loadProfilesFromPutiorr() {
   if (previousDefault && !loaded.some((profile) => profile.id === previousDefault)) {
     notes.push(`Profile #${previousDefault} no longer exists: pick a new default`);
   }
-  setStatus([`Loaded ${loaded.length} profile(s) — press Save to use them`, ...notes]);
+  setStatus([`Loaded ${loaded.length} profile(s) — press Save to use them`, ...notes], 'ok');
 }
 
 async function restore() {
-  const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
-  // SYNC_DEFAULTS no longer lists the retired `rules` key, and storage.get only
-  // answers the keys it is asked for, so the legacy read is its own call.
-  const legacy = await chrome.storage.sync.get({ rules: [] });
+  // SYNC_DEFAULTS no longer lists the retired `rules` key and storage.get only
+  // answers the keys it is asked for, so it is asked for here — in the same
+  // read as the settings. A separate await for it would put an optional,
+  // cosmetic notice in front of the form: its rejection would leave every field
+  // empty, which looks like a first run and would overwrite the stored settings
+  // on the next Save.
+  const sync = await chrome.storage.sync.get({ ...SYNC_DEFAULTS, rules: [] });
   const local = await chrome.storage.local.get({ username: '', password: '' });
 
   // storage can hold data written by a different extension version, so every
@@ -262,20 +278,20 @@ async function restore() {
   renderDefaultProfileSelect(defaultProfileId);
   renderProfileSites();
 
-  if (Array.isArray(legacy.rules) && legacy.rules.length) renderLegacyRules(legacy.rules);
+  if (Array.isArray(sync.rules) && sync.rules.length) renderLegacyRules(sync.rules);
 
   if (defaultProfileId && !profiles.some((profile) => profile.id === defaultProfileId)) {
-    setStatus(`Saved default profile #${defaultProfileId} is not in the stored list; load profiles again`, false);
+    setStatus(`Saved default profile #${defaultProfileId} is not in the stored list; load profiles again`, 'error');
   }
 }
 
 // storage.sync.set rejects on its own quota, and a rejection escaping a click
 // listener would leave the page claiming nothing at all.
-const reporting = (action) => () => action().catch((error) => setStatus(error.message, false));
+const reporting = (action) => () => action().catch((error) => setStatus(error.message, 'error'));
 
 el('loadProfiles').addEventListener('click', reporting(loadProfilesFromPutiorr));
 el('dismissLegacy').addEventListener('click', reporting(dismissLegacyRules));
 el('save').addEventListener('click', reporting(save));
 // An unhandled rejection here would leave an empty form that looks like a first
 // run and would overwrite the stored settings on the next save.
-restore().catch((error) => setStatus(`Could not read the stored settings: ${error.message}`, false));
+restore().catch((error) => setStatus(`Could not read the stored settings: ${error.message}`, 'error'));

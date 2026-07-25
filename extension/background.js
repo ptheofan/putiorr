@@ -92,7 +92,12 @@ async function postGrab(settings, payload) {
     if (response.status === 401) {
       throw new Error('putiorr rejected the credentials; check username and password in options');
     }
-    throw new Error(body.error || `putiorr responded with ${response.status}`);
+    // The status rides along: the caller knows which of the ids it sent could
+    // have produced a 404, and putiorr cannot know which of them was a stored
+    // setting rather than a deliberate pick.
+    throw Object.assign(new Error(body.error || `putiorr responded with ${response.status}`), {
+      status: response.status,
+    });
   }
   return body;
 }
@@ -140,6 +145,15 @@ async function handleGrab(payload) {
     notify(profileName ? `Sent to putiorr → ${profileName}` : 'Sent to putiorr', result.transfer?.name ?? '');
     return { ok: true };
   } catch (error) {
+    // A grab the worker did not pin to a profile can only 404 on the default it
+    // sent: a site match names a profile putiorr has just looked up. "Profile
+    // not found" alone would leave the user hunting a profile they never chose
+    // for this grab, on a page that has no idea it was deleted.
+    if (error.status === 404 && !hasExplicitId && defaultProfileId) {
+      const message = `putiorr no longer has the default profile (#${defaultProfileId}); load profiles again in the options — click here to open them`;
+      notify('putiorr grab failed', message, NOTIFY_CONFIGURE);
+      return { ok: false, error: message };
+    }
     notify('putiorr grab failed', error.message);
     return { ok: false, error: error.message };
   }
