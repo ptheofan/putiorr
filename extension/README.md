@@ -6,9 +6,10 @@ putiorr profile the grab resolved to.
 
 There are two ways to grab:
 
-- **Click** a `magnet:` or `.torrent` link. The click is captured and the grab
-  goes to the profile of the first matching site rule, or to the default
-  profile. Auto-capture can be switched off in the options.
+- **Click** a `magnet:` or `.torrent` link. The click is captured and putiorr
+  decides where it goes: the profile that lists the page's site under **Browser
+  sites**, or the extension's default profile. Auto-capture can be switched off
+  in the options.
 - **Right-click any link → Send to putiorr → `<profile>`.** This overrides
   the profile for that one grab, and it is also the way to grab from trackers
   whose download URLs do not end in `.torrent` (`download.php?id=…` and
@@ -28,7 +29,26 @@ The extension is not published; load it unpacked.
    right-click menu answers "Reload the page, then try again" for `.torrent`
    links.
 
-## Configure
+## Configure The Sites In putiorr
+
+Which site grabs into which profile is a putiorr setting, kept on the profile
+itself — the extension holds no copy of it. In the putiorr dashboard, open a
+profile's setup wizard and fill in step **4. Browser grabs**: **Browser sites**
+is a comma-separated list of the sites whose grabs land in that profile.
+Subdomains match automatically, so list the domain itself — `x.example` also
+covers `dl.x.example`. Leave it empty to keep a profile out of browser grabs.
+
+putiorr normalizes what you save and the profile card shows the stored result,
+so what is listed is what will be matched: a unicode domain is stored in
+punycode, a scheme, port, or path is stripped, and leading and trailing dots are
+dropped. Underscore hostnames (`media_server.lan`) are accepted because they
+really do match on a home LAN. Wildcards are refused — `*.x.example` is answered
+with the entry you actually want, `x.example`, and the profile is not saved
+until you fix it. A single-label site saves with a warning next to the
+confirmation, because suffix matching makes `lan` a rule over every host ending
+in `.lan`.
+
+## Configure The Extension
 
 Open the extension options (`chrome://extensions` → **Details** →
 **Extension options**) and:
@@ -41,23 +61,44 @@ Open the extension options (`chrome://extensions` → **Details** →
    are kept in `chrome.storage.local`, not in the Google-account-synced storage
    that holds the rest of the settings.
 3. Click **Test connection & load profiles**. It calls `GET /api/profiles` and
-   loads the enabled profiles. Loading only fills the dropdowns — press
-   **Save** to store them.
-4. Pick a **default profile**. Without one, only site rules and the right-click
-   menu can grab.
+   loads the enabled profiles. Loading only fills the page — press **Save** to
+   store them.
+4. Pick a **default profile**. It is used for grabs from sites no putiorr
+   profile claims. Without one, only the sites configured in putiorr and the
+   right-click menu can grab.
 5. Leave **Auto-capture magnet and .torrent clicks** on, or switch it off to
    grab exclusively through the right-click menu.
-6. Optionally add **site rules**: a comma-separated list of domains and the
-   profile they grab into. Subdomains match automatically, so list the domain
-   itself — `x.example` also covers `dl.x.example`.
 
-Rule domains are normalized when you save and written back into the field, so
-what is on screen is what will be matched: a unicode domain is stored in
-punycode, a scheme or path is stripped, and a leading dot is dropped. Underscore
-hostnames (`media_server.lan`) are accepted because they really do match on a
-home LAN. Wildcards are rejected — `*.x.example` is answered with the rule you
-actually want, `x.example`. A single-label domain saves with a warning, because
-suffix matching makes `lan` a rule over every host ending in `.lan`.
+The **Profiles** card lists what the last load returned: every enabled profile
+with its browser sites, read-only. It is a view of putiorr's setting, not a
+second place to edit it — nothing about the sites is stored, so the card is
+empty again after a reload of the options page until you test the connection,
+and a site moved to another profile in putiorr applies to the very next click
+whether or not the card has caught up.
+
+Upgrading from a version that had its own site rules? The options page shows
+them read-only under **Old site rules**, above the connection card, and keeps
+showing them until you press **Dismiss**, which deletes them from storage. They
+are never pushed to putiorr: only you know whether that mapping is still what
+you want. Recreate it as **Browser sites** on the profiles you want, then
+dismiss.
+
+## Which Profile A Grab Lands In
+
+putiorr resolves this on every grab, in this order:
+
+1. The profile picked from the right-click menu, when the grab came from there.
+2. Otherwise the first enabled profile, in creation order, whose **Browser
+   sites** match the page's hostname exactly or as a suffix. Listing one site on
+   two profiles is therefore not an error; the older profile simply wins.
+3. Otherwise the default profile configured in the extension options.
+4. Otherwise nothing: putiorr answers `400` and the notification reads "no
+   profile matches this site and no default profile is configured".
+
+A disabled profile does not claim its sites — routing to it is exactly what
+disabling turned off. An explicit right-click pick is still sent to it, and
+putiorr refuses that one by name ("RR profile X is disabled") rather than
+quietly grabbing somewhere else.
 
 ## Pick The Right Profile
 
@@ -83,13 +124,24 @@ Run this once after loading the extension, against a running putiorr (the
    the uploaded file.
 3. Right-click a link → **Send to putiorr → `<other profile>`** → the
    transfer lands under that other profile's folder.
+4. In putiorr, set **Browser sites** on a profile that is *not* the extension's
+   default to the site you are testing on, save, and click a `magnet:` link
+   there → the notification names that profile, not the default, and the
+   transfer lands under its folder. Nothing in the extension is touched for
+   this: the options page shows the new site after the next **Test connection &
+   load profiles**, but grabs route correctly before that.
 
 ## What To Expect
 
 - Every grab that reaches the extension's service worker ends in a
-  notification. Success shows the profile and the transfer name; failure shows
-  what went wrong (unreachable putiorr, rejected credentials, no profile
-  configured, the error putiorr returned).
+  notification. Success names the profile putiorr actually resolved — read from
+  the response, not guessed locally — along with the transfer name; failure
+  shows what went wrong (unreachable putiorr, rejected credentials, no profile
+  matching the site and no default, the error putiorr returned).
+- A default profile that putiorr no longer has is called out for what it is:
+  the grab fails with "putiorr no longer has the default profile (#N); load
+  profiles again in the options", and clicking that notification opens the
+  options page.
 - Modifier clicks are never captured. Ctrl/Cmd, Shift, and Alt clicks are passed
   straight to Chrome, so **Alt+click stays "download to disk"** and is the
   manual escape hatch when you want the raw `.torrent`.
@@ -119,7 +171,27 @@ The extension posts to `POST /api/grab` on putiorr. That endpoint requires the
 curl -X POST http://nas:9091/api/grab \
   -H 'X-Putiorr-Grab: 1' \
   -H 'Content-Type: application/json' \
-  -d '{"profileId":1,"magnet":"magnet:?xt=urn:btih:…"}'
+  -d '{"pageHost":"x.example","magnet":"magnet:?xt=urn:btih:…"}'
+```
+
+The body carries either `magnet` or `torrentBase64` (plus an optional
+`filename`), an optional `sourceUrl` for putiorr's log, and the three fields
+that decide the profile:
+
+- `profileId` — optional, the caller's explicit pick. It wins over everything
+  else; a value that is not a positive integer is a `400`, and an id putiorr
+  does not have is a `404`, never a silent fallback.
+- `pageHost` — the hostname of the page the grab came from, matched against the
+  profiles' **Browser sites**.
+- `defaultProfileId` — optional, used only when no site matches. Missing, with
+  no match, is the `400` "no profile matches this site and no default profile
+  is configured"; present but unknown to putiorr is a `404`.
+
+The reply names the profile that answered, so the caller does not have to repeat
+its own guess back to the user:
+
+```json
+{"ok":true,"profile":{"id":4,"name":"browser"},"transfer":{"id":9,"name":"…"}}
 ```
 
 The header is an anti-CSRF measure, not authentication. Without it, any web page
@@ -151,5 +223,9 @@ applies to `/api/grab` like it does to every other putiorr route.
   web-accessible `lib/resolve.js`; `use_dynamic_url` was deliberately not used
   because it broke dynamic import from content scripts before Chrome 132, and is
   worth re-evaluating once the supported Chrome floor moves past that.
+- The extension expects a putiorr that knows about browser sites. An
+  auto-captured click sends no `profileId` — that is the server's decision now —
+  so against an older putiorr it comes back as "profileId is required" and only
+  the right-click menu still grabs. Update putiorr, or use the menu.
 - Chrome only. This is a Manifest V3 extension built against the `chrome.*` APIs
   and has not been adapted for other browsers.

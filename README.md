@@ -50,9 +50,11 @@ The [`extension/`](extension) directory holds a Chrome (Manifest V3) extension
 that captures `magnet:` links and `.torrent` downloads on any site and sends
 them to putiorr via `POST /api/grab`. That endpoint requires the
 `X-Putiorr-Grab` header and answers `403` without it, so a web page cannot
-trigger grabs cross-site. Point browser grabs at a dedicated profile with
-auto-remove completed enabled, the way `prowlarr` grabs are cleaned up: nothing
-imports them.
+trigger grabs cross-site. Which site grabs into which profile is a putiorr
+setting — each profile lists its **Browser sites** — so putiorr resolves every
+grab itself and falls back to the default profile configured in the extension.
+Point browser grabs at a dedicated profile with auto-remove completed enabled,
+the way `prowlarr` grabs are cleaned up: nothing imports them.
 
 See [`extension/README.md`](extension/README.md) for setup and limitations.
 
