@@ -416,9 +416,11 @@ export class TransferService {
       // settings row into a copy of the put.io transfer list.
       transfers: entry.transfers.slice(0, 5),
     }));
-    const previous = JSON.stringify(this.store.adoptionNotices());
+    // Nothing is written or logged while the answer is the same as last time:
+    // the poll runs every few seconds, and this is a report about
+    // configuration, which does not change on that timescale.
+    if (JSON.stringify(notices) === JSON.stringify(this.store.adoptionNotices())) return;
     this.store.saveAdoptionNotices(notices);
-    if (JSON.stringify(notices) === previous) return;
 
     if (notices.length === 0) {
       logger.info('every put.io transfer can be attributed to one RR profile again');
