@@ -764,3 +764,32 @@ test('deleting a quarantined download removes the files at its recorded absolute
     harness.store.close();
   }
 });
+
+test('deleting a quarantined download from put.io needs put.io ids to delete', async () => {
+  const harness = await createHarness();
+  try {
+    // The rows quarantined as 'no put.io transfer id' are exactly the ones
+    // with nothing to delete remotely. Reporting success for zero API calls
+    // tells the user the remote copy is gone when nothing was even asked.
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: null,
+      putio_file_id: null,
+      reason: 'no put.io transfer id',
+    });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteRemote: true }),
+      /has no put\.io ids .* cannot delete it from put\.io/,
+    );
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.equal(harness.store.listOrphanedDownloads().length, 1);
+
+    // Without the put.io option it is still removable, which is the promise
+    // the refusal has to keep.
+    assert.deepEqual(await harness.service.deleteOrphanedDownload(orphanId), { ok: true });
+    assert.deepEqual(harness.store.listOrphanedDownloads(), []);
+  } finally {
+    harness.store.close();
+  }
+});

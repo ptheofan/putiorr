@@ -92,17 +92,20 @@ export function renderOrphanedDownloads() {
     setText(card.querySelector('[data-role="local-path"]'), orphan.localPath || 'Local path unknown');
 
     const select = card.querySelector('[data-role="profile"]');
-    for (const profile of state.profiles ?? []) {
+    const profiles = state.profiles ?? [];
+    for (const profile of profiles) {
       const option = document.createElement('option');
       option.value = String(profile.id);
       option.textContent = profile.name;
       select.appendChild(option);
     }
     // Rule 3: no put.io transfer id means no identity to reattach, so the only
-    // thing on offer is delete.
-    select.disabled = !orphan.assignable;
+    // thing on offer is delete. An empty picker is the other way Assign cannot
+    // work — a profile has to exist before anything can be assigned to it.
+    const assignable = orphan.assignable && profiles.length > 0;
+    select.disabled = !assignable;
     const assign = card.querySelector('[data-action="assign"]');
-    assign.disabled = !orphan.assignable;
+    assign.disabled = !assignable;
     assign.addEventListener('click', () => {
       runOrphanAction(card, () => assignOrphanedDownload(orphan.id, Number(select.value)));
     });

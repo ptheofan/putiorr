@@ -77,9 +77,9 @@ export function ownerlessDownloadMessage(transfer) {
     + ' reassign it from the dashboard or delete it';
 }
 
-// A Transmission id may be our association id or a torrent hash. Only the first
-// identifies exactly one download.
-function isAssociationId(identifier) {
+// A Transmission id may be a download id or a torrent hash. Only the first
+// identifies exactly one download: the hash is informational and not unique.
+function isDownloadId(identifier) {
   return typeof identifier === 'number' || /^\d+$/.test(String(identifier));
 }
 
@@ -446,15 +446,15 @@ export class TransferService {
         // a download was gone while it kept downloading, and hid the fact that
         // the client is addressing the wrong endpoint.
         //
-        // Only a numeric association id can say that, though. A hash names a
-        // set of associations, since two profiles may legitimately hold one
-        // put.io transfer, so "this hash exists under another profile" cannot
+        // Only a numeric download id can say that, though. A hash names a set
+        // of downloads, since put.io can report one infohash for more than one
+        // transfer, so "this hash exists under another profile" cannot
         // tell a mis-addressed client apart from one whose own copy is simply
         // gone already — and the second is routine: a repeat remove, or our own
         // auto-remove sweep having hard-deleted the row between the client's
         // get and its remove. A mis-addressed client has no valid ids either,
         // so the check keeps its value.
-        const foreign = isAssociationId(id) ? this.store.findDownloadById(Number(id)) : undefined;
+        const foreign = isDownloadId(id) ? this.store.findDownloadById(Number(id)) : undefined;
         // A tombstoned row is already gone as far as any client is concerned,
         // so there is nothing to correct anyone about.
         if (foreign && !foreign.removed_at) {
@@ -806,7 +806,16 @@ export class TransferService {
     const row = this.store.findOrphanedDownloadById(orphanId);
     if (!row) throw new Error('Quarantined download not found');
 
+    // Refused rather than reported as done: removeRemoteTransfer with both ids
+    // null calls put.io zero times and returns no errors, so the user would be
+    // told the remote copy was deleted when nothing was even asked.
     if (deleteRemote) {
+      if (row.putio_transfer_id == null && row.putio_file_id == null) {
+        throw new Error(
+          `putiorr has no put.io ids for ${row.name || 'this download'}, so it cannot delete it from put.io;`
+          + ' remove it there by hand, then delete this entry without the put.io option',
+        );
+      }
       await this.removeRemoteTransfer({
         id: row.id,
         name: row.name,

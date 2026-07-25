@@ -110,7 +110,10 @@ export function profileConflictError(error, input = {}, store) {
     ? store?.findProfileBySlug(input.slug)
     : store?.findProfileByRpcPath(input.rpc_path);
   const ownerName = String(owner?.name ?? '').trim();
-  if (column === 'rpc_path' && input.type !== GRAB_PROFILE_TYPE) {
+  // No type check: a grab profile holds no rpc_path at all now, so a
+  // uniqueness failure on that column can only come from a profile whose
+  // wizard shows the field.
+  if (column === 'rpc_path') {
     return new Error(ownerName
       ? `RPC endpoint path ${input.rpc_path} is already used by ${ownerName}; choose a different path`
       : `RPC endpoint path ${input.rpc_path} is already used by another profile; choose a different path`);

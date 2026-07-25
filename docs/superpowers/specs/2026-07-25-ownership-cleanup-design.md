@@ -232,6 +232,12 @@ stops working on upgrade, so each needs the fix spelled out.
   existed because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a
   live Transmission endpoint. The path now answers every request with a refusal.
   Fix: nothing — grab profiles are reached through the browser extension.
+- **`GET /api/downloads` answers `{ downloads, orphaned }` instead of a bare
+  array.** The quarantine is a separate list so the dashboard can render it as
+  its own needs-attention section rather than interleaving rows that need a
+  decision with rows that are making progress. The WebSocket downloads payload
+  carries the same two arrays. Anything scripted against the old shape needs
+  `.downloads`.
 - **Every RR profile must have a download profile.** The upgrade assigns the
   default to any profile that had none, and a download profile that is in use
   can no longer be deleted without reassigning the profiles that reference it —

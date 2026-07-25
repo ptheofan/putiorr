@@ -53,10 +53,12 @@ test('the needs-attention section renders the reason, the local path and a profi
   assert.match(html, /id="orphanedDownloadsList"/);
   assert.match(downloadsJs, /data-role="reason"/);
   assert.match(downloadsJs, /data-role="local-path"/);
-  // A row with no put.io transfer id has no identity to reattach, so the
-  // picker and the assign button are disabled and only delete remains.
-  assert.match(downloadsJs, /select\.disabled = !orphan\.assignable;/);
-  assert.match(downloadsJs, /assign\.disabled = !orphan\.assignable;/);
+  // A row with no put.io transfer id has no identity to reattach, and a
+  // dashboard with no profiles has nothing to assign to. Either way the picker
+  // and the assign button are disabled and only delete remains.
+  assert.match(downloadsJs, /const assignable = orphan\.assignable && profiles\.length > 0;/);
+  assert.match(downloadsJs, /select\.disabled = !assignable;/);
+  assert.match(downloadsJs, /assign\.disabled = !assignable;/);
   // Hidden entirely when there is nothing to fix.
   assert.match(downloadsJs, /setHidden\(el\.orphanedDownloads, orphans\.length === 0\)/);
 });
