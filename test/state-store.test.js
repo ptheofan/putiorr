@@ -553,3 +553,58 @@ test('profiles written before the browser sites column read as none and stay edi
     reopened.close();
   }
 });
+
+test('seeded profiles store their preset in the spelling every comparison uses', async () => {
+  // PUTIORR_PROFILES_JSON is written straight into the store without passing
+  // through the API that lowercases a preset, so the store has to do it: a
+  // profile typed "Grab" would be invisible to ?type=grab and refused for
+  // browser grabs with a message telling the user to set the preset it has.
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
+  const config = loadConfig({
+    PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
+    PUTIORR_STATE_PATH: ':memory:',
+    PUTIORR_PROFILES_JSON: JSON.stringify([
+      {
+        name: 'Movies Grab',
+        type: ' Grab ',
+        slug: 'movies-grab',
+        putio_folder_name: 'putiorr',
+        downloadAt: path.join(root, 'downloads'),
+        rpc_path: '/grab/movies-grab/rpc',
+      },
+      {
+        name: 'Plain',
+        slug: 'plain',
+        putio_folder_name: 'putiorr',
+        downloadAt: path.join(root, 'downloads'),
+        rpc_path: '/plain/rpc',
+      },
+    ]),
+  }, root);
+  const store = new StateStore(':memory:');
+  try {
+    store.seedFromConfig(config);
+
+    assert.equal(store.findProfileBySlug('movies-grab').type, 'grab');
+    assert.equal(store.findProfileBySlug('plain').type, 'custom', 'a seed without a preset stays custom');
+  } finally {
+    store.close();
+  }
+});
+
+test('the default seeded profile keeps the preset spelling config normalized', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
+  const config = loadConfig({
+    PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
+    PUTIORR_STATE_PATH: ':memory:',
+    PUTIORR_DEFAULT_PROFILE_TYPE: 'Grab',
+  }, root);
+  const store = new StateStore(':memory:');
+  try {
+    store.seedFromConfig(config);
+
+    assert.equal(store.findProfileBySlug('default').type, 'grab');
+  } finally {
+    store.close();
+  }
+});

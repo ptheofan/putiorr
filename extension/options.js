@@ -215,6 +215,18 @@ async function fetchProfiles(baseUrl, headers) {
   return body;
 }
 
+// Three different answers end up with nothing to show, and only one of them is
+// "create a profile". A row this page had to drop is a putiorr that answered
+// with grab profiles, and a disabled row is a profile that exists: telling
+// either user that none exist sends them to make a second one.
+function emptyProfilesComplaint(rows, enabledRows) {
+  if (enabledRows.length) {
+    return 'answered with Putiorr Grab profiles this page could not read; check that the URL points at putiorr';
+  }
+  if (rows.length) return 'has no enabled Putiorr Grab profiles; enable one there';
+  return 'has no Putiorr Grab profiles; create one there with the Putiorr Grab preset';
+}
+
 async function loadProfilesFromPutiorr() {
   const url = validateBaseUrl(el('baseUrl').value);
   if (!url.ok) {
@@ -249,10 +261,7 @@ async function loadProfilesFromPutiorr() {
   // status has to name the fix: a putiorr full of *arr profiles answers this
   // exactly like one with no profiles at all, since neither can accept a grab.
   if (!loaded.length) {
-    const complaint = rows.length && !enabledRows.length
-      ? 'has no enabled Putiorr Grab profiles; enable one there'
-      : 'has no Putiorr Grab profiles; create one there with the Putiorr Grab preset';
-    setStatus(`putiorr at ${url.baseUrl} ${complaint}`, 'error');
+    setStatus(`putiorr at ${url.baseUrl} ${emptyProfilesComplaint(rows, enabledRows)}`, 'error');
     return;
   }
 

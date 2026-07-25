@@ -806,3 +806,98 @@ test('a profile whose browser sites are all unambiguous carries no warning key',
   assert.equal(created.status, 201);
   assert.equal('browser_domain_warnings' in created.body, false);
 });
+
+test('a duplicate grab profile name is refused by name, not by a hidden column', async (t) => {
+  // The wizard hides the RPC endpoint path for grab profiles and derives it
+  // from the display name, so "UNIQUE constraint failed: profiles.rpc_path"
+  // would point at a field that is not on the form.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, {
+    name: 'Movies Grab',
+    slug: 'movies-grab',
+    type: 'grab',
+    rpc_path: '/grab/movies-grab/rpc',
+  });
+  assert.equal(created.status, 201);
+
+  const duplicate = await postProfile(harness, {
+    name: 'Movies Grab',
+    slug: 'movies-grab',
+    type: 'grab',
+    rpc_path: '/grab/movies-grab/rpc',
+  });
+
+  assert.equal(duplicate.status, 400);
+  assert.equal(
+    duplicate.body.error,
+    'A profile named "Movies Grab" already exists; choose a different display name',
+  );
+  assert.doesNotMatch(duplicate.body.error, /UNIQUE|constraint|rpc_path/);
+});
+
+test('a duplicate *arr endpoint names the path the wizard actually shows', async (t) => {
+  // An *arr profile derives its path from the preset rather than the name, and
+  // the field is on the form, so the path is what the user has to change.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, {
+    name: 'Sonarr',
+    slug: 'sonarr',
+    type: 'sonarr',
+    rpc_path: '/sonarr/transmission/rpc',
+  });
+  assert.equal(created.status, 201);
+
+  const duplicate = await postProfile(harness, {
+    name: 'Sonarr Anime',
+    slug: 'sonarr-anime',
+    type: 'sonarr',
+    rpc_path: '/sonarr/transmission/rpc',
+  });
+
+  assert.equal(duplicate.status, 400);
+  assert.equal(
+    duplicate.body.error,
+    'RPC endpoint path /sonarr/transmission/rpc is already used by another profile; choose a different path',
+  );
+
+  // A name collision on an *arr profile is still a name collision: the slug is
+  // what repeats, and the display name is what makes it.
+  const sameName = await postProfile(harness, {
+    name: 'Sonarr',
+    slug: 'sonarr',
+    type: 'sonarr',
+    rpc_path: '/sonarr-2/transmission/rpc',
+  });
+
+  assert.equal(sameName.status, 400);
+  assert.equal(
+    sameName.body.error,
+    'A profile named "Sonarr" already exists; choose a different display name',
+  );
+});
+
+test('renaming a profile onto another profile name is refused the same way', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const first = await postProfile(harness, { name: 'Movies', slug: 'movies', rpc_path: '/movies/rpc' });
+  const second = await postProfile(harness, { name: 'Music', slug: 'music', rpc_path: '/music/rpc' });
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 201);
+
+  const response = await fetch(`${harness.base}/api/profiles/${second.body.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Movies', slug: 'movies' }),
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(
+    (await response.json()).error,
+    'A profile named "Movies" already exists; choose a different display name',
+  );
+});

@@ -9,6 +9,11 @@ import { logger } from '../logger.js';
 import { PutioOAuthClient } from '../putio/oauth.js';
 import { matchProfileByHost, normalizeBrowserDomains } from '../transfer/browser-domains.js';
 import { VersionChecker } from '../version.js';
+// The dashboard writes this preset into the profiles this server then routes
+// on, so the two must spell it identically; constants.js is plain data with no
+// imports of its own, which is why the server can read the same file the
+// browser is served. WEB_DIR below already points at that directory.
+import { GRAB_PROFILE_TYPE } from '../web/constants.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -19,9 +24,9 @@ const PUTIO_SWAGGER_APP_ID = '3270';
 const OAUTH_APP_ID_SETTING = 'putio_oauth_app_id';
 const OAUTH_RELAY_URL_SETTING = 'putio_oauth_relay_url';
 const CLIENT_SETTINGS_TEST_TIMEOUT_MS = 5_000;
-// The profile preset that browser grabs belong to; the web dashboard spells the
-// same value in PROFILE_TYPES and labels it "Putiorr Grab".
-const GRAB_PROFILE_TYPE = 'grab';
+// Both of the profiles table's UNIQUE columns are derived from what the wizard
+// shows, so a collision is reported in terms of the field to change.
+const UNIQUE_PROFILE_COLUMN = /UNIQUE constraint failed: profiles\.(\w+)/;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -84,6 +89,35 @@ function refuseNonGrabProfile(profile) {
     status: 400,
     error: `${profile.name} is not a Putiorr Grab profile; set its App preset to Putiorr Grab in putiorr`,
   };
+}
+
+// SQLite answers a duplicate with the column its index is on, which the wizard
+// shows under the form as-is. `profiles.rpc_path` is a field a grab profile
+// never renders — the wizard derives that path from the display name — so the
+// raw message sends the user looking for something that is not on screen. The
+// *arr presets do show the path and derive it from the preset rather than the
+// name, so there the path is what has to change. Anything that is not a
+// uniqueness failure is passed through untouched.
+export function profileConflictError(error, input = {}) {
+  const column = UNIQUE_PROFILE_COLUMN.exec(error?.message ?? '')?.[1];
+  if (!column) return error;
+  if (column === 'rpc_path' && input.type !== GRAB_PROFILE_TYPE) {
+    return new Error(
+      `RPC endpoint path ${input.rpc_path} is already used by another profile; choose a different path`,
+    );
+  }
+  const name = String(input.name ?? '').trim();
+  return new Error(name
+    ? `A profile named "${name}" already exists; choose a different display name`
+    : 'Another profile already uses this display name; choose a different one');
+}
+
+function writeProfile(input, write) {
+  try {
+    return write();
+  } catch (error) {
+    throw profileConflictError(error, input);
+  }
 }
 
 function timingSafeEqualString(a, b) {
@@ -667,7 +701,7 @@ export class TransmissionRpcServer {
 
       if (method === 'POST' && requestPath === '/api/profiles') {
         const input = normalizeProfileInput(await readJsonBody(req));
-        const profile = this.service.store.createProfile(input);
+        const profile = writeProfile(input, () => this.service.store.createProfile(input));
         jsonResponse(res, 201, profileResponse(profile, input), this.sessionId);
         return;
       }
@@ -675,7 +709,7 @@ export class TransmissionRpcServer {
       const profileMatch = requestPath.match(/^\/api\/profiles\/(\d+)$/);
       if (profileMatch && method === 'PUT') {
         const input = normalizeProfileInput(await readJsonBody(req), { partial: true });
-        const profile = this.service.store.updateProfile(Number(profileMatch[1]), input);
+        const profile = writeProfile(input, () => this.service.store.updateProfile(Number(profileMatch[1]), input));
         if (!profile) throw new Error('Profile not found');
         jsonResponse(res, 200, profileResponse(profile, input), this.sessionId);
         return;

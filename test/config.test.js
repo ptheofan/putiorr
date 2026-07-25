@@ -78,3 +78,13 @@ test('ensureRuntimeDirs creates download and state directories', async () => {
 
   assert.equal(path.isAbsolute(config.targetDir), true);
 });
+
+test('the seeded preset is lowercased so it matches the presets code compares against', () => {
+  // A preset is only ever compared exactly: `?type=grab` and the check that
+  // decides whether a profile may serve browser grabs both do. "Grab" would
+  // seed a profile that reads as set up and is never selected by either.
+  assert.equal(loadConfig({ PUTIORR_DEFAULT_PROFILE_TYPE: ' Grab ' }, process.cwd(), { loadEnvFile: false }).defaultProfileType, 'grab');
+  assert.equal(loadConfig({ PUTIORR_DEFAULT_PROFILE_TYPE: 'SONARR' }, process.cwd(), { loadEnvFile: false }).defaultProfileType, 'sonarr');
+  assert.equal(loadConfig({ PUTIORR_DEFAULT_PROFILE_TYPE: '   ' }, process.cwd(), { loadEnvFile: false }).defaultProfileType, 'custom');
+  assert.equal(loadConfig({}, process.cwd(), { loadEnvFile: false }).defaultProfileType, 'custom');
+});

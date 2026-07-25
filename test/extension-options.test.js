@@ -586,6 +586,30 @@ test('a putiorr whose grab profiles are all disabled says which fix applies', as
   assert.equal(harness.fields.status.className, 'error');
 });
 
+test('grab profiles this page cannot read are not reported as missing', async () => {
+  // sanitizeProfiles drops a row without a usable id, which can empty the list
+  // even though putiorr answered with enabled grab profiles. "Create one with
+  // the Putiorr Grab preset" would be advice for a profile that already exists.
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [{ id: 0, name: 'Movies', enabled: true }, { name: 'TV', enabled: true }],
+    }),
+  });
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  assert.equal(
+    harness.status(),
+    'putiorr at http://nas:9091 answered with Putiorr Grab profiles this page could not read; check that the URL points at putiorr',
+  );
+  assert.equal(harness.fields.status.className, 'error');
+  assert.doesNotMatch(harness.status(), /create one/);
+});
+
 test('a putiorr with no grab profiles at all names the preset that fixes it', async () => {
   // Nothing came back for ?type=grab: the *arr profiles this putiorr may well
   // have are invisible here on purpose, so "no profiles" would read as a broken

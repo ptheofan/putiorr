@@ -139,6 +139,14 @@ function profileBrowserDomainsPatch(input) {
   return domains === undefined ? undefined : JSON.stringify(normalizeBrowserDomains(domains).domains);
 }
 
+// The API lowercases the preset before it reaches the store, but the seed paths
+// do not go through it: PUTIORR_PROFILES_JSON and PUTIORR_DEFAULT_PROFILE_TYPE
+// are written straight in. A preset is only ever compared exactly, so storing
+// "Grab" would leave a profile that no browser grab and no ?type= filter finds.
+function profileTypeValue(input) {
+  return String(input.type ?? '').trim().toLowerCase() || 'custom';
+}
+
 function profileClientHost(input) {
   return input.client_host ?? input.clientHost;
 }
@@ -658,7 +666,7 @@ export class StateStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.name,
-      input.type ?? 'custom',
+      profileTypeValue(input),
       input.slug,
       downloadProfileId == null ? null : normalizeOptionalId(downloadProfileId),
       autoRemoveCompleted ? 1 : 0,
