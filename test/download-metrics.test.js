@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DownloadManager } from '../src/download/manager.js';
@@ -682,6 +682,83 @@ test('a mixed-status put.io failure is not read as "the remote is gone"', async 
     const logged = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
     assert.equal(logged.meta.transferId, transfer.id);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 3 review, critical finding: legacyLocalPath used to fall through to a
+// bare row.name when a quarantined row had neither an owner nor a stored
+// download_dir — the shape a poll-adopted transfer leaves behind, since nothing
+// ever asked it for a download-dir. deleteLocalData then resolved that name
+// against process.cwd(), which satisfies resolveInside's containment check
+// trivially, and rm(recursive, force) ran on <cwd>/<name>.
+function quarantineRow(store, overrides = {}) {
+  const row = {
+    putio_transfer_id: 4242,
+    hash: 'quarantinedhash',
+    name: 'Quarantined.Release',
+    source: '',
+    source_type: 'magnet',
+    category: '',
+    lifecycle: 'remote',
+    total_size: 0,
+    downloaded_ever: 0,
+    putio_file_id: null,
+    save_parent_id: null,
+    legacy_download_dir: '',
+    quarantined_at: 'now',
+    reason: 'no owner',
+    ...overrides,
+  };
+  const keys = Object.keys(row);
+  const result = store.db.prepare(
+    `INSERT INTO orphaned_downloads (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`,
+  ).run(...keys.map((key) => row[key]));
+  return Number(result.lastInsertRowid);
+}
+
+test('deleting a quarantined download never resolves its files against the working directory', async () => {
+  const harness = await createHarness();
+  const cwd = process.cwd();
+  const sandbox = await mkdtemp(path.join(tmpdir(), 'putiorr-cwd-'));
+  try {
+    // The exact reproduction: a relative path, and a directory of that name
+    // sitting in whatever the process happens to have as its cwd.
+    process.chdir(sandbox);
+    const victim = path.join(sandbox, 'Quarantined.Release');
+    await mkdir(victim, { recursive: true });
+    await writeFile(path.join(victim, 'movie.mkv'), 'irreplaceable');
+
+    const orphanId = quarantineRow(harness.store, { legacy_download_dir: 'Quarantined.Release' });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /does not know where .* files are/,
+    );
+
+    // Nothing was touched, and the entry is still there to be dealt with.
+    await stat(path.join(victim, 'movie.mkv'));
+    assert.equal(harness.store.listOrphanedDownloads().length, 1);
+  } finally {
+    process.chdir(cwd);
+    harness.store.close();
+  }
+});
+
+test('deleting a quarantined download removes the files at its recorded absolute path', async () => {
+  const harness = await createHarness();
+  try {
+    const target = path.join(harness.config.targetDir, 'tv', 'Quarantined.Release');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, 'movie.mkv'), 'movie');
+
+    const orphanId = quarantineRow(harness.store, { legacy_download_dir: target });
+    const result = await harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true });
+
+    assert.equal(result.ok, true);
+    await assert.rejects(() => stat(target), { code: 'ENOENT' });
+    assert.deepEqual(harness.store.listOrphanedDownloads(), []);
   } finally {
     harness.store.close();
   }

@@ -1028,3 +1028,45 @@ test('reappearing legacy tables are reported after the migration has run', async
     store.close();
   }
 });
+
+// The store half of the same finding: a poll-adopted transfer never had a
+// download-dir, so an ownerless one used to quarantine with its bare name as
+// the "local path". Nothing may record a relative path.
+test('a quarantined row never records a relative local path', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [
+      profileRow({ id: 1, slug: 'default', name: 'Default', rpc_path: '/transmission/rpc' }),
+      profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/transmission/rpc' }),
+    ],
+    transfers: [
+      // Adopted from the put.io poll: an owner it later lost, and no
+      // download_dir, because nothing ever asked it for one.
+      transferRow({ id: 3, profile_id: null, putio_transfer_id: 1003, category: '', download_dir: '' }),
+      transferRow({
+        id: 4,
+        profile_id: null,
+        putio_transfer_id: 1004,
+        hash: 'e'.repeat(40),
+        name: 'Relative.Release',
+        category: '',
+        download_dir: 'relative/fragment',
+      }),
+    ],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const quarantined = store.listOrphanedDownloads();
+    assert.equal(quarantined.length, 2);
+    for (const row of quarantined) {
+      assert.equal(row.legacy_download_dir, '', `${row.name} recorded ${row.legacy_download_dir}`);
+    }
+    for (const entry of collapseReport(store).ownerless) {
+      assert.equal(entry.localPath, '');
+    }
+  } finally {
+    store.close();
+  }
+});

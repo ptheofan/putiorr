@@ -795,12 +795,19 @@ export class StateStore {
   // is what the *arr asked for, which is the right answer when the owner is
   // unknown; when it is known, the folder the files actually staged into is
   // the profile's own.
+  //
+  // Absolute or nothing. This used to fall through to a bare row.name — the
+  // shape a poll-adopted transfer leaves behind, since nothing ever asked it
+  // for a download-dir — and a relative path resolves against process.cwd()
+  // wherever it is later used, which satisfies resolveInside's containment
+  // check trivially. The quarantine's delete then recursively removed
+  // <cwd>/<name>. An empty string is the honest answer for "putiorr does not
+  // know where these files are", and every consumer has to handle it anyway.
   legacyLocalPath(row, owner) {
-    if (owner?.download_at) {
-      return path.join(owner.download_at, row.category ?? '', row.name ?? '');
-    }
-    if (row.download_dir) return path.join(row.download_dir, row.name ?? '');
-    return row.name ?? '';
+    const candidate = owner?.download_at
+      ? path.join(owner.download_at, row.category ?? '', row.name ?? '')
+      : (row.download_dir ? path.join(row.download_dir, row.name ?? '') : '');
+    return path.isAbsolute(candidate) ? candidate : '';
   }
 
   quarantineLegacyRow(statement, row, localPath, reason, timestamp) {

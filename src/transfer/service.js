@@ -812,8 +812,19 @@ export class TransferService {
       }, { throwOnError: true });
     }
     // legacy_download_dir already ends in the download's own folder, which is
-    // the only thing the quarantine knows about where the files went.
-    if (deleteLocal && row.legacy_download_dir) {
+    // the only thing the quarantine knows about where the files went. It is
+    // recorded absolute or not at all: a relative path would resolve against
+    // process.cwd() here, and rm(recursive) would take whatever happens to sit
+    // there. Refusing is also the honest answer to "delete the files" when we
+    // cannot say which files those are — silently skipping reported success
+    // for a deletion that never happened.
+    if (deleteLocal) {
+      if (!path.isAbsolute(row.legacy_download_dir ?? '')) {
+        throw new Error(
+          `putiorr does not know where ${row.name || 'this download'}'s files are, so it cannot delete them;`
+          + ' remove them by hand, then delete this entry without the local-files option',
+        );
+      }
       await deleteLocalData(path.dirname(row.legacy_download_dir), path.basename(row.legacy_download_dir));
     }
     this.store.deleteOrphanedDownload(orphanId);
