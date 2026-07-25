@@ -74,6 +74,9 @@ async function createHarness() {
     PUTIORR_LISTEN_PORT: '0',
     PUTIORR_PUTIO_TOKEN: 'test-token',
     PUTIORR_PUTIO_APP_ID: '12345',
+    // Only Putiorr Grab profiles serve browser grabs, so the profile the store
+    // seeds is one: every grab here would otherwise be refused for its preset.
+    PUTIORR_DEFAULT_PROFILE_TYPE: 'grab',
   }, root);
   const store = new StateStore(':memory:');
   store.seedFromConfig(config);
@@ -279,12 +282,12 @@ test('grab for a disabled profile returns 400', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
   const disabled = harness.store.createProfile({
-    name: 'Sonarr',
-    type: 'sonarr',
-    slug: 'sonarr',
-    putio_folder_name: 'sonarr',
-    downloadAt: path.join(harness.config.targetDir, 'sonarr-root'),
-    rpc_path: '/sonarr/transmission/rpc',
+    name: 'Grabs',
+    type: 'grab',
+    slug: 'grabs',
+    putio_folder_name: 'grabs',
+    downloadAt: path.join(harness.config.targetDir, 'grabs-root'),
+    rpc_path: '/grab/grabs/rpc',
     enabled: true,
   });
   harness.store.updateProfile(disabled.id, { enabled: false });
@@ -358,10 +361,10 @@ test('grab rejects metainfo that is not valid base64', async (t) => {
 // Which profile a browser grab lands in is decided here rather than in the
 // extension, so these cases are the whole resolution order: explicit pick →
 // site match → the extension's default → refusal.
-function createSiteProfile(harness, slug, browserDomains, { enabled = true } = {}) {
+function createSiteProfile(harness, slug, browserDomains, { enabled = true, type = 'grab' } = {}) {
   return harness.store.createProfile({
     name: slug.toUpperCase(),
-    type: 'custom',
+    type,
     slug,
     putio_folder_name: slug,
     downloadAt: path.join(harness.config.targetDir, slug),
@@ -487,6 +490,77 @@ test('a defaultProfileId that is not an id is refused as itself', async (t) => {
   assert.equal(harness.putio.added.length, 0);
 });
 
+test('a grab profile claims the site even when an *arr profile listed it first', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  // Created first, so it wins on id order — the preset is what decides, not
+  // which profile happened to list the site earliest.
+  const arr = createSiteProfile(harness, 'sonarr', ['x.example'], { type: 'sonarr' });
+  const grab = createSiteProfile(harness, 'browser', ['x.example']);
+  assert.ok(arr.id < grab.id, 'the *arr profile must be the older one for this to prove anything');
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.profile, { id: grab.id, name: grab.name });
+  assert.equal(harness.store.findTransferByPutioId(77).profile_id, grab.id);
+});
+
+test('an *arr profile that lists the site does not claim a grab on its own', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  // browser_domains on a non-grab profile simply stops being consulted, so the
+  // grab has nothing to resolve to rather than landing in an *arr profile.
+  createSiteProfile(harness, 'sonarr', ['x.example'], { type: 'sonarr' });
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  assert.equal(body.error, 'No profile matches this site and no default profile is configured');
+  assert.equal(harness.putio.added.length, 0);
+});
+
+test('an explicit pick of a non-grab profile is refused by naming the preset', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const arr = createSiteProfile(harness, 'sonarr', [], { type: 'sonarr' });
+
+  const { status, body } = await postGrab(harness, {
+    profileId: arr.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  // The message has to say which profile and what to change, because the pick
+  // came from a right-click menu the user cannot edit.
+  assert.match(body.error, /SONARR/);
+  assert.match(body.error, /Putiorr Grab/);
+  assert.equal(harness.putio.added.length, 0);
+});
+
+test('a default pointing at a non-grab profile is refused by naming the preset', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const arr = createSiteProfile(harness, 'sonarr', [], { type: 'sonarr' });
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    defaultProfileId: arr.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  assert.match(body.error, /SONARR/);
+  assert.match(body.error, /Putiorr Grab/);
+  assert.equal(harness.putio.added.length, 0);
+});
+
 test('a disabled profile does not claim its browser sites', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
@@ -558,6 +632,57 @@ test('a defaultProfileId that no longer exists is a 404, not a silent grab', asy
   assert.equal(status, 404);
   assert.equal(body.error, 'Profile not found');
   assert.equal(harness.putio.added.length, 0);
+});
+
+// The extension asks for the profiles it is allowed to use, so the filter is
+// the server's job: the extension never learns the type vocabulary.
+async function getProfiles(harness, query = '') {
+  const response = await fetch(`${harness.base}/api/profiles${query}`);
+  return { status: response.status, body: await response.json() };
+}
+
+test('GET /api/profiles?type= returns only profiles of that type', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const seeded = harness.store.listProfiles()[0];
+  const arr = createSiteProfile(harness, 'sonarr', [], { type: 'sonarr' });
+  const grab = createSiteProfile(harness, 'browser', ['x.example']);
+
+  const grabs = await getProfiles(harness, '?type=grab');
+  assert.equal(grabs.status, 200);
+  assert.deepEqual(grabs.body.map((profile) => profile.id).sort(), [seeded.id, grab.id].sort());
+
+  // The filter is the type the caller asked for, not a hard-coded grab branch.
+  const arrs = await getProfiles(harness, '?type=sonarr');
+  assert.deepEqual(arrs.body.map((profile) => profile.id), [arr.id]);
+});
+
+test('GET /api/profiles without a type is unchanged, disabled profiles and all', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const seeded = harness.store.listProfiles()[0];
+  const arr = createSiteProfile(harness, 'sonarr', [], { type: 'sonarr' });
+  const disabled = createSiteProfile(harness, 'browser', ['x.example'], { enabled: false });
+
+  const all = await getProfiles(harness);
+  assert.equal(all.status, 200);
+  assert.deepEqual(all.body.map((profile) => profile.id).sort(), [seeded.id, arr.id, disabled.id].sort());
+
+  // An unset <select> submits '', which is a caller with no filter rather than
+  // a caller asking for the profiles whose type is the empty string.
+  const empty = await getProfiles(harness, '?type=');
+  assert.deepEqual(empty.body.map((profile) => profile.id).sort(), all.body.map((profile) => profile.id).sort());
+});
+
+test('GET /api/profiles with an unknown type returns an empty list', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await getProfiles(harness, '?type=nosuchtype');
+
+  assert.equal(status, 200);
+  assert.deepEqual(body, []);
 });
 
 // The profile API is where a browser site is actually typed in, so its

@@ -19,6 +19,9 @@ const PUTIO_SWAGGER_APP_ID = '3270';
 const OAUTH_APP_ID_SETTING = 'putio_oauth_app_id';
 const OAUTH_RELAY_URL_SETTING = 'putio_oauth_relay_url';
 const CLIENT_SETTINGS_TEST_TIMEOUT_MS = 5_000;
+// The profile preset that browser grabs belong to; the web dashboard spells the
+// same value in PROFILE_TYPES and labels it "Putiorr Grab".
+const GRAB_PROFILE_TYPE = 'grab';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -67,6 +70,20 @@ function isTorrentMetainfoBase64(value) {
   // base64, then require a bencoded dictionary so login pages never reach put.io as a torrent.
   if (data.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')) return false;
   return data.length > 0 && data[0] === 0x64;
+}
+
+// A profile the caller named — its explicit pick or its cached default — is
+// refused when it is not a Putiorr Grab profile, and the refusal says which
+// profile and what to change: the pick comes from a right-click menu the user
+// cannot edit. Returns the refusal to send, or undefined when the profile may
+// serve grabs.
+function refuseNonGrabProfile(profile) {
+  if (profile.type === GRAB_PROFILE_TYPE) return undefined;
+  return {
+    ok: false,
+    status: 400,
+    error: `${profile.name} is not a Putiorr Grab profile; set its App preset to Putiorr Grab in putiorr`,
+  };
 }
 
 function timingSafeEqualString(a, b) {
@@ -381,7 +398,7 @@ export class TransmissionRpcServer {
     }
 
     if (requestPath.startsWith('/api/')) {
-      await this.handleApi(req, res, requestPath);
+      await this.handleApi(req, res, requestPath, url.searchParams);
       return;
     }
 
@@ -469,7 +486,9 @@ export class TransmissionRpcServer {
     }
   }
 
-  async handleApi(req, res, requestPath) {
+  // The query string is passed alongside the path rather than replacing it:
+  // every branch below matches on the path, and so does the failure log.
+  async handleApi(req, res, requestPath, searchParams = new URLSearchParams()) {
     try {
       const method = req.method ?? 'GET';
 
@@ -583,7 +602,17 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'GET' && requestPath === '/api/profiles') {
-        jsonResponse(res, 200, this.service.store.listProfiles({ includeDisabled: true }), this.sessionId);
+        // The browser extension asks for `?type=grab` so it never has to know
+        // the preset vocabulary. An absent or empty value is a caller with no
+        // filter, not one asking for profiles whose type is the empty string.
+        const type = (searchParams.get('type') ?? '').trim();
+        const profiles = this.service.store.listProfiles({ includeDisabled: true });
+        jsonResponse(
+          res,
+          200,
+          type ? profiles.filter((profile) => profile.type === type) : profiles,
+          this.sessionId,
+        );
         return;
       }
 
@@ -1121,7 +1150,8 @@ export class TransmissionRpcServer {
   // enabled profile that claims the site the grab came from, then the caller's
   // configured default. Returns `{ ok: true, profile }` or the refusal to send
   // as `{ ok: false, status, error }` — tagged so a resolved profile is never
-  // confused with a branch that forgot to answer.
+  // confused with a branch that forgot to answer. Every path ends at a Putiorr
+  // Grab profile: no other preset is configured for browser grabs.
   //
   // The refusals follow this file's convention: one that is about a named field
   // opens with that field spelled exactly as the caller sends it, and one that
@@ -1140,15 +1170,19 @@ export class TransmissionRpcServer {
       // Disabled is deliberately not filtered here — requireProfile refuses it
       // by name later, which tells the user why their pick did nothing.
       const profile = this.service.store.findProfileById(profileId);
-      return profile
-        ? { ok: true, profile }
-        : { ok: false, status: 404, error: 'Profile not found' };
+      if (!profile) return { ok: false, status: 404, error: 'Profile not found' };
+      return refuseNonGrabProfile(profile) ?? { ok: true, profile };
     }
 
     // listProfiles() is enabled-only, so a profile that is switched off does
     // not claim its sites: routing to it is exactly what the user turned off.
+    // Only a Putiorr Grab profile claims a site, so browser_domains left on an
+    // *arr profile is simply not consulted.
     const matched = pageHost
-      ? matchProfileByHost(this.service.store.listProfiles(), pageHost)
+      ? matchProfileByHost(
+        this.service.store.listProfiles().filter((profile) => profile.type === GRAB_PROFILE_TYPE),
+        pageHost,
+      )
       : undefined;
     if (matched) return { ok: true, profile: matched };
 
@@ -1174,9 +1208,8 @@ export class TransmissionRpcServer {
     // A stale cached default has to surface; routing the grab elsewhere would
     // put the transfer somewhere the user never chose.
     const fallback = this.service.store.findProfileById(defaultId);
-    return fallback
-      ? { ok: true, profile: fallback }
-      : { ok: false, status: 404, error: 'Profile not found' };
+    if (!fallback) return { ok: false, status: 404, error: 'Profile not found' };
+    return refuseNonGrabProfile(fallback) ?? { ok: true, profile: fallback };
   }
 
   async testClientSettings(input) {
