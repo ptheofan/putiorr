@@ -198,8 +198,9 @@ export class DownloadManager {
       throw new Error('ready transfer has no put.io file id');
     }
 
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-    if (!profile) throw new Error('No RR profile is available for download');
+    // No owner means no folder to stage into. This used to borrow whichever
+    // profile sorted first and write another profile's files into its folder.
+    const profile = this.service.requireTransferProfile(transfer);
     const remoteFiles = await this.service.getPutio().listTransferFiles(transfer.putio_file_id);
     if (remoteFiles.length === 0) {
       throw new Error('ready transfer has no downloadable files on put.io');
@@ -242,8 +243,11 @@ export class DownloadManager {
       .filter((transfer) => transfer.lifecycle === 'processed');
 
     for (const transfer of transfers) {
-      const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-      if (!profile) continue;
+      const profile = this.service.findTransferProfile(transfer);
+      if (!profile) {
+        this.warnOwnerlessDownload(transfer, 'cannot check for local data');
+        continue;
+      }
 
       let hasLocalData;
       try {
@@ -309,13 +313,28 @@ export class DownloadManager {
 
     for (const transfer of transfers) {
       const profile = this.autoRemoveProfileForTransfer(transfer);
+      if (!profile) {
+        this.warnOwnerlessDownload(transfer, 'cannot tell whether it should be auto-removed');
+        continue;
+      }
       if (!profileAutoRemovesCompleted(profile)) continue;
       await this.removeCompletedAutoRemoveTransfer(transfer);
     }
   }
 
   autoRemoveProfileForTransfer(transfer) {
-    return this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    return this.service.findTransferProfile(transfer);
+  }
+
+  // An ownerless download is a state the user has to be able to see and fix, so
+  // every sweep that steps over one says so rather than skipping in silence.
+  warnOwnerlessDownload(transfer, consequence) {
+    logger.warn('skipped download with no owning RR profile', {
+      transferId: transfer.id,
+      putioTransferId: transfer.putio_transfer_id,
+      name: transfer.name,
+      consequence,
+    });
   }
 
   async hasLocalTransferData(profile, transfer) {
@@ -409,7 +428,7 @@ export class DownloadManager {
   async processFile(file) {
     const transfer = this.store.findTransferById(file.transfer_id);
     if (!transfer || transfer.removed_at) return;
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    const profile = this.service.requireTransferProfile(transfer);
 
     const targetPath = resolveInside(
       profile.download_at,

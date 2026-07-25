@@ -46,6 +46,10 @@ export const DEFAULT_PROFILE_TYPE = 'sonarr';
 // Mirrors the server's GRAB_PROFILE_TYPE: the only preset the browser
 // extension may send grabs to.
 export const GRAB_PROFILE_TYPE = 'grab';
+// The endpoint every Transmission client reaches by default. It belongs to one
+// *arr profile or to none; it is never a Putiorr Grab profile's path, and the
+// server refuses it outright once more than one *arr profile could have meant it.
+export const SHARED_RPC_PATH = '/transmission/rpc';
 export const DEFAULT_PUTIO_FOLDER = 'putiorr';
 export const DEFAULT_DOWNLOAD_FOLDER = '/putiorr';
 export const DEFAULT_CLIENT_HOST = 'putiorr';

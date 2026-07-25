@@ -6,18 +6,10 @@ import { PutioClient } from '../putio/client.js';
 import { calculateTransmissionProgress } from '../transmission/progress.js';
 // The preset the dashboard writes into a profile; plain data with no imports of
 // its own, so the one spelling serves both the browser and this process.
-import { GRAB_PROFILE_TYPE } from '../web/constants.js';
+import { GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined);
-}
-
-function normalizedIdentity(value) {
-  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
-}
-
-function firstCategorySegment(category) {
-  return String(category ?? '').split(/[\\/]/).filter(Boolean)[0] ?? '';
 }
 
 function generatedHash() {
@@ -73,6 +65,13 @@ function remoteDeleteError(errors) {
     if (status !== undefined) aggregate.status = status;
   }
   return aggregate;
+}
+
+// Named the same way wherever it surfaces — the dashboard, the RPC result, the
+// log — so a user who sees it in one place can search for it in another.
+export function ownerlessDownloadMessage(transfer) {
+  return `Download ${transfer?.id ?? '(unknown)'} (${transfer?.name ?? 'unnamed'}) has no owning RR profile;`
+    + ' reassign it from the dashboard or delete it';
 }
 
 function isTransferStillListed(transfer, remoteIds, remoteHashes) {
@@ -144,14 +143,6 @@ export class TransferService {
     return this.putioClient;
   }
 
-  getDefaultProfile() {
-    return this.store.findProfileBySlug('default') ?? this.store.listProfiles()[0];
-  }
-
-  getProfileForRpcPath(rpcPath) {
-    return this.store.findProfileByRpcPath(rpcPath);
-  }
-
   // The *arr side of putiorr — every RPC endpoint and everything torrent-add
   // resolves through — chooses only from these. A Putiorr Grab profile is
   // reachable exclusively through /api/grab, which always names the profile it
@@ -164,132 +155,59 @@ export class TransferService {
     return this.store.listProfiles().filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
   }
 
+  // The one mechanism. An RPC request is owned by the profile whose path it
+  // arrived on; the shared path serves exactly one *arr profile, or refuses.
+  // Nothing else may select an owner — not the download-dir category, not the
+  // client's name, not row order.
   resolveRpcProfile(profile) {
     if (profile) return this.requireProfile(profile);
     const profiles = this.listArrProfiles();
     if (profiles.length === 1) return profiles[0];
     if (profiles.length === 0) throw new Error('No enabled RR profile is configured');
-    throw new Error('RPC endpoint is ambiguous; use the unique RPC path configured for this RR profile');
-  }
-
-  profileMatchesCategory(profile, category) {
-    const normalized = normalizedIdentity(firstCategorySegment(category));
-    if (!normalized) return false;
-    return [profile.slug, profile.type, profile.name]
-      .some((value) => normalizedIdentity(value) === normalized);
-  }
-
-  findProfilesByCategory(category) {
-    return this.listArrProfiles().filter((profile) => this.profileMatchesCategory(profile, category));
-  }
-
-  findProfileByCategory(category) {
-    const matches = this.findProfilesByCategory(category);
-    return matches.length === 1 ? matches[0] : undefined;
-  }
-
-  // Unreachable from any request as of phase 1 of the ownership cleanup (#67):
-  // the RPC client's name never names a profile. Kept only until phase 2
-  // deletes the inference layer wholesale.
-  findProfileByUserAgent(userAgent) {
-    const client = normalizedIdentity(String(userAgent ?? '').split('/')[0]);
-    if (!client) return undefined;
-    const matches = this.listArrProfiles().filter((profile) => {
-      const identities = [profile.slug, profile.name];
-      if (profile.type !== 'custom') identities.push(profile.type);
-      return identities.some((value) => {
-        const identity = normalizedIdentity(value);
-        return identity && (client === identity || (identity.length >= 4 && client.startsWith(identity)));
-      });
-    });
-    return matches.length === 1 ? matches[0] : undefined;
-  }
-
-  validateCategoryLabels(args, category) {
-    const labels = Array.isArray(args.labels)
-      ? args.labels.map((label) => normalizedIdentity(label)).filter(Boolean)
-      : [];
-    const expected = normalizedIdentity(firstCategorySegment(category));
-    if (labels.length > 0 && expected && !labels.includes(expected)) {
-      throw new Error(`Labels ${labels.join(', ')} conflict with download-dir category ${category}`);
-    }
-  }
-
-  // `clientProfile` is the profile the RPC client's User-Agent was taken to
-  // mean. Nothing supplies it any more — the header is not a credential, and it
-  // used to both select a profile the path could not name and veto the one the
-  // category did. Every branch reading it below is therefore dead, and phase 2
-  // of the ownership cleanup (#67) deletes it along with the rest of the
-  // inference layer. It stays a parameter here only so that removal is one
-  // change rather than two.
-  resolveProfileForAdd(args = {}, profile, clientProfile) {
-    const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
-    if (profile) {
-      const currentProfile = this.resolveRpcProfile(profile);
-      const category = extractCategory(currentProfile.download_at, downloadDir);
-      this.validateCategoryLabels(args, category);
-      const categoryMatches = this.findProfilesByCategory(category);
-      const categoryProfile = categoryMatches.length === 1 ? categoryMatches[0] : undefined;
-      if (categoryProfile && categoryProfile.id !== currentProfile.id) {
-        throw new Error(
-          `Category ${category} conflicts with RPC profile ${currentProfile.name}; use ${categoryProfile.rpc_path} for ${categoryProfile.name}`,
-        );
-      }
-      return currentProfile;
-    }
-
-    const matches = [];
-    for (const candidate of this.listArrProfiles()) {
-      try {
-        const category = extractCategory(candidate.download_at, downloadDir);
-        if (this.profileMatchesCategory(candidate, category)) matches.push({ profile: candidate, category });
-      } catch {
-        // The generic endpoint may serve profiles with different download roots.
-      }
-    }
-    const profileIds = new Set(matches.map((match) => match.profile.id));
-    if (profileIds.size > 1) {
-      throw new Error(`download-dir ${downloadDir} matches multiple enabled RR profiles`);
-    }
-
-    const match = matches[0];
-    if (match) {
-      this.validateCategoryLabels(args, match.category);
-      if (clientProfile && clientProfile.id !== match.profile.id) {
-        throw new Error(
-          `Category ${match.category} conflicts with ${clientProfile.name} identified by the RPC client`,
-        );
-      }
-      return match.profile;
-    }
-
-    // Prowlarr may replace its default category with a per-release mapped category.
-    if (clientProfile?.type === 'prowlarr') {
-      const category = extractCategory(clientProfile.download_at, downloadDir);
-      this.validateCategoryLabels(args, category);
-      return clientProfile;
-    }
-
-    const category = (() => {
-      try {
-        return extractCategory(this.config.targetDir, downloadDir);
-      } catch {
-        return '';
-      }
-    })();
-    if (clientProfile) {
-      throw new Error(
-        `download-dir category ${category || '(none)'} does not match RPC client ${clientProfile.name}`,
-      );
-    }
     throw new Error(
-      `No enabled RR profile matches download-dir category ${category || '(none)'}`,
+      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} enabled RR profiles share it.`
+      + ` Point this download client at the RPC path of the profile it means — ${this.rpcPathAdvice(profiles)}`,
     );
+  }
+
+  // This message is the whole user experience of a misconfigured multi-profile
+  // setup, so it names every profile and the exact path to type. A profile
+  // still sitting on the shared path has no path to hand out; repeating the one
+  // that just failed would read as a contradiction, so it is called out as the
+  // thing to fix.
+  rpcPathAdvice(profiles) {
+    return profiles
+      .map((profile) => (profile.rpc_path === SHARED_RPC_PATH
+        ? `${profile.name} needs its own RPC path`
+        : `${profile.name} → ${profile.rpc_path}`))
+      .join('; ');
   }
 
   requireProfile(profile) {
     if (!profile) throw new Error('No enabled RR profile is configured');
     if (!profile.enabled) throw new Error(`RR profile ${profile.name} is disabled`);
+    return profile;
+  }
+
+  // A download's owner is stored, never inferred. Everything that follows from
+  // ownership — the folder the files stage into, the download policy, the
+  // put.io folder — has no answer without it, and the old
+  // `?? getDefaultProfile()` supplied one anyway: slug 'default', else whatever
+  // sorted first, with no type filter, so a Putiorr Grab profile could quietly
+  // become the owner of an *arr download and take its files with it.
+  //
+  // Until phase 3 makes profile_id NOT NULL the column can still be null on
+  // rows written by older versions, so this stays a runtime check rather than
+  // an assertion.
+  findTransferProfile(transfer) {
+    return transfer?.profile_id != null
+      ? this.store.findProfileById(transfer.profile_id)
+      : undefined;
+  }
+
+  requireTransferProfile(transfer) {
+    const profile = this.findTransferProfile(transfer);
+    if (!profile) throw new Error(ownerlessDownloadMessage(transfer));
     return profile;
   }
 
@@ -302,13 +220,18 @@ export class TransferService {
   }
 
   async addTorrent(args = {}, profile) {
-    const currentProfile = await this.ensureProfileFolder(
-      this.resolveProfileForAdd(args, profile),
-    );
+    // Resolved exactly like torrent-get and torrent-remove. It used to resolve
+    // by download-dir category instead, so an ambiguous shared endpoint
+    // accepted adds it would then refuse to list or remove: the *arr grabbed
+    // releases it could never see, import or clean up, and re-grabbed them on
+    // every RSS cycle.
+    const currentProfile = await this.ensureProfileFolder(this.resolveRpcProfile(profile));
     const filename = firstDefined(args.filename, args.url);
     const magnetLink = firstDefined(args.magnetLink, args['magnet-link']);
     const metainfo = args.metainfo;
     const downloadDir = firstDefined(args.downloadDir, args['download-dir'], '');
+    // Purely the name of the staging subdirectory under the owner's folder, and
+    // computed only now that the owner is known. It never selects or vetoes.
     const category = extractCategory(currentProfile.download_at, downloadDir);
 
     let putioTransfer;
@@ -502,15 +425,30 @@ export class TransferService {
 
     for (const id of ids) {
       const transfer = this.store.findTransfer(id, { profileId: currentProfile.id });
-      if (!transfer) continue;
+      if (!transfer) {
+        // An id nobody has is a no-op: Transmission clients routinely remove
+        // ids they have already forgotten. An id that exists but belongs to
+        // another profile is not — answering "success" to that told the client
+        // a download was gone while it kept downloading, and hid the fact that
+        // the client is addressing the wrong endpoint.
+        const foreign = this.store.findTransfer(id);
+        if (foreign) {
+          const owner = this.findTransferProfile(foreign);
+          throw new Error(
+            `Download ${id} belongs to RR profile ${owner ? owner.name : '(none)'}, not ${currentProfile.name}`
+            + `${owner?.rpc_path ? `; use ${owner.rpc_path}` : ''}`,
+          );
+        }
+        continue;
+      }
 
       const hasOtherAssociations = this.store.hasOtherActiveAssociations(transfer);
       const remoteDeleted = !hasOtherAssociations
         || this.store.allActiveAssociationsProcessed(transfer.remote_id);
       if (remoteDeleted) await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
-        const transferProfile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
-        const targetDir = path.join(transferProfile.download_at, transfer.category ?? '');
+        // The row was found scoped to this profile, so this is that profile.
+        const targetDir = path.join(currentProfile.download_at, transfer.category ?? '');
         await deleteLocalData(targetDir, transfer.name);
       }
       if (remoteDeleted && !hasOtherAssociations) {
@@ -542,11 +480,13 @@ export class TransferService {
       await this.removeRemoteTransfer(transfer, { throwOnError: true });
     }
 
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
-    const targetDir = path.join(profile.download_at, transfer.category ?? '');
     const fileCount = this.store.listFilesForTransfer(transfer.id).length;
+    // Only the local half needs an owner, because only the local half needs a
+    // folder. Requiring one to remove the row would strand exactly the
+    // downloads whose error message tells the user to remove them.
     if (deleteLocal) {
-      await deleteLocalData(targetDir, transfer.name);
+      const profile = this.requireTransferProfile(transfer);
+      await deleteLocalData(path.join(profile.download_at, transfer.category ?? ''), transfer.name);
     }
     // A profile association can be hard-deleted after requested remote cleanup.
     // If put.io is intentionally kept, retain a tombstone so refresh cannot
@@ -618,7 +558,7 @@ export class TransferService {
     });
 
     if (deleteLocal) {
-      const profile = this.store.findProfileById(transfer.profile_id) ?? this.getDefaultProfile();
+      const profile = this.requireTransferProfile(transfer);
       const targetDir = path.join(profile.download_at, transfer.category ?? '');
       for (const file of files) {
         await deleteLocalFileData(targetDir, transfer.name, file.relative_path);
@@ -726,7 +666,10 @@ export class TransferService {
   }
 
   toTransmissionTorrent(row, requestedFields = []) {
-    const profile = this.store.findProfileById(row.profile_id) ?? this.getDefaultProfile();
+    // Rows reach here only from getTorrents, which selects them scoped to a
+    // resolved profile, so an ownerless one is a bug rather than a state to
+    // render around.
+    const profile = this.requireTransferProfile(row);
     const stats = this.store.getTransferFileStats(row.id);
     const progress = calculateTransmissionProgress(row, stats);
     const files = this.store.listFilesForTransfer(row.id);
@@ -805,10 +748,15 @@ export class TransferService {
 
   listDownloads() {
     return this.store.listActiveTransfers().map((row) => {
-      const profile = this.store.findProfileById(row.profile_id) ?? this.getDefaultProfile();
+      // The dashboard is where an ownerless download has to become visible, so
+      // this is the one read path that reports the problem instead of throwing
+      // — one broken row must not blank the whole list. It is still never
+      // attributed to a profile that does not own it.
+      const profile = this.findTransferProfile(row);
+      const ownerError = profile ? '' : ownerlessDownloadMessage(row);
       const downloadProfile = profile
         ? this.store.findDownloadProfileById(profile.download_profile_id) ?? this.store.findDefaultDownloadProfile()
-        : this.store.findDefaultDownloadProfile();
+        : undefined;
       const stats = this.store.getTransferFileStats(row.id);
       const fileItems = this.store.listFilesForTransfer(row.id).map((file) => {
         const size = Number(file.size ?? 0);
@@ -837,10 +785,10 @@ export class TransferService {
         id: row.id,
         hash: row.hash,
         name: row.name,
-        profileId: profile?.id,
-        profileName: profile?.name ?? 'Unknown',
+        profileId: profile?.id ?? null,
+        profileName: profile?.name ?? 'No RR profile',
         profileType: profile?.type ?? 'custom',
-        downloadProfileId: downloadProfile?.id,
+        downloadProfileId: downloadProfile?.id ?? null,
         downloadProfileName: downloadProfile?.name ?? 'Default',
         putioFolder: profile?.putio_folder_name ?? '',
         downloadAt: profile ? path.join(profile.download_at, row.category ?? '') : '',
@@ -857,7 +805,7 @@ export class TransferService {
         combinedProgress: Math.round(progress.percentDone * 100),
         speed: row.download_speed,
         eta: row.eta,
-        error: row.error_string || fileError,
+        error: ownerError || row.error_string || fileError,
         totalSize: row.total_size,
         downloadedSize: Number(stats.downloaded_size ?? 0),
         files: {

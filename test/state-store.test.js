@@ -631,3 +631,34 @@ test('updating a profile normalizes the preset the same way creating one does', 
     store.close();
   }
 });
+
+// Phase 2 of the ownership cleanup (#67): the owner is resolved once, at
+// ingestion, and frozen. Boot-time reassignment handed every ownerless row to
+// whichever profile sorted first, which is a silent change of owner — and the
+// filesystem path, the download policy and the put.io folder all follow the
+// owner, so the files went somewhere nobody asked for.
+test('seeding never assigns an owner to a download that has none', () => {
+  const root = process.cwd();
+  const config = loadConfig({
+    PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
+    PUTIORR_STATE_PATH: ':memory:',
+  }, root);
+  const store = new StateStore(':memory:');
+  try {
+    store.seedFromConfig(config);
+    const transfer = store.createOrUpdateTransfer({
+      putio_transfer_id: 91,
+      hash: 'ownerlesshash',
+      name: 'Ownerless.Release',
+      lifecycle: 'remote',
+    });
+    assert.equal(transfer.profile_id, null);
+
+    // A second boot is where the reassignment used to happen.
+    store.seedFromConfig(config);
+
+    assert.equal(store.findTransferById(transfer.id).profile_id, null);
+  } finally {
+    store.close();
+  }
+});

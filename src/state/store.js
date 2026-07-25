@@ -534,7 +534,6 @@ export class StateStore {
       }
     }
     this.assignMissingProfileDownloadProfiles(defaultDownloadProfile.id);
-    this.assignMissingTransferProfiles();
   }
 
   createDefaultProfile(config) {
@@ -567,16 +566,6 @@ export class StateStore {
       SET download_profile_id = ?, updated_at = ?
       WHERE download_profile_id IS NULL
     `).run(downloadProfileId, nowIso());
-  }
-
-  assignMissingTransferProfiles() {
-    const profile = this.findProfileBySlug('default') ?? this.listProfiles()[0];
-    if (!profile) return;
-    this.db.prepare(`
-      UPDATE transfer_associations
-      SET profile_id = ?, updated_at = ?
-      WHERE profile_id IS NULL
-    `).run(profile.id, nowIso());
   }
 
   createDownloadProfile(input) {

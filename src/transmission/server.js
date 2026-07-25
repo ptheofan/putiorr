@@ -13,7 +13,7 @@ import { VersionChecker } from '../version.js';
 // on, so the two must spell it identically; constants.js is plain data with no
 // imports of its own, which is why the server can read the same file the
 // browser is served. WEB_DIR below already points at that directory.
-import { GRAB_PROFILE_TYPE } from '../web/constants.js';
+import { GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -443,14 +443,19 @@ export class TransmissionRpcServer {
     // NULL UNIQUE, and that accident used to make its derived /grab/<slug>/rpc a
     // live Transmission endpoint an *arr could add into. Refuse at the router so
     // the refusal covers every method, not just the ones that resolve a profile.
-    if (pathProfile?.type === GRAB_PROFILE_TYPE) {
+    //
+    // Never for the shared path, though: a grab profile that somehow holds it
+    // would otherwise turn one bad row into an outage for every *arr on the box.
+    // The shared endpoint belongs to the *arr side, and a grab profile sitting
+    // on it is simply not found there.
+    if (pathProfile?.type === GRAB_PROFILE_TYPE && requestPath !== SHARED_RPC_PATH) {
       this.refuseGrabProfileRpc(req, res, pathProfile);
       return;
     }
-    const rpcProfile = requestPath === '/transmission/rpc' && rpcProfiles.length > 1
-      ? undefined
+    const rpcProfile = requestPath === SHARED_RPC_PATH
+      ? (rpcProfiles.length === 1 ? rpcProfiles[0] : undefined)
       : pathProfile;
-    if (rpcProfile || requestPath === '/transmission/rpc') {
+    if (rpcProfile || requestPath === SHARED_RPC_PATH) {
       await this.handleRpc(req, res, rpcProfile);
       return;
     }
@@ -1310,9 +1315,9 @@ export class TransmissionRpcServer {
         message: 'Shared folder write test passed from putiorr. Browser grabs are downloaded straight into that folder.',
       };
     }
-    const rpcPath = profile.rpc_path || normalizeRpcPath(input.rpc_path ?? input.rpcPath ?? '/transmission/rpc');
-    const rpcPathIsActive = rpcPath === '/transmission/rpc' || Boolean(this.service.store.findProfileByRpcPath(rpcPath));
-    const testedPath = rpcPathIsActive ? rpcPath : '/transmission/rpc';
+    const rpcPath = profile.rpc_path || normalizeRpcPath(input.rpc_path ?? input.rpcPath ?? SHARED_RPC_PATH);
+    const rpcPathIsActive = rpcPath === SHARED_RPC_PATH || Boolean(this.service.store.findProfileByRpcPath(rpcPath));
+    const testedPath = rpcPathIsActive ? rpcPath : SHARED_RPC_PATH;
     const url = clientSettingsUrl({
       host: profile.client_host || 'putiorr',
       port: profile.client_port || '9091',

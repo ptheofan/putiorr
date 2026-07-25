@@ -191,3 +191,21 @@ Phased per the audit's plan, each phase independently shippable:
 5. Profile-delete prompt; lifecycle fixes (sticky `complete`, disabled
    profiles, grab auto-remove default server-side).
 6. Docs and the tests that currently pin the deleted behaviour as contracts.
+
+## Breaking changes to carry into the changelog
+
+Phase 6 turns these into release notes. Each is a setup that works today and
+stops working on upgrade, so each needs the fix spelled out.
+
+- **Prowlarr on the shared endpoint with mapped categories.** The User-Agent
+  bypass that let anything calling itself Prowlarr claim an add is gone
+  (phase 1), and so is category routing (phase 2). Fix: point Prowlarr at its
+  own RPC path, `/prowlarr/transmission/rpc`.
+- **Any multi-profile setup where the *arr apps share `/transmission/rpc`.**
+  The shared endpoint now serves exactly one *arr profile and refuses
+  otherwise, naming each profile's path in the refusal. Fix: give each *arr
+  its own RPC path, including the seeded profile that still holds the shared
+  one. A single-profile install is unaffected.
+- **Downloads with no owning profile no longer acquire one at boot.** They
+  appear in the dashboard as errored and are skipped by the sweeps rather than
+  being handed to whichever profile sorted first. Fix: reassign or delete them.

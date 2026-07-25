@@ -488,3 +488,130 @@ test('a transient prune failure is left for the next tick and does not abort the
     harness.store.close();
   }
 });
+
+// Phase 2 of the ownership cleanup (#67): an owner is never guessed. Every path
+// below used to fall back to `getDefaultProfile()` — slug 'default', else
+// whichever profile sorted first — which is not type-filtered, so a Putiorr
+// Grab profile could become the fallback owner of an *arr download and stage
+// its files into a folder no *arr imports from, with no error and no log line.
+function createOwnerlessTransfer(store, patch = {}) {
+  return store.createOrUpdateTransfer({
+    putio_transfer_id: 55,
+    putio_file_id: 56,
+    save_parent_id: 42,
+    hash: 'ownerlesshash',
+    name: 'Ownerless.Release',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    ...patch,
+  });
+}
+
+test('preparing a download with no owning profile fails loudly instead of borrowing one', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createOwnerlessTransfer(harness.store);
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await assert.rejects(
+      () => manager.prepareTransfer(harness.store.findTransferById(transfer.id)),
+      /no owning RR profile/i,
+    );
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the dashboard shows an ownerless download as broken rather than under someone else', async () => {
+  const harness = await createHarness();
+  try {
+    const owned = harness.store.createOrUpdateTransfer({
+      profile_id: harness.store.findProfileBySlug('default').id,
+      putio_transfer_id: 60,
+      hash: 'ownedhash',
+      name: 'Owned.Release',
+      lifecycle: 'downloading',
+    });
+    const orphan = createOwnerlessTransfer(harness.store);
+
+    // One bad row must not take the whole list down with it.
+    const downloads = harness.service.listDownloads();
+    assert.equal(downloads.length, 2);
+
+    const shown = downloads.find((download) => download.id === orphan.id);
+    assert.equal(shown.profileId, null);
+    assert.equal(shown.profileName, 'No RR profile');
+    assert.equal(shown.downloadAt, '');
+    assert.match(shown.error, /no owning RR profile/i);
+    assert.equal(downloads.find((download) => download.id === owned.id).profileName, 'Custom');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the sweeps skip an ownerless download loudly instead of resolving its path', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createOwnerlessTransfer(harness.store, { lifecycle: 'processed' });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pruneProcessedTransfersMissingLocalData();
+      await manager.removeProcessedAutoRemoveTransfers();
+    } finally {
+      console.log = originalLog;
+    }
+
+    // Nothing was deleted on the strength of a borrowed profile's folder.
+    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    const warned = logs.map((line) => JSON.parse(line))
+      .filter((entry) => entry.message === 'skipped download with no owning RR profile');
+    assert.equal(warned.length, 2);
+    assert.equal(warned[0].meta.transferId, transfer.id);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('an ownerless download can still be deleted from the dashboard', async () => {
+  // The error the dashboard shows tells the user to reassign or delete it, so
+  // deleting it has to work. Only the local-files half needs an owner, because
+  // only that half needs a folder.
+  const harness = await createHarness();
+  try {
+    const transfer = createOwnerlessTransfer(harness.store);
+
+    const result = await harness.service.deleteDownloadBucket(transfer.id, {
+      deleteRemote: true,
+      deleteLocal: false,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.deepEqual(harness.putio.deletedTransfers, [55]);
+
+    // Asking to delete files there is no folder for is the one refusal.
+    const second = createOwnerlessTransfer(harness.store, { putio_transfer_id: 57, hash: 'ownerlesstwo' });
+    await assert.rejects(
+      () => harness.service.deleteDownloadBucket(second.id, { deleteRemote: false, deleteLocal: true }),
+      /no owning RR profile/i,
+    );
+    assert.ok(harness.store.findTransferById(second.id));
+  } finally {
+    harness.store.close();
+  }
+});
