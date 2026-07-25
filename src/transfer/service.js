@@ -68,7 +68,10 @@ function remoteDeleteError(errors) {
 }
 
 // Named the same way wherever it surfaces — the dashboard, the RPC result, the
-// log — so a user who sees it in one place can search for it in another.
+// log — so a user who sees it in one place can search for it in another. After
+// phase 3 only a hand-edited database can reach it; the legacy rows that used
+// to are quarantined in orphaned_downloads, where the dashboard offers a
+// profile picker and a delete control.
 export function ownerlessDownloadMessage(transfer) {
   return `Download ${transfer?.id ?? '(unknown)'} (${transfer?.name ?? 'unnamed'}) has no owning RR profile;`
     + ' reassign it from the dashboard or delete it';
@@ -830,6 +833,11 @@ export class TransferService {
       // this is the one read path that reports the problem instead of throwing
       // — one broken row must not blank the whole list. It is still never
       // attributed to a profile that does not own it.
+      //
+      // Only a hand-edited database can produce one: profile_id is NOT NULL
+      // with ON DELETE RESTRICT, and the legacy rows the schema upgrade could
+      // not attach to a profile are quarantined in orphaned_downloads and
+      // rendered as their own needs-attention section.
       const profile = this.findDownloadOwner(row);
       const ownerError = profile ? '' : ownerlessDownloadMessage(row);
       const downloadProfile = profile

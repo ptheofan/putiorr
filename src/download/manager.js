@@ -324,8 +324,12 @@ export class DownloadManager {
     return this.service.findDownloadOwner(transfer);
   }
 
-  // An ownerless download is a state the user has to be able to see and fix, so
-  // every sweep that steps over one says so rather than skipping in silence.
+  // downloads.profile_id is NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  // so a download reaching a sweep without an owner means the database was
+  // edited by hand — the legacy rows the schema upgrade could not attach to a
+  // profile live in orphaned_downloads, not here. It is still a state the user
+  // has to be able to see and fix, so every sweep that steps over one says so
+  // rather than skipping in silence.
   warnOwnerlessDownload(transfer, consequence) {
     logger.warn('skipped download with no owning RR profile', {
       transferId: transfer.id,
