@@ -158,20 +158,29 @@ test('the wizard swaps the *arr RPC step for the browser step on Putiorr Grab pr
   );
 });
 
-test('grab profiles derive a hidden RPC path from the display name', () => {
+test('grab profiles carry no RPC path at all', () => {
   const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
 
-  assert.match(profilesJs, /export function grabRpcPathForName[\s\S]*?`\/grab\/\$\{slugify\(name\)\}\/rpc`/);
-  // The preview reads the same derivation as the field does: the *arr default
-  // would put a grab profile on /grab/transmission/rpc, which is nobody's path.
+  // Nothing derives one any more. profiles.rpc_path is nullable, so a grab
+  // profile simply has none — the derived /grab/<slug>/rpc was an artefact of
+  // the column being NOT NULL UNIQUE, and it doubled as a live Transmission
+  // endpoint an *arr could add into.
+  assert.doesNotMatch(profilesJs, /grabRpcPathForName/);
+  assert.doesNotMatch(profilesJs, /syncDerivedRpcPath/);
   assert.match(
     profilesJs,
-    /export function getClientSettingsFromProfile[\s\S]*?rpcPathForType\(profile\.type, profile\.name\)/,
+    /export function rpcPathForType\(type\) \{\s*return type === GRAB_PROFILE_TYPE \? null : defaultRpcPathForType\(type\);/,
   );
-  // The field is hidden for grab profiles, so nothing else would refresh it;
-  // every preview pass realigns it with the name the way a preset switch does.
-  assert.match(profilesJs, /export function syncDerivedRpcPath[\s\S]*?grabRpcPathForName\(fieldValue\(el\.wizardProfileName\)\)/);
-  assert.match(profilesJs, /export function updateWizardPreview\(\) \{\s*syncDerivedRpcPath\(\);/);
+  // The wizard sends the null explicitly, so switching an *arr profile to the
+  // grab preset clears the path it used to hold.
+  assert.match(profilesJs, /rpc_path: \(fieldValue\(el\.wizardProfileType\)[\s\S]*?=== GRAB_PROFILE_TYPE\s*\?\s*null/);
+  // ...and stops demanding it before saving.
+  assert.match(profilesJs, /const needsRpcPath = payload\.type !== GRAB_PROFILE_TYPE;/);
+  // The client-settings preview is only ever reached for the *arr presets.
+  assert.match(
+    profilesJs,
+    /export function getClientSettingsFromProfile[\s\S]*?defaultRpcPathForType\(profile\.type\)/,
+  );
 });
 
 test('a grab profile card trades the RPC endpoint fact for its browser sites', () => {

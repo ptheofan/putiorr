@@ -605,7 +605,7 @@ test('seeded profiles store their preset in the spelling every comparison uses',
         slug: 'movies-grab',
         putio_folder_name: 'putiorr',
         downloadAt: path.join(root, 'downloads'),
-        rpc_path: '/grab/movies-grab/rpc',
+        rpc_path: null,
       },
       {
         name: 'Plain',

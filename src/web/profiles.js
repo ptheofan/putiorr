@@ -385,7 +385,10 @@ export function createProfileCard(profile) {
   setText(card.querySelector('[data-role="type"]'), type.label);
   setText(card.querySelector('[data-role="name"]'), displayName);
   setText(card.querySelector('[data-role="summary"]'), profileSummary(profile));
-  setProfileFact(card, 'rpc', profile.rpc_path || 'Not set');
+  // "Not set" reads like a misconfiguration; a grab profile is not supposed to
+  // have one. The fact is hidden for grab profiles anyway, so this is the
+  // fallback for the one that is mid-switch.
+  setProfileFact(card, 'rpc', profile.rpc_path || (isGrab ? 'Not used' : 'Not set'));
   setProfileFact(card, 'putio', profile.putio_folder_name || 'Not set');
   setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
   setProfileFact(card, 'download-profile', downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId));
@@ -455,7 +458,7 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   setWizardField(el.wizardPutioFolder, profile.putio_folder_name || DEFAULT_PUTIO_FOLDER);
   setWizardField(el.wizardDownloadAt, profile.downloadAt ?? profile.download_at ?? defaultDownloadFolder());
   renderDownloadProfileOptions(profile.download_profile_id ?? profile.downloadProfileId ?? defaultDownloadProfileId());
-  setWizardField(el.wizardRpcPath, profile.rpc_path || rpcPathForType(type, displayName));
+  setWizardField(el.wizardRpcPath, profile.rpc_path || rpcPathForType(type) || '');
   setWizardField(el.wizardClientHost, profile.client_host ?? profile.clientHost ?? DEFAULT_CLIENT_HOST);
   setWizardField(el.wizardClientPort, profile.client_port ?? profile.clientPort ?? DEFAULT_CLIENT_PORT);
   setWizardChecked(el.wizardUseSsl, Boolean(profile.client_use_ssl ?? profile.clientUseSsl));
@@ -503,7 +506,7 @@ export function createDefaultProfile(type) {
     putio_folder_name: DEFAULT_PUTIO_FOLDER,
     downloadAt: defaultDownloadFolder(),
     download_profile_id: defaultDownloadProfileId(),
-    rpc_path: rpcPathForType(type, detail.label),
+    rpc_path: rpcPathForType(type),
     auto_remove_completed: Boolean(detail.autoRemoveCompleted),
     enabled: true,
   };
@@ -524,7 +527,7 @@ export function syncWizardDefaultsForType() {
     previousDetail.label,
     nextDetail.label,
   ));
-  setWizardField(el.wizardRpcPath, rpcPathForType(nextType, nextDetail.label));
+  setWizardField(el.wizardRpcPath, rpcPathForType(nextType) || '');
   setWizardChecked(el.wizardAutoRemoveCompleted, Boolean(nextDetail.autoRemoveCompleted));
   el.profileWizard.dataset.previousType = nextType;
   applyProfileTypeLayout(nextType);
@@ -569,22 +572,12 @@ export function renumberWizardSteps() {
   });
 }
 
-// Grab profiles have no RPC endpoint field, but the store still requires a
-// unique path, so one is derived from the display name and never shown.
-export function grabRpcPathForName(name) {
-  return `/grab/${slugify(name)}/rpc`;
-}
-
-export function rpcPathForType(type, name) {
-  return type === GRAB_PROFILE_TYPE ? grabRpcPathForName(name) : defaultRpcPathForType(type);
-}
-
-// The *arr presets realign their path when the preset changes; a grab path
-// follows the display name instead, and nothing else would refresh a field the
-// user cannot see.
-export function syncDerivedRpcPath() {
-  if (fieldValue(el.wizardProfileType) !== GRAB_PROFILE_TYPE) return;
-  setWizardField(el.wizardRpcPath, grabRpcPathForName(fieldValue(el.wizardProfileName)));
+// A grab profile has no Transmission endpoint at all. It used to carry a
+// derived /grab/<slug>/rpc, invented here and never shown, purely because
+// profiles.rpc_path was NOT NULL UNIQUE — and that made the derived path a live
+// endpoint an *arr could add into.
+export function rpcPathForType(type) {
+  return type === GRAB_PROFILE_TYPE ? null : defaultRpcPathForType(type);
 }
 
 export function getWizardPayload() {
@@ -595,7 +588,11 @@ export function getWizardPayload() {
     putio_folder_name: fieldValue(el.wizardPutioFolder).trim(),
     downloadAt: fieldValue(el.wizardDownloadAt).trim(),
     download_profile_id: numericSelectValue(el.wizardDownloadProfile.value),
-    rpc_path: normalizeRpcPath(fieldValue(el.wizardRpcPath)),
+    // Explicitly null rather than absent: a profile switched from an *arr
+    // preset to grab has to lose the path it used to hold.
+    rpc_path: (fieldValue(el.wizardProfileType) || DEFAULT_PROFILE_TYPE) === GRAB_PROFILE_TYPE
+      ? null
+      : normalizeRpcPath(fieldValue(el.wizardRpcPath)),
     client_host: fieldValue(el.wizardClientHost).trim() || DEFAULT_CLIENT_HOST,
     client_port: fieldValue(el.wizardClientPort).trim(),
     client_use_ssl: fieldChecked(el.wizardUseSsl),
@@ -616,8 +613,11 @@ export async function saveProfileFromWizard({
 } = {}) {
   const id = el.wizardProfileId.value;
   const payload = getWizardPayload();
-  if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || !payload.rpc_path) {
-    setWizardMessage('Profile name, put.io folder, download folder, and RPC endpoint are required.', 'error');
+  const needsRpcPath = payload.type !== GRAB_PROFILE_TYPE;
+  if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || (needsRpcPath && !payload.rpc_path)) {
+    setWizardMessage(needsRpcPath
+      ? 'Profile name, put.io folder, download folder, and RPC endpoint are required.'
+      : 'Profile name, put.io folder, and download folder are required.', 'error');
     return undefined;
   }
   if (manageButton) el.saveProfileButton.disabled = true;
@@ -696,7 +696,6 @@ export async function deleteProfileById(id = el.wizardProfileId.value) {
 }
 
 export function updateWizardPreview() {
-  syncDerivedRpcPath();
   const profile = getWizardPayload();
   const settings = getClientSettingsFromProfile(profile);
   el.profileWizardTitle.textContent = `Set up ${profile.name || settings.appLabel}`;
@@ -746,7 +745,9 @@ export function getClientSettingsFromProfile(profile) {
   const host = (profile.client_host ?? profile.clientHost ?? fieldValue(el.wizardClientHost).trim()) || DEFAULT_CLIENT_HOST;
   const port = (profile.client_port ?? profile.clientPort ?? fieldValue(el.wizardClientPort).trim()) || DEFAULT_CLIENT_PORT;
   const useSsl = Boolean(profile.client_use_ssl ?? profile.clientUseSsl ?? fieldChecked(el.wizardUseSsl));
-  const rpcPath = normalizeRpcPath(profile.rpc_path || rpcPathForType(profile.type, profile.name));
+  // Only ever reached for the *arr presets: a grab profile's wizard shows no
+  // client settings at all, because nothing connects to one.
+  const rpcPath = normalizeRpcPath(profile.rpc_path || defaultRpcPathForType(profile.type));
   const protocol = useSsl ? 'https' : 'http';
   const portSuffix = port ? `:${port}` : '';
   return {

@@ -2182,7 +2182,8 @@ function createGrabProfile(harness, overrides = {}) {
     slug: 'movies-grab',
     putio_folder_name: 'putiorr',
     downloadAt: harness.config.targetDir,
-    rpc_path: '/grab/movies-grab/rpc',
+    // A grab profile holds no Transmission endpoint: nothing connects to one.
+    rpc_path: null,
     enabled: true,
     ...overrides,
   });
@@ -2313,7 +2314,7 @@ test('an *arr add is never routed into a grab profile', async (t) => {
     await harness.rpcServer.stop();
     harness.store.close();
   });
-  const grab = createGrabProfile(harness, { name: 'Movies', slug: 'movies', rpc_path: '/grab/movies/rpc' });
+  const grab = createGrabProfile(harness, { name: 'Movies', slug: 'movies' });
 
   const added = await sharedRpc(harness, 'torrent-add', {
     filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
@@ -2355,7 +2356,7 @@ test('a grab profile is invisible to the shared endpoint, whatever it is called'
     await harness.rpcServer.stop();
     harness.store.close();
   });
-  const grab = createGrabProfile(harness, { name: 'Grabsite', slug: 'grabsite', rpc_path: '/grab/grabsite/rpc' });
+  const grab = createGrabProfile(harness, { name: 'Grabsite', slug: 'grabsite' });
   harness.store.createProfile({
     name: 'Sonarr',
     type: 'sonarr',
@@ -2508,14 +2509,19 @@ test('an unresolved shared torrent-get refuses instead of listing every profile'
   assert.equal(listed.arguments, undefined);
 });
 
-test('a Putiorr Grab derived RPC path refuses Transmission traffic', async (t) => {
+// The endpoint grab profiles used to derive is gone from the database, so a
+// profile lookup can no longer refuse it — and serveWeb answers any unknown
+// path with index.html and HTTP 200, which an *arr would read as success. The
+// refusal is a static route on the shape of the path instead.
+test('the retired Putiorr Grab RPC path refuses Transmission traffic', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
     harness.store.close();
   });
   const grab = createGrabProfile(harness);
-  const grabUrl = harness.url.replace('/transmission/rpc', grab.rpc_path);
+  assert.equal(grab.rpc_path, null);
+  const grabUrl = harness.url.replace('/transmission/rpc', `/grab/${grab.slug}/rpc`);
 
   const handshake = await fetch(grabUrl, { method: 'POST' });
   const sessionId = handshake.headers.get('x-transmission-session-id');

@@ -27,6 +27,9 @@ const CLIENT_SETTINGS_TEST_TIMEOUT_MS = 5_000;
 // Both of the profiles table's UNIQUE columns are derived from what the wizard
 // shows, so a collision is reported in terms of the field to change.
 const UNIQUE_PROFILE_COLUMN = /UNIQUE constraint failed: profiles\.(\w+)/;
+// The shape of the endpoint grab profiles used to derive, kept as a static
+// route so an *arr still pointed at it gets a sentence rather than the SPA.
+const GRAB_RPC_PATH_PATTERN = /^\/grab\/[^/]+\/rpc$/;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -92,19 +95,16 @@ function refuseNonGrabProfile(profile) {
 }
 
 // SQLite answers a duplicate with the column its index is on, which the wizard
-// shows under the form as-is. `profiles.rpc_path` is a field a grab profile
-// never renders — the wizard derives that path from the display name — so the
-// raw message sends the user looking for something that is not on screen. The
-// *arr presets do show the path and derive it from the preset rather than the
-// name, so there the path is what has to change. Anything that is not a
-// uniqueness failure is passed through untouched.
+// shows under the form as-is. The *arr presets show the endpoint path, so
+// there the path is what has to change; a grab profile holds no path at all,
+// so the only thing it can collide on is the slug its display name makes.
+// Anything that is not a uniqueness failure is passed through untouched.
 export function profileConflictError(error, input = {}, store) {
   const column = UNIQUE_PROFILE_COLUMN.exec(error?.message ?? '')?.[1];
   if (!column) return error;
   // Named after the profile that actually holds the value, never after the one
-  // being written: a grab profile's derived endpoint can collide with a Custom
-  // profile that simply uses that path, and "a profile named X already exists"
-  // would send the user looking for a profile that does not exist. A disabled
+  // being written: "a profile named X already exists" about the name the user
+  // just typed sends them looking for a profile that does not exist. A disabled
   // owner is not findable by path, so that case stays deliberately vague.
   const owner = column === 'slug'
     ? store?.findProfileBySlug(input.slug)
@@ -115,8 +115,6 @@ export function profileConflictError(error, input = {}, store) {
       ? `RPC endpoint path ${input.rpc_path} is already used by ${ownerName}; choose a different path`
       : `RPC endpoint path ${input.rpc_path} is already used by another profile; choose a different path`);
   }
-  // The grab wizard shows no endpoint field, so the display name it derives
-  // that endpoint from is the only thing the user can change here.
   return new Error(ownerName
     ? `A profile named "${ownerName}" already exists; choose a different display name`
     : 'Another profile already uses this display name; choose a different one');
@@ -439,17 +437,16 @@ export class TransmissionRpcServer {
     // profile, breaking torrent-remove on a setup that had been working.
     const rpcProfiles = this.service.listArrProfiles();
     const pathProfile = this.service.store.findProfileByRpcPath(requestPath);
-    // A Putiorr Grab profile only holds an rpc_path because the column is NOT
-    // NULL UNIQUE, and that accident used to make its derived /grab/<slug>/rpc a
-    // live Transmission endpoint an *arr could add into. Refuse at the router so
-    // the refusal covers every method, not just the ones that resolve a profile.
-    //
-    // Never for the shared path, though: a grab profile that somehow holds it
-    // would otherwise turn one bad row into an outage for every *arr on the box.
-    // The shared endpoint belongs to the *arr side, and a grab profile sitting
-    // on it is simply not found there.
-    if (pathProfile?.type === GRAB_PROFILE_TYPE && requestPath !== SHARED_RPC_PATH) {
-      this.refuseGrabProfileRpc(req, res, pathProfile);
+    // A Putiorr Grab profile used to hold a derived /grab/<slug>/rpc only
+    // because profiles.rpc_path was NOT NULL UNIQUE, and that accident made it
+    // a live Transmission endpoint an *arr could add into. Phase 3 removed the
+    // path, which would leave the endpoint falling through to serveWeb — and
+    // serveWeb answers any unknown path with index.html and HTTP 200, so an
+    // *arr still pointed at it would read "success" and garbage. The guard is
+    // therefore static, on the shape of the path, rather than on a profile
+    // lookup that can no longer match anything.
+    if (GRAB_RPC_PATH_PATTERN.test(requestPath)) {
+      this.refuseGrabRpcPath(req, res);
       return;
     }
     const rpcProfile = requestPath === SHARED_RPC_PATH
@@ -471,14 +468,14 @@ export class TransmissionRpcServer {
   // Transmission reports failures as a human-readable string in `result` with
   // HTTP 200, and *arr apps surface that string, so the refusal arrives where
   // the user is looking instead of as an opaque transport error.
-  refuseGrabProfileRpc(req, res, profile) {
-    logger.warn('refused Transmission RPC on a Putiorr Grab profile endpoint', {
+  refuseGrabRpcPath(req, res) {
+    logger.warn('refused Transmission RPC on a retired Putiorr Grab endpoint', {
       requestPath: new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`).pathname,
       requestMethod: req.method,
-      profile: profile.slug,
     });
     jsonResponse(res, 200, {
-      result: `${profile.name} is a Putiorr Grab profile and does not accept Transmission RPC; browser grabs reach it through the browser extension`,
+      result: 'This endpoint belonged to a Putiorr Grab profile and no longer accepts Transmission RPC;'
+        + ' browser grabs reach a grab profile through the browser extension',
     }, this.sessionId);
   }
 
@@ -1431,7 +1428,9 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const autoRemoveCompleted = input.auto_remove_completed ?? input.autoRemoveCompleted;
   const putioFolderName = input.putio_folder_name ?? input.putioFolderName;
   const downloadAt = input.downloadAt ?? input.download_at ?? input.local_path ?? input.localPath;
-  const rpcPath = input.rpc_path ?? input.rpcPath;
+  // ?? would fold an explicit null into "not mentioned", and null is exactly
+  // what a grab profile sends to clear the path it may have held.
+  const rpcPath = input.rpc_path !== undefined ? input.rpc_path : input.rpcPath;
   const clientHost = input.client_host ?? input.clientHost;
   const clientPort = input.client_port ?? input.clientPort;
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
@@ -1444,7 +1443,12 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (autoRemoveCompleted !== undefined) output.auto_remove_completed = normalizeBooleanInput(autoRemoveCompleted);
   if (putioFolderName !== undefined) output.putio_folder_name = String(putioFolderName).trim();
   if (downloadAt !== undefined) output.download_at = path.resolve(String(downloadAt).trim());
-  if (rpcPath !== undefined) output.rpc_path = normalizeRpcPath(rpcPath);
+  // null or '' means "this profile has no Transmission endpoint", which is what
+  // a grab profile is. normalizeRpcPath would turn either into '', and the
+  // column is nullable now, so the distinction has to survive to the store.
+  if (rpcPath !== undefined) {
+    output.rpc_path = rpcPath == null || rpcPath === '' ? null : normalizeRpcPath(rpcPath);
+  }
   if (clientHost !== undefined) output.client_host = String(clientHost).trim() || 'putiorr';
   if (clientPort !== undefined) output.client_port = String(clientPort).trim();
   if (clientUseSsl !== undefined) output.client_use_ssl = Boolean(clientUseSsl);
@@ -1465,8 +1469,14 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (input.enabled !== undefined) output.enabled = Boolean(input.enabled);
 
   if (!partial) {
-    for (const key of ['name', 'slug', 'putio_folder_name', 'download_at', 'rpc_path']) {
+    for (const key of ['name', 'slug', 'putio_folder_name', 'download_at']) {
       if (!output[key]) throw new Error(`${key} is required`);
+    }
+    // Only an *arr ingress needs one. A grab profile is reached exclusively
+    // through the extension, and requiring a path here is what forced the
+    // wizard to derive one it never showed.
+    if (output.type !== GRAB_PROFILE_TYPE && !output.rpc_path) {
+      throw new Error('rpc_path is required');
     }
   }
 

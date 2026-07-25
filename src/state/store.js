@@ -1149,7 +1149,7 @@ export class StateStore {
       input.putio_folder_name,
       input.putio_folder_id ?? null,
       profileDownloadAt(input),
-      input.rpc_path,
+      input.rpc_path ?? null,
       profileClientHost(input) ?? 'putiorr',
       profileClientPort(input) ?? '9091',
       profileClientUseSsl(input) ? 1 : 0,

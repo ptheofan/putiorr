@@ -287,7 +287,7 @@ test('grab for a disabled profile returns 400', async (t) => {
     slug: 'grabs',
     putio_folder_name: 'grabs',
     downloadAt: path.join(harness.config.targetDir, 'grabs-root'),
-    rpc_path: '/grab/grabs/rpc',
+    rpc_path: null,
     enabled: true,
   });
   harness.store.updateProfile(disabled.id, { enabled: false });
@@ -833,7 +833,7 @@ test('a duplicate grab profile name is refused by name, not by a hidden column',
     name: 'Movies Grab',
     slug: 'movies-grab',
     type: 'grab',
-    rpc_path: '/grab/movies-grab/rpc',
+    rpc_path: null,
   });
   assert.equal(created.status, 201);
 
@@ -841,7 +841,7 @@ test('a duplicate grab profile name is refused by name, not by a hidden column',
     name: 'Movies Grab',
     slug: 'movies-grab',
     type: 'grab',
-    rpc_path: '/grab/movies-grab/rpc',
+    rpc_path: null,
   });
 
   assert.equal(duplicate.status, 400);
@@ -917,10 +917,14 @@ test('renaming a profile onto another profile name is refused the same way', asy
   );
 });
 
-test('a conflict names the profile that actually holds the value', async (t) => {
-  // The endpoint a grab profile derives can collide with a Custom profile that
-  // simply uses that path. Blaming a display name nobody has would send the
-  // user looking for a profile that does not exist.
+test('a grab profile has no endpoint to collide with', async (t) => {
+  // Was: "a conflict names the profile that actually holds the value" — it
+  // proved that a grab profile's derived /grab/<slug>/rpc colliding with a
+  // Custom profile squatting on that path was reported against the squatter,
+  // not against the display name the grab wizard shows. Nothing derives that
+  // path any more, so what has to be proved is that the collision is gone:
+  // profiles.rpc_path is nullable, a grab profile holds none, and the partial
+  // unique index only covers the rows that do.
   const harness = await createHarness();
   t.after(closeHarness(harness));
 
@@ -936,13 +940,19 @@ test('a conflict names the profile that actually holds the value', async (t) => 
     name: 'Movies Grab',
     slug: 'movies-grab',
     type: 'grab',
-    rpc_path: '/grab/movies-grab/rpc',
+    rpc_path: null,
   });
 
-  assert.equal(grab.status, 400);
-  assert.match(grab.body.error, /Legacy Endpoint/);
-  assert.doesNotMatch(grab.body.error, /A profile named "Movies Grab" already exists/);
-  // The path is not a field the grab wizard shows, so the fix on offer is the
-  // display name it derives that path from.
-  assert.match(grab.body.error, /display name/);
+  assert.equal(grab.status, 201);
+  assert.equal(grab.body.rpc_path, null);
+
+  // A second one is fine too: any number of rows may hold no path.
+  const second = await postProfile(harness, {
+    name: 'Books Grab',
+    slug: 'books-grab',
+    type: 'grab',
+    rpc_path: null,
+  });
+  assert.equal(second.status, 201);
+  assert.equal(second.body.rpc_path, null);
 });
