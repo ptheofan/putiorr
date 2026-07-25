@@ -212,6 +212,15 @@ export function defaultRpcPathForType(type) {
   return `/${slugify(type || DEFAULT_PROFILE_TYPE)}/transmission/rpc`;
 }
 
+// A preset switch renames the profile only while the name is still the one a
+// preset chose. Otherwise the refusal that tells a user to switch an *arr
+// profile to Putiorr Grab would cost them the name they typed — and with it the
+// slug, the endpoint derived from it, and the category older transfers match.
+export function presetDisplayName(currentName, previousLabel, nextLabel) {
+  const current = String(currentName ?? '').trim();
+  return current === '' || current === previousLabel ? nextLabel : current;
+}
+
 // The wizard only sends the sites when it is showing them. A hidden Browser
 // grabs step means the preset has none, and the field still holds whatever the
 // last profile left in it: sending that would write sites onto an *arr profile

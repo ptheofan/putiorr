@@ -23,6 +23,7 @@ import {
   setProfileFact,
   browserDomainsPayload,
   grabProfileSummary,
+  presetDisplayName,
 } from './util.js';
 import { setMessage } from './putio.js';
 import {
@@ -68,7 +69,7 @@ export const WIZARD_HELP = {
         'Reloading the unpacked extension after a putiorr update keeps its options page in step with the dashboard.',
       ]
       : [
-        'Changing the preset rewrites Display name and RPC endpoint path so they stay aligned.',
+        'Changing the preset rewrites the RPC endpoint path, and the Display name with it while that name is still the one a preset chose. A name you typed yourself is kept.',
         'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets use separate paths so their requests do not share one category by accident.',
       ],
     valueLabel: 'Selected setup',
@@ -497,8 +498,13 @@ export function renderDownloadProfileOptions(selectedId = defaultDownloadProfile
 export function syncWizardDefaultsForType() {
   const nextType = fieldValue(el.wizardProfileType) || DEFAULT_PROFILE_TYPE;
   const nextDetail = profileType(nextType);
+  const previousDetail = profileType(el.profileWizard.dataset.previousType || DEFAULT_PROFILE_TYPE);
 
-  setWizardField(el.wizardProfileName, nextDetail.label);
+  setWizardField(el.wizardProfileName, presetDisplayName(
+    fieldValue(el.wizardProfileName),
+    previousDetail.label,
+    nextDetail.label,
+  ));
   setWizardField(el.wizardRpcPath, rpcPathForType(nextType, nextDetail.label));
   setWizardChecked(el.wizardAutoRemoveCompleted, Boolean(nextDetail.autoRemoveCompleted));
   el.profileWizard.dataset.previousType = nextType;

@@ -1,0 +1,426 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  fieldValue,
+  fieldChecked,
+  numericSelectValue,
+  setNumberInput,
+  numberInputValue,
+  integerInputValue,
+  setByteInput,
+  setTimeInput,
+  splitBytesForInput,
+  byteInputValue,
+  timeInputValue,
+  syncByteInput,
+  syncTimeInput,
+  updateByteInputDisabledState,
+  setText,
+  setAttribute,
+  setDataValue,
+  setHidden,
+  placeChildAt,
+  clampPercent,
+  formatBytes,
+  formatWholeBytes,
+  formatSpeed,
+  formatWholeSpeed,
+  formatEta,
+  slugify,
+  statusLabel,
+  normalizeRpcPath,
+  joinPathParts,
+  defaultRpcPathForType,
+  presetDisplayName,
+  setProfileFact,
+  escapeSvgText,
+  truncateLabel,
+} from '../src/web/util.js';
+
+// util.js takes every element it touches as an argument and reads only a
+// handful of properties off it, so these stand-ins are the whole environment it
+// needs. The one exception is syncByteInput, which asks the document who has
+// focus; that single property is stubbed where it is used.
+function fakeInput(properties = {}) {
+  return {
+    value: '',
+    checked: false,
+    disabled: false,
+    attributes: new Map(),
+    getAttribute(name) {
+      return this.attributes.has(name) ? this.attributes.get(name) : null;
+    },
+    setAttribute(name, value) {
+      this.attributes.set(name, value);
+    },
+    hasAttribute(name) {
+      return this.attributes.has(name);
+    },
+    ...properties,
+  };
+}
+
+function fakeByteInputs() {
+  const classes = new Set();
+  const wrapper = {
+    classList: {
+      toggle(name, force) {
+        if (force) classes.add(name);
+        else classes.delete(name);
+      },
+    },
+  };
+  return {
+    classes,
+    hidden: fakeInput(),
+    disabled: fakeInput({ closest: () => wrapper }),
+    amount: fakeInput(),
+    unit: fakeInput({ value: 'bytes' }),
+  };
+}
+
+test('field readers survive the empty values Web Awesome inputs report', () => {
+  assert.equal(fieldValue(fakeInput({ value: 'sonarr' })), 'sonarr');
+  // wa-input reports null until it is touched, so the attribute is the value.
+  assert.equal(fieldValue(fakeInput({ value: null, attributes: new Map([['value', '/movies']]) })), '/movies');
+  assert.equal(fieldValue(fakeInput({ value: null })), '');
+  assert.equal(fieldValue(undefined), '');
+  assert.equal(fieldValue({}), '');
+
+  assert.equal(fieldChecked(fakeInput({ checked: true })), true);
+  assert.equal(fieldChecked(fakeInput({ attributes: new Map([['checked', '']]) })), true);
+  assert.equal(fieldChecked(fakeInput()), false);
+  assert.equal(fieldChecked(undefined), false);
+});
+
+test('numeric field readers reject everything that is not a positive number', () => {
+  assert.equal(numericSelectValue('3'), 3);
+  assert.equal(numericSelectValue(7), 7);
+  assert.equal(numericSelectValue('0'), null);
+  assert.equal(numericSelectValue('-2'), null);
+  assert.equal(numericSelectValue('none'), null);
+  assert.equal(numericSelectValue(''), null);
+
+  assert.equal(numberInputValue(fakeInput({ value: '42' })), 42);
+  assert.equal(numberInputValue(fakeInput({ value: '0' })), 0);
+  assert.equal(numberInputValue(fakeInput({ value: 'twelve' })), 0);
+  assert.equal(integerInputValue(fakeInput({ value: '12.9' })), 12);
+  assert.equal(integerInputValue(fakeInput({ value: '-4' })), 0);
+});
+
+test('setNumberInput clamps to a whole non-negative number and skips equal writes', () => {
+  const input = fakeInput({ value: '5' });
+  let writes = 0;
+  Object.defineProperty(input, 'value', {
+    get: () => input.stored ?? '5',
+    set: (next) => {
+      writes += 1;
+      input.stored = next;
+    },
+  });
+
+  setNumberInput(input, '5');
+  assert.equal(writes, 0, 'an unchanged value must not be written back');
+
+  setNumberInput(input, '9.7');
+  assert.equal(input.value, '9');
+  setNumberInput(input, -3);
+  assert.equal(input.value, '0');
+  setNumberInput(input, undefined);
+  assert.equal(input.value, '0');
+  // Three calls, two writes: undefined lands on the '0' that -3 already wrote.
+  assert.equal(writes, 2);
+});
+
+test('byte inputs split into the largest whole unit and read back the same bytes', () => {
+  assert.deepEqual(splitBytesForInput(3 * 1024 * 1024 * 1024), { amount: 3, unit: 'gb' });
+  assert.deepEqual(splitBytesForInput(5 * 1024 * 1024), { amount: 5, unit: 'mb' });
+  assert.deepEqual(splitBytesForInput(1500), { amount: 1500, unit: 'bytes' });
+  assert.deepEqual(splitBytesForInput(0), { amount: 0, unit: 'bytes' });
+
+  const fields = fakeByteInputs();
+  setByteInput(fields.hidden, fields.disabled, fields.amount, fields.unit, 100 * 1024 * 1024);
+  assert.equal(fields.hidden.value, String(100 * 1024 * 1024));
+  assert.equal(fields.disabled.checked, false);
+  assert.equal(fields.amount.value, '100');
+  assert.equal(fields.unit.value, 'mb');
+  assert.equal(fields.classes.has('is-disabled'), false);
+  assert.equal(byteInputValue(fields.disabled, fields.amount, fields.unit), 100 * 1024 * 1024);
+
+  // Zero is how the form spells "off", so the amount is emptied and the row is
+  // greyed out rather than showing a meaningless 0.
+  setByteInput(fields.hidden, fields.disabled, fields.amount, fields.unit, 0);
+  assert.equal(fields.hidden.value, '0');
+  assert.equal(fields.disabled.checked, true);
+  assert.equal(fields.amount.value, '');
+  assert.equal(fields.amount.disabled, true);
+  assert.equal(fields.classes.has('is-disabled'), true);
+  assert.equal(byteInputValue(fields.disabled, fields.amount, fields.unit), 0);
+});
+
+test('byteInputValue falls back to bytes for a unit it does not know', () => {
+  const fields = fakeByteInputs();
+  fields.amount.value = '12';
+  fields.unit.value = 'furlongs';
+  assert.equal(byteInputValue(fields.disabled, fields.amount, fields.unit), 12);
+});
+
+test('time inputs store seconds and multiply the chosen unit back out', () => {
+  const hidden = fakeInput();
+  const amount = fakeInput();
+  const unit = fakeInput();
+
+  setTimeInput(hidden, amount, unit, 90);
+  assert.equal(hidden.value, '90');
+  assert.equal(amount.value, '90');
+  assert.equal(unit.value, 'seconds');
+  assert.equal(timeInputValue(amount, unit), 90);
+
+  unit.value = 'minutes';
+  amount.value = '3';
+  assert.equal(timeInputValue(amount, unit), 180);
+  unit.value = 'fortnights';
+  assert.equal(timeInputValue(amount, unit), 3);
+
+  setTimeInput(hidden, amount, unit, -5);
+  assert.equal(hidden.value, '0');
+});
+
+test('sync helpers strip non-digits before recomputing the hidden value', () => {
+  const fields = fakeByteInputs();
+  fields.amount.value = '1a2b3';
+  fields.unit.value = 'mb';
+  syncByteInput(fields.hidden, fields.disabled, fields.amount, fields.unit);
+  assert.equal(fields.amount.value, '123');
+  assert.equal(fields.hidden.value, String(123 * 1024 * 1024));
+
+  const hidden = fakeInput();
+  const amount = fakeInput({ value: '4 5m' });
+  const unit = fakeInput({ value: 'minutes' });
+  syncTimeInput(hidden, amount, unit);
+  assert.equal(amount.value, '45');
+  assert.equal(hidden.value, String(45 * 60));
+});
+
+test('clearing the amount while the disable checkbox has focus refills it with 1', () => {
+  // The only line in util.js that reads the document: emptying the field is
+  // what re-enabling the row looks like, and an empty amount would read back as
+  // "off" again the moment it is saved.
+  const previousDocument = globalThis.document;
+  const fields = fakeByteInputs();
+  globalThis.document = { activeElement: fields.disabled };
+  try {
+    fields.amount.value = '';
+    fields.unit.value = 'bytes';
+    syncByteInput(fields.hidden, fields.disabled, fields.amount, fields.unit);
+    assert.equal(fields.amount.value, '1');
+    assert.equal(fields.hidden.value, '1');
+
+    // The same empty field with the focus elsewhere is left as the user typed it.
+    globalThis.document = { activeElement: undefined };
+    fields.amount.value = '';
+    syncByteInput(fields.hidden, fields.disabled, fields.amount, fields.unit);
+    assert.equal(fields.amount.value, '');
+    assert.equal(fields.hidden.value, '0');
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+test('updateByteInputDisabledState mirrors the checkbox onto the row it owns', () => {
+  const fields = fakeByteInputs();
+  fields.disabled.checked = true;
+  updateByteInputDisabledState(fields.disabled, fields.amount, fields.unit);
+  assert.equal(fields.amount.disabled, true);
+  assert.equal(fields.unit.disabled, true);
+  assert.equal(fields.classes.has('is-disabled'), true);
+
+  fields.disabled.checked = false;
+  updateByteInputDisabledState(fields.disabled, fields.amount, fields.unit);
+  assert.equal(fields.amount.disabled, false);
+  assert.equal(fields.unit.disabled, false);
+  assert.equal(fields.classes.has('is-disabled'), false);
+
+  // A checkbox outside a .byte-input wrapper still toggles its two fields.
+  const orphan = fakeInput({ checked: true, closest: () => null });
+  updateByteInputDisabledState(orphan, fields.amount, fields.unit);
+  assert.equal(fields.amount.disabled, true);
+});
+
+test('DOM writers only touch a property that is actually changing', () => {
+  const element = { textContent: 'Sonarr' };
+  let writes = 0;
+  Object.defineProperty(element, 'textContent', {
+    get: () => element.stored ?? 'Sonarr',
+    set: (next) => {
+      writes += 1;
+      element.stored = next;
+    },
+  });
+  setText(element, 'Sonarr');
+  assert.equal(writes, 0);
+  setText(element, 'Radarr');
+  assert.equal(element.textContent, 'Radarr');
+  setText(element, undefined);
+  assert.equal(element.textContent, '');
+  assert.equal(writes, 2);
+
+  const attributed = fakeInput();
+  let attributeWrites = 0;
+  attributed.setAttribute = function setAttributeSpy(name, value) {
+    attributeWrites += 1;
+    this.attributes.set(name, value);
+  };
+  setAttribute(attributed, 'title', '/putiorr/sonarr');
+  setAttribute(attributed, 'title', '/putiorr/sonarr');
+  assert.equal(attributed.getAttribute('title'), '/putiorr/sonarr');
+  assert.equal(attributeWrites, 1);
+
+  const dataElement = { dataset: { tone: 'info' } };
+  setDataValue(dataElement, 'tone', 'info');
+  setDataValue(dataElement, 'tone', 'warn');
+  assert.equal(dataElement.dataset.tone, 'warn');
+
+  const hideable = { hidden: false };
+  setHidden(hideable, true);
+  assert.equal(hideable.hidden, true);
+  setHidden(hideable, true);
+  assert.equal(hideable.hidden, true);
+  setHidden(hideable, false);
+  assert.equal(hideable.hidden, false);
+});
+
+test('placeChildAt moves a child only when it is not already in that slot', () => {
+  const first = { id: 'first' };
+  const second = { id: 'second' };
+  const moved = [];
+  const parent = {
+    children: [first, second],
+    insertBefore(child, before) {
+      moved.push([child.id, before?.id ?? null]);
+    },
+  };
+
+  placeChildAt(parent, first, 0);
+  assert.deepEqual(moved, [], 'a child already in place is left alone');
+
+  placeChildAt(parent, second, 0);
+  assert.deepEqual(moved, [['second', 'first']]);
+
+  // Past the end there is nothing to insert before, which appends.
+  placeChildAt(parent, first, 5);
+  assert.deepEqual(moved.at(-1), ['first', null]);
+});
+
+test('clampPercent keeps progress inside 0..100 and rounds it', () => {
+  assert.equal(clampPercent(-12), 0);
+  assert.equal(clampPercent(0), 0);
+  assert.equal(clampPercent(41.6), 42);
+  assert.equal(clampPercent(100), 100);
+  assert.equal(clampPercent(180), 100);
+  assert.equal(clampPercent(undefined), 0);
+});
+
+test('byte and speed formatters pick a unit and keep zero readable', () => {
+  assert.equal(formatBytes(0), '0 B');
+  assert.equal(formatBytes(-5), '0 B');
+  assert.equal(formatBytes(512), '512 B');
+  assert.equal(formatBytes(1536), '1.5 KB');
+  assert.equal(formatBytes(3 * 1024 * 1024), '3.0 MB');
+  assert.equal(formatBytes(2.5 * 1024 * 1024 * 1024), '2.5 GB');
+
+  assert.equal(formatWholeBytes(0), '0 B');
+  assert.equal(formatWholeBytes(900), '900 B');
+  assert.equal(formatWholeBytes(1536), '2 KB');
+  assert.equal(formatWholeBytes(3 * 1024 * 1024), '3 MB');
+  assert.equal(formatWholeBytes(4 * 1024 * 1024 * 1024), '4 GB');
+
+  // Idle is the state, not a rate: a download waiting on put.io shows no 0 B/s.
+  assert.equal(formatSpeed(0), 'Idle');
+  assert.equal(formatSpeed(700), '700 B/s');
+  assert.equal(formatSpeed(2048), '2.0 KB/s');
+  assert.equal(formatSpeed(6 * 1024 * 1024), '6.0 MB/s');
+  assert.equal(formatSpeed(1.5 * 1024 * 1024 * 1024), '1.5 GB/s');
+
+  assert.equal(formatWholeSpeed(0), 'Idle');
+  assert.equal(formatWholeSpeed(800), '800 B/s');
+  assert.equal(formatWholeSpeed(2048), '2 KB/s');
+  assert.equal(formatWholeSpeed(6 * 1024 * 1024), '6 MB/s');
+  assert.equal(formatWholeSpeed(2 * 1024 * 1024 * 1024), '2 GB/s');
+});
+
+test('formatEta reports seconds, minutes, hours, and an unknown remainder', () => {
+  assert.equal(formatEta(-1), 'ETA unavailable');
+  assert.equal(formatEta(undefined), 'ETA unavailable');
+  assert.equal(formatEta(45), '45s');
+  assert.equal(formatEta(150), '3m');
+  assert.equal(formatEta(3 * 3600), '3h');
+});
+
+test('slugify produces the category an *arr app matches on', () => {
+  assert.equal(slugify('Sonarr'), 'sonarr');
+  assert.equal(slugify('Sonarr 4K!'), 'sonarr-4k');
+  assert.equal(slugify('  --Movies Grab--  '), 'movies-grab');
+  assert.equal(slugify(''), 'profile');
+  assert.equal(slugify('***'), 'profile');
+  assert.equal(slugify(undefined), 'profile');
+});
+
+test('statusLabel names every download state it is given', () => {
+  assert.equal(statusLabel('complete'), 'Complete');
+  assert.equal(statusLabel('downloading'), 'Active');
+  assert.equal(statusLabel('failed'), 'Failed');
+  assert.equal(statusLabel('queued'), 'Pending');
+  assert.equal(statusLabel(undefined), 'Pending');
+});
+
+test('RPC paths are rooted and derived per preset', () => {
+  assert.equal(normalizeRpcPath('/sonarr/transmission/rpc'), '/sonarr/transmission/rpc');
+  assert.equal(normalizeRpcPath('sonarr/transmission/rpc'), '/sonarr/transmission/rpc');
+  assert.equal(normalizeRpcPath('  /radarr/rpc  '), '/radarr/rpc');
+  assert.equal(normalizeRpcPath(''), '', 'an empty path stays empty so the wizard can refuse it');
+  assert.equal(normalizeRpcPath(undefined), '');
+
+  assert.equal(defaultRpcPathForType('sonarr'), '/sonarr/transmission/rpc');
+  assert.equal(defaultRpcPathForType('Putiorr Grab'), '/putiorr-grab/transmission/rpc');
+  assert.equal(defaultRpcPathForType(''), '/sonarr/transmission/rpc');
+  assert.equal(defaultRpcPathForType(undefined), '/sonarr/transmission/rpc');
+});
+
+test('joinPathParts builds the category folder without doubling separators', () => {
+  assert.equal(joinPathParts('/putiorr', 'sonarr'), '/putiorr/sonarr');
+  assert.equal(joinPathParts('/putiorr/', '/sonarr'), '/putiorr/sonarr');
+  assert.equal(joinPathParts('/putiorr', ''), '/putiorr');
+  assert.equal(joinPathParts('', 'sonarr'), '/sonarr');
+  assert.equal(joinPathParts('', ''), '');
+});
+
+test('presetDisplayName keeps a name the user typed and follows the preset otherwise', () => {
+  // The 400 a grab aimed at an *arr profile returns tells the user to switch
+  // that profile's preset; doing so must not rename their profile.
+  assert.equal(presetDisplayName('Movies 4K', 'Sonarr', 'Putiorr Grab'), 'Movies 4K');
+  assert.equal(presetDisplayName('Sonarr', 'Sonarr', 'Putiorr Grab'), 'Putiorr Grab');
+  assert.equal(presetDisplayName('  Sonarr  ', 'Sonarr', 'Radarr'), 'Radarr');
+  assert.equal(presetDisplayName('', 'Sonarr', 'Radarr'), 'Radarr');
+  assert.equal(presetDisplayName(undefined, 'Sonarr', 'Radarr'), 'Radarr');
+  assert.equal(presetDisplayName('sonarr', 'Sonarr', 'Radarr'), 'sonarr', 'the match is exact, not case-folded');
+});
+
+test('setProfileFact writes the fact and the title that reveals the ellipsized rest', () => {
+  const dd = fakeInput({ textContent: '' });
+  const card = { querySelector: (selector) => (selector === '[data-role="rpc"]' ? dd : null) };
+
+  setProfileFact(card, 'rpc', '/grab/movies-grab/rpc');
+  assert.equal(dd.textContent, '/grab/movies-grab/rpc');
+  assert.equal(dd.getAttribute('title'), '/grab/movies-grab/rpc');
+});
+
+test('escapeSvgText and truncateLabel keep topology labels safe and short', () => {
+  assert.equal(escapeSvgText('Movies & <Grab>'), 'Movies &amp; &lt;Grab&gt;');
+  assert.equal(escapeSvgText(undefined), '');
+
+  assert.equal(truncateLabel('Sonarr', 10), 'Sonarr');
+  assert.equal(truncateLabel('Sonarr Anime 4K', 10), 'Sonarr An…');
+  assert.equal(truncateLabel('Sonarr', 6), 'Sonarr');
+  assert.equal(truncateLabel(undefined, 5), '');
+});

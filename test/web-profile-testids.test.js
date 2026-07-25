@@ -107,6 +107,13 @@ test('the wizard swaps the *arr RPC step for the browser step on Putiorr Grab pr
   assert.match(profilesJs, /setText\(el\.wizardAutoRemoveCompleted, isGrab \? GRAB_AUTO_REMOVE_LABEL : ARR_AUTO_REMOVE_LABEL\)/);
   assert.match(html, /id="wizardAutoRemoveCompleted"[^>]*>App will not signal import completion; remove from putiorr once files download locally</);
 
+  // Switching preset must not rename a profile the user named: the 400 that a
+  // grab aimed at an *arr profile returns asks for exactly this switch.
+  assert.match(
+    profilesJs,
+    /setWizardField\(el\.wizardProfileName, presetDisplayName\(\s*fieldValue\(el\.wizardProfileName\),\s*previousDetail\.label,\s*nextDetail\.label,\s*\)\)/,
+  );
+
   // The wizard element is reused across opens, so both the open and the preset
   // change have to re-apply the layout or a grab profile leaves it stale.
   assert.match(profilesJs, /export function openProfileWizard[\s\S]*?applyProfileTypeLayout\(type\)/);
