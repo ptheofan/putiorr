@@ -26,6 +26,9 @@ function setStatus(message, ok = true) {
   const lines = Array.isArray(message) ? message.filter(Boolean) : [message];
   status.textContent = lines.join('\n');
   status.className = ok ? '' : 'error';
+  // The status line sits at the top of the page and Save at the bottom: without
+  // this, a refused save looks like a button that does nothing at all.
+  status.scrollIntoView?.({ block: 'nearest' });
 }
 
 function createOption(value, label) {
@@ -43,14 +46,16 @@ function fillProfileSelect(select, selectedId, placeholder) {
   select.value = profiles.some((profile) => profile.id === selectedId) ? String(selectedId) : '';
 }
 
-function defaultPlaceholder() {
-  return profiles.length ? 'No default profile' : 'Load profiles first';
+// With no profiles loaded, "No default profile" and "Pick a profile" both read
+// as a choice the user declined to make rather than one they cannot make yet.
+function placeholderFor(label) {
+  return profiles.length ? label : 'Load profiles first';
 }
 
 function renderProfileSelects(defaultProfileId) {
-  fillProfileSelect(el('defaultProfile'), defaultProfileId, defaultPlaceholder());
+  fillProfileSelect(el('defaultProfile'), defaultProfileId, placeholderFor('No default profile'));
   for (const { select } of ruleRows) {
-    fillProfileSelect(select, Number(select.value) || 0, 'Pick a profile');
+    fillProfileSelect(select, Number(select.value) || 0, placeholderFor('Pick a profile'));
   }
 }
 
@@ -86,7 +91,7 @@ function addRuleRow(rule = {}) {
 
   const entry = { row, input, select };
   ruleRows.push(entry);
-  fillProfileSelect(select, Number(rule.profileId) || 0, 'Pick a profile');
+  fillProfileSelect(select, Number(rule.profileId) || 0, placeholderFor('Pick a profile'));
   return entry;
 }
 
@@ -145,21 +150,34 @@ async function save() {
 
   const defaultProfileId = Number(el('defaultProfile').value) || 0;
 
-  await chrome.storage.sync.set({
-    baseUrl: url.baseUrl,
-    defaultProfileId,
-    autoCapture: el('autoCapture').checked,
-    rules: collected.rules.map(({ domains, profileId }) => ({ domains, profileId })),
-    // The service worker sanitizes what it reads, but storing a clean list keeps
-    // a malformed profile out of the context menu in the first place.
-    profiles: sanitizeProfiles(profiles),
-  });
-  // Credentials stay in storage.local: storage.sync is synchronized to the
-  // user's Google account, and putiorr's password does not belong there.
-  await chrome.storage.local.set({
-    username: el('username').value,
-    password: el('password').value,
-  });
+  // Credentials go first, and stay in storage.local: storage.sync is
+  // synchronized to the user's Google account, and putiorr's password does not
+  // belong there. Settings can be retyped from what is on screen; a password
+  // that failed to store while the rest of the save reported success cannot.
+  try {
+    await chrome.storage.local.set({
+      username: el('username').value,
+      password: el('password').value,
+    });
+  } catch (error) {
+    setStatus(`The username and password could not be stored: ${error.message}`, false);
+    return;
+  }
+
+  try {
+    await chrome.storage.sync.set({
+      baseUrl: url.baseUrl,
+      defaultProfileId,
+      autoCapture: el('autoCapture').checked,
+      rules: collected.rules.map(({ domains, profileId }) => ({ domains, profileId })),
+      // The service worker sanitizes what it reads, but storing a clean list keeps
+      // a malformed profile out of the context menu in the first place.
+      profiles: sanitizeProfiles(profiles),
+    });
+  } catch (error) {
+    setStatus(`The username and password were saved, but the settings were not: ${error.message}`, false);
+    return;
+  }
 
   const notes = [...collected.warnings];
   if (!defaultProfileId) {
@@ -216,6 +234,15 @@ async function loadProfilesFromPutiorr() {
     return;
   }
 
+  // An empty answer is never worth applying: it would clear the profile list and
+  // every selection on the page, and the next Save would commit that loss under
+  // a green "Saved" — including to the worker's context menu. A putiorr with no
+  // enabled profiles and a URL pointing at the wrong host look identical here.
+  if (!loaded.length) {
+    setStatus(`putiorr at ${url.baseUrl} has no enabled profiles; create one there first`, false);
+    return;
+  }
+
   // Selections that the new list no longer contains are about to be cleared by
   // the re-render, so they are counted while they are still on screen.
   const previousDefault = Number(el('defaultProfile').value) || 0;
@@ -227,11 +254,6 @@ async function loadProfilesFromPutiorr() {
 
   profiles = loaded;
   renderProfileSelects(previousDefault);
-
-  if (!loaded.length) {
-    setStatus(`putiorr at ${url.baseUrl} has no enabled profiles; create one there first`, false);
-    return;
-  }
 
   const notes = [];
   if (previousDefault && !keeps(previousDefault)) {
