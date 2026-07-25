@@ -67,9 +67,9 @@ Open the extension options (`chrome://extensions` → **Details** →
    are kept in `chrome.storage.local`, not in the Google-account-synced storage
    that holds the rest of the settings.
 3. Click **Test connection & load profiles**. It calls
-   `GET /api/profiles?type=grab` and loads the enabled Putiorr Grab profiles
-   from the answer; putiorr applies the preset filter, so this page never
-   offers a profile it would refuse. Loading only fills the page — press
+   `GET /api/profiles?type=grab`, so putiorr answers with Putiorr Grab profiles
+   only and this page never offers a profile putiorr would refuse; the disabled
+   ones come back too and are dropped here. Loading only fills the page — press
    **Save** to store them.
 4. Pick a **default profile**. It is used for grabs from sites no putiorr
    profile claims. Without one, only the sites configured in putiorr and the
@@ -77,20 +77,29 @@ Open the extension options (`chrome://extensions` → **Details** →
 5. Leave **Auto-capture magnet and .torrent clicks** on, or switch it off to
    grab exclusively through the right-click menu.
 
-A putiorr with no Putiorr Grab profile at all answers that load with an empty
-list, and so does one whose grab profiles are all disabled. Neither is applied
-— clearing the page and saving that would empty the right-click menu too — and
-the status names the fix: "has no Putiorr Grab profiles; create one there with
-the Putiorr Grab preset", or "has no enabled Putiorr Grab profiles; enable one
-there". A putiorr full of *arr profiles is the first of those two: none of them
-can accept a grab.
+Three different answers leave nothing to load, and the status says which one it
+was rather than sending you off to create a profile you already have:
+
+- "has no Putiorr Grab profiles; create one there with the Putiorr Grab preset"
+  — nothing came back at all. A putiorr full of *arr profiles reads this way
+  too, since none of them can accept a grab.
+- "has no enabled Putiorr Grab profiles; enable one there" — grab profiles
+  exist, and every one of them is switched off.
+- "answered with Putiorr Grab profiles this page could not read; check that the
+  URL points at putiorr" — rows came back without a usable id, which is what
+  some other server's JSON at that URL looks like from here.
+
+None of the three is applied: clearing the page and saving that would take the
+right-click menu with it.
 
 The **Profiles** card lists what the last load returned: every enabled Putiorr
 Grab profile with its browser sites, read-only. It is a view of putiorr's
-setting, not a second place to edit it — nothing about the sites is stored, so
-the card is empty again after a reload of the options page until you test the
-connection, and a site moved to another profile in putiorr applies to the very
-next click whether or not the card has caught up.
+setting, not a second place to edit it. The sites are deliberately not stored,
+so after a reload of the options page the card lists the profile names it has
+cached with "sites unknown until you load" in place of their sites, until you
+test the connection again; it is empty only when nothing is cached at all. A
+site moved to another profile in putiorr applies to the very next click whether
+or not the card has caught up.
 
 Upgrading from a version that had its own site rules? The options page shows
 them read-only under **Old site rules**, above the connection card, and keeps
@@ -129,14 +138,15 @@ quietly grabbing somewhere else.
 ## Pick The Right Profile
 
 Browser grabs get their own profile, created with the **Putiorr Grab** preset,
-which turns **Auto-remove completed downloads** on by default. A browser grab
-has no *arr app that will import it and signal completion, so without that flag
-the transfer sits in the putiorr list forever. With it — exactly like a
-`prowlarr` profile, which gets the flag for the same reason — the completed
-transfer is removed from putiorr and from put.io once the files have
-downloaded, while the downloaded files stay on disk. Switching it back off is
-allowed, and putiorr logs a warning (once per profile) when a grab targets a
-profile that does not have the flag set.
+which ticks its auto-remove checkbox — **Nothing imports a browser grab; remove
+from putiorr once files download locally**, in the wizard's Options step — by
+default. A browser grab has no *arr app that will import it and signal
+completion, so without that flag the transfer sits in the putiorr list forever.
+With it — exactly like a `prowlarr` profile, which gets the flag for the same
+reason — the completed transfer is removed from putiorr and from put.io once
+the files have downloaded, while the downloaded files stay on disk. Switching
+it back off is allowed, and putiorr logs a warning (once per profile) when a
+grab targets a profile that does not have the flag set.
 
 Grabs land in the profile's **Shared download folder** as put.io named them,
 with no category subfolder: that folder exists so an *arr app can find its own
@@ -228,9 +238,9 @@ that decide the profile:
 `profileId` and `defaultProfileId` name a profile instead of letting putiorr
 find one, so either can name a profile of the wrong preset. That is the `400`
 "`<name>` is not a Putiorr Grab profile; set its App preset to Putiorr Grab in
-putiorr". The list to pick from is `GET /api/profiles?type=grab`, which putiorr
-filters by preset; without the parameter that route answers with every profile,
-disabled ones included.
+putiorr". The list to pick from is `GET /api/profiles?type=grab`. That parameter
+filters by preset and by nothing else — disabled profiles are in the answer
+either way — while the bare route answers with every profile of every preset.
 
 The reply names the profile that answered, so the caller does not have to repeat
 its own guess back to the user:
