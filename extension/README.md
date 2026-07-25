@@ -138,9 +138,11 @@ applies to `/api/grab` like it does to every other putiorr route.
 - Links inside iframes are not captured (`all_frames` is not set in the
   manifest), so an embedded frame behaves as if the extension were not
   installed.
-- There is no size cap on the fetched `.torrent`; an oversized file trips
-  Chrome's message size limit, which fails the send and falls back to a normal
-  download.
+- The extension puts no size cap on the fetched `.torrent`, but putiorr rejects
+  request bodies over 2 MiB and base64 inflates the file by 4/3, so anything
+  above roughly 1.5 MiB comes back as a failure notification — with no
+  fallback download, because the grab did reach putiorr — and has to be added
+  by hand.
 - A malicious page can overlay an invisible magnet link under a real button and
   harvest a genuine click — the grab notification is the only tell.
 - Any page can detect that the extension is installed by fetching its
