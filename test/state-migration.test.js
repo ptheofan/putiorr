@@ -224,6 +224,10 @@ export function writeLegacyDb(dbPath, {
   associationFiles = [],
   settings = {},
   includeDownloadProfiles = true,
+  // Every released schema has UNIQUE on transfers.putio_transfer_id, so a
+  // duplicate can only reach the collapse from a database somebody rebuilt or
+  // half-restored by hand. Dropping it here is how that shape gets written.
+  transfersUnique = true,
 } = {}) {
   const db = new DatabaseSync(dbPath);
   try {
@@ -231,7 +235,10 @@ export function writeLegacyDb(dbPath, {
     db.exec(SETTINGS_DDL);
     if (includeDownloadProfiles) db.exec(DOWNLOAD_PROFILES_DDL);
     db.exec(era === 'association' ? PROFILES_ASSOCIATION_DDL : PROFILES_PRE_ASSOCIATION_DDL);
-    db.exec(era === 'association' ? TRANSFERS_ASSOCIATION_DDL : TRANSFERS_PRE_ASSOCIATION_DDL);
+    const transfersDdl = era === 'association' ? TRANSFERS_ASSOCIATION_DDL : TRANSFERS_PRE_ASSOCIATION_DDL;
+    db.exec(transfersUnique
+      ? transfersDdl
+      : transfersDdl.replace('putio_transfer_id INTEGER UNIQUE', 'putio_transfer_id INTEGER'));
     db.exec(TRANSFER_FILES_DDL);
     if (era === 'association') db.exec(TRANSFER_ASSOCIATIONS_DDL);
 
@@ -1130,6 +1137,136 @@ test('reassignment falls back to a new id when the old one has been taken', asyn
     // Progress made before the quarantine is not thrown away: a download that
     // reappears at 0 bytes reads as a restart nobody asked for.
     assert.equal(created.downloaded_ever, 640);
+  } finally {
+    store.close();
+  }
+});
+
+// Finding 3: `transfers` without `transfer_associations` — a partially restored
+// or hand-edited database. The migration cannot chain (the association hop's
+// guard key says it already ran), so those rows are invisible to this version.
+// Saying so only in the log means nobody finds out.
+test('legacy rows the migration cannot reach are recorded, not silently stranded', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    profiles: [profileRow({ id: 1 })],
+    transfers: [
+      transferRow({ id: 1, putio_transfer_id: 1001 }),
+      transferRow({ id: 2, putio_transfer_id: 1002, hash: 'b'.repeat(40), name: 'Second' }),
+    ],
+    // The association hop's guard key is set, but its output is gone.
+    settings: { transfer_associations_migrated_v1: '1' },
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const report = store.schemaMigrationReports().downloads;
+    assert.equal(report.strandedLegacyRows, 2);
+    assert.equal(report.migrated, 0);
+    assert.equal(store.getSetting('downloads_schema_v1'), '1');
+  } finally {
+    store.close();
+  }
+});
+
+test('a database with nothing to collapse records no report at all', async () => {
+  const dbPath = await tempDbPath();
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.schemaMigrationReports().downloads, undefined);
+  } finally {
+    store.close();
+  }
+});
+
+// Finding 5: rolling back is right; a bare "UNIQUE constraint failed" that
+// names neither the row nor the backup, and repeats on every boot, is not.
+test('a failed collapse names the offending row and the backup it just took', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfersUnique: false,
+    transfers: [
+      transferRow({ id: 1, putio_transfer_id: 1001 }),
+      transferRow({ id: 2, putio_transfer_id: 1001, hash: 'b'.repeat(40), name: 'Duplicate.Release' }),
+    ],
+    associations: [
+      associationRow({ id: 1, transfer_id: 1 }),
+      associationRow({ id: 2, transfer_id: 2 }),
+    ],
+  });
+
+  assert.throws(() => new StateStore(dbPath), (error) => {
+    assert.match(error.message, /could not migrate its database to the downloads schema/);
+    assert.match(error.message, /UNIQUE constraint failed: downloads\.putio_transfer_id/);
+    assert.match(error.message, /while migrating download 2 \(put\.io transfer 1001, Duplicate\.Release\)/);
+    assert.match(error.message, /A backup taken before the attempt is at .*\.pre-downloads-\d+\.bak/);
+    assert.match(error.message, /repeat on every start/);
+    return true;
+  });
+
+  // Rollback is intact: the source tables and their rows are untouched.
+  assert.equal(allRows(dbPath, 'SELECT id FROM transfer_associations').length, 2);
+  assert.equal(allRows(dbPath, 'SELECT id FROM downloads').length, 0);
+});
+
+// The foreign_key_check read-and-throw in each migration. Neither can fire
+// through normal data, so each is reached by breaking the copy it guards.
+test('the collapse refuses to commit a download pointing at a profile that is gone', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 1, putio_transfer_id: 1001 })],
+    associations: [associationRow({ id: 1, transfer_id: 1 })],
+  });
+
+  class DanglingStore extends StateStore {
+    collapseTransfersIntoDownloads() {
+      const report = super.collapseTransfersIntoDownloads();
+      // Foreign keys are off inside the transaction, so this writes.
+      this.db.prepare('UPDATE downloads SET profile_id = 999999').run();
+      return report;
+    }
+  }
+
+  assert.throws(() => new DanglingStore(dbPath), /dangling reference/);
+  assert.equal(allRows(dbPath, 'SELECT id FROM transfer_associations').length, 1);
+  assert.equal(
+    allRows(dbPath, "SELECT value FROM settings WHERE key = 'downloads_schema_v1'").length,
+    0,
+  );
+});
+
+test('the profiles rebuild refuses to commit a downloads row whose profile it lost', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 1, putio_transfer_id: 1001 })],
+    associations: [associationRow({ id: 1, transfer_id: 1 })],
+  });
+
+  class LosingStore extends StateStore {
+    rebuildProfilesTable() {
+      const report = super.rebuildProfilesTable();
+      // The copy dropped a profile a download still references.
+      this.db.prepare('DELETE FROM profiles WHERE id = 1').run();
+      return report;
+    }
+  }
+
+  assert.throws(() => new LosingStore(dbPath), /dangling reference/);
+
+  // The rollback left the old profiles table, so the next boot finishes.
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.findProfileById(1).slug, 'sonarr');
+    assert.equal(store.findDownloadById(1).profile_id, 1);
+    assert.equal(store.getSetting('profiles_schema_v2'), '1');
+    assert.equal(store.db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
   } finally {
     store.close();
   }

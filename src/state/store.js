@@ -578,11 +578,12 @@ export class StateStore {
   migrateDownloadsCollapse() {
     if (this.getSetting('downloads_schema_v1') === '1') return;
     if (!this.hasTable('transfer_associations')) {
+      this.recordStrandedLegacyRows();
       this.setSetting('downloads_schema_v1', '1');
       return;
     }
 
-    this.backupBeforeCollapse();
+    const backup = this.backupBeforeCollapse();
     this.db.exec('PRAGMA foreign_keys = OFF');
     try {
       this.db.exec('BEGIN IMMEDIATE');
@@ -601,11 +602,54 @@ export class StateStore {
         this.logCollapseReport(report);
       } catch (error) {
         this.db.exec('ROLLBACK');
-        throw error;
+        throw this.collapseFailure(error, backup);
       }
     } finally {
       this.db.exec('PRAGMA foreign_keys = ON');
     }
+  }
+
+  // A failed collapse throws out of the constructor, so putiorr does not start
+  // — correctly, because the alternative is running against a database it has
+  // half-understood. But the bare SQLite text ("UNIQUE constraint failed:
+  // downloads.putio_transfer_id") names neither the row that caused it nor the
+  // backup taken seconds earlier, and it repeats on every boot forever. Both
+  // belong in the one message the user will ever see.
+  collapseFailure(error, backup) {
+    const failure = new Error(
+      `putiorr could not migrate its database to the downloads schema: ${error.message}.`
+      + ' The database was left exactly as it was, so this will repeat on every start until it is'
+      + ` fixed.${backup ? ` A backup taken before the attempt is at ${backup}.` : ''}`
+      + ' Please report this with the log line above.',
+    );
+    failure.cause = error;
+    return failure;
+  }
+
+  // `transfers` without `transfer_associations` means the association hop
+  // already ran and its output is gone — a partially restored or hand-edited
+  // database. The rows left in `transfers` are invisible to this version, and
+  // saying so only in the log means nobody finds out.
+  recordStrandedLegacyRows() {
+    if (!this.hasTable('transfers')) return;
+    const stranded = Number(this.db.prepare('SELECT COUNT(*) AS total FROM transfers').get().total);
+    if (stranded === 0) return;
+    this.setSetting('downloads_schema_v1_report', JSON.stringify({
+      version: 1,
+      at: nowIso(),
+      migrated: 0,
+      adoptedBySoleProfile: 0,
+      extraAssociations: [],
+      noPutioId: [],
+      ownerless: [],
+      droppedFiles: 0,
+      strandedLegacyRows: stranded,
+    }));
+    logger.warn('legacy transfers were left behind by the downloads schema migration', {
+      strandedLegacyRows: stranded,
+      consequence: 'these downloads are not visible to this version of putiorr',
+      fix: 'restore a backup taken before the upgrade, or re-add them',
+    });
   }
 
   // Row by row in JS rather than one INSERT ... SELECT. The tables hold
@@ -747,7 +791,30 @@ export class StateStore {
         continue;
       }
 
-      insertDownload.run(
+      this.insertCollapsedDownload(insertDownload, row, profileId);
+      copyFiles.run(row.id);
+      report.migrated += 1;
+    }
+
+    // Dependency order, with foreign keys already off. Load-bearing if anyone
+    // ever turns them back on inside this block: dropping a parent performs an
+    // implicit DELETE FROM, which cascades into the children.
+    this.db.exec(`
+      DROP TABLE IF EXISTS association_files;
+      DROP TABLE IF EXISTS transfer_associations;
+      DROP TABLE IF EXISTS transfer_files;
+      DROP TABLE IF EXISTS transfers;
+    `);
+    return report;
+  }
+
+  // Wrapped so a constraint that fires here names the row that caused it. The
+  // migration filters every NOT NULL column before inserting, so this can only
+  // be a bug in the collapse or a database shape the fixtures do not cover —
+  // and either way the user's only route to a fix is telling us which row.
+  insertCollapsedDownload(statement, row, profileId) {
+    try {
+      statement.run(
         row.id,
         profileId,
         row.putio_transfer_id,
@@ -778,20 +845,13 @@ export class StateStore {
         row.created_at,
         row.updated_at,
       );
-      copyFiles.run(row.id);
-      report.migrated += 1;
+    } catch (error) {
+      throw new Error(
+        `${error.message} while migrating download ${row.id} `
+        + `(put.io transfer ${row.putio_transfer_id}, ${row.name || 'unnamed'})`,
+        { cause: error },
+      );
     }
-
-    // Dependency order, with foreign keys already off. Load-bearing if anyone
-    // ever turns them back on inside this block: dropping a parent performs an
-    // implicit DELETE FROM, which cascades into the children.
-    this.db.exec(`
-      DROP TABLE IF EXISTS association_files;
-      DROP TABLE IF EXISTS transfer_associations;
-      DROP TABLE IF EXISTS transfer_files;
-      DROP TABLE IF EXISTS transfers;
-    `);
-    return report;
   }
 
   // The design asks the log to name the profile and the local path so a user
