@@ -276,8 +276,16 @@ function normalizeDownloadProfileRow(row) {
   };
 }
 
+// Stored absolute, always. Every local path a download resolves is built on
+// this column, and a relative one resolves against whatever the process has as
+// its working directory — a different answer per launch, and one that makes
+// resolveInside's containment check meaningless. The HTTP API already resolved
+// what it accepted; seeds from PUTIORR_PROFILES_JSON went in raw.
 function profileDownloadAt(input) {
-  return input.download_at ?? input.downloadAt ?? input.local_path ?? input.localPath;
+  const value = input.download_at ?? input.downloadAt ?? input.local_path ?? input.localPath;
+  if (value === undefined || value === null) return value;
+  const text = String(value).trim();
+  return text ? path.resolve(text) : text;
 }
 
 function profileDownloadProfileId(input) {

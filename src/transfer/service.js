@@ -2,7 +2,9 @@ import path from 'node:path';
 import {
   deleteLocalData,
   deleteLocalFileData,
+  downloadCategoryDir,
   extractCategory,
+  legacyDownloadLocalRoot,
   resolveDownloadRoot,
 } from '../download/paths.js';
 import { logger } from '../logger.js';
@@ -223,6 +225,50 @@ export class TransferService {
     const profile = this.findDownloadOwner(download);
     if (!profile) throw new Error(ownerlessDownloadMessage(download));
     return profile;
+  }
+
+  // Who claims a directory on disk, in the words the refusal will use. The
+  // design requires deleteLocalData to establish that a path belongs to
+  // exactly one download before removing anything; this is where that answer
+  // comes from. A download claims the folder carrying its id under its
+  // profile's category directory, and the folder its name alone spelled before
+  // phase 4 — which is the one two profiles could share, and the one the
+  // quarantine recorded for rows it could not attach to a profile.
+  localPathOwners(localPath) {
+    const target = path.resolve(String(localPath ?? ''));
+    const owners = [];
+    for (const download of [...this.store.listActiveDownloads(), ...this.store.listRemovedDownloads()]) {
+      const profile = this.findDownloadOwner(download);
+      if (!profile || !this.downloadClaimsPath(profile, download, target)) continue;
+      owners.push(`download ${download.id} (${download.name}) of RR profile ${profile.name}`);
+    }
+    for (const orphan of this.store.listOrphanedDownloads()) {
+      if (!orphan.legacy_download_dir) continue;
+      if (path.resolve(orphan.legacy_download_dir) !== target) continue;
+      owners.push(`quarantined download ${orphan.id} (${orphan.name})`);
+    }
+    return owners;
+  }
+
+  downloadClaimsPath(profile, download, target) {
+    try {
+      const categoryDir = downloadCategoryDir(profile, download);
+      if (
+        path.dirname(target) === categoryDir
+        && path.basename(target).startsWith(`${download.id}-`)
+      ) {
+        return true;
+      }
+      return legacyDownloadLocalRoot(profile, download) === target;
+    } catch {
+      // A profile with no usable download folder cannot claim anything; it
+      // must not make an unrelated path look unowned or contested either.
+      return false;
+    }
+  }
+
+  ownershipCheck() {
+    return { ownersOfPath: (localPath) => this.localPathOwners(localPath) };
   }
 
   async ensureProfileFolder(profile) {
@@ -491,7 +537,7 @@ export class TransferService {
       await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
         // The row was found scoped to this profile, so this is that profile.
-        await deleteLocalData(await resolveDownloadRoot(currentProfile, transfer));
+        await deleteLocalData(await resolveDownloadRoot(currentProfile, transfer), this.ownershipCheck());
       }
       this.store.deleteDownload(transfer.id);
       logger.info('torrent removed', {
@@ -526,7 +572,7 @@ export class TransferService {
 
     const fileCount = this.store.listFilesForDownload(transfer.id).length;
     if (deleteLocal) {
-      await deleteLocalData(localTarget);
+      await deleteLocalData(localTarget, this.ownershipCheck());
     }
     // The row can be hard-deleted once put.io has been cleaned up. If put.io is
     // intentionally kept, a tombstone stays behind so the next refresh cannot
@@ -600,7 +646,7 @@ export class TransferService {
 
     if (deleteLocal) {
       for (const file of files) {
-        await deleteLocalFileData(downloadRoot, file.relative_path);
+        await deleteLocalFileData(downloadRoot, file.relative_path, this.ownershipCheck());
       }
     }
 
@@ -854,7 +900,7 @@ export class TransferService {
           + ' remove them by hand, then delete this entry without the local-files option',
         );
       }
-      await deleteLocalData(row.legacy_download_dir);
+      await deleteLocalData(row.legacy_download_dir, this.ownershipCheck());
     }
     this.store.deleteOrphanedDownload(orphanId);
     logger.info('quarantined download deleted', {

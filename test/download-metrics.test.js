@@ -859,6 +859,44 @@ test('deleting a quarantined download removes the files at its recorded absolute
   }
 });
 
+test('deleting a quarantined download refuses a folder another download also claims', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    // The old layout put a download in `<category>/<put.io name>`, so a
+    // quarantined row's recorded path can be the very folder a live download
+    // still stages into. rm -rf there takes the live download's files.
+    const live = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 44,
+      hash: 'sharedfolderhash',
+      name: 'Shared.Name',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    const target = path.join(harness.config.targetDir, 'tv', 'Shared.Name');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, 'movie.mkv'), 'irreplaceable');
+
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: 45,
+      name: 'Shared.Name',
+      category: 'tv',
+      legacy_download_dir: target,
+    });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /2 downloads own it/,
+    );
+    assert.equal(await readFile(path.join(target, 'movie.mkv'), 'utf8'), 'irreplaceable');
+    assert.equal(harness.store.listOrphanedDownloads().length, 1);
+    assert.ok(harness.store.findDownloadById(live.id));
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('deleting a quarantined download from put.io needs put.io ids to delete', async () => {
   const harness = await createHarness();
   try {

@@ -60,6 +60,23 @@ test('upsertDownload matches later remote updates by put.io id', () => {
   }
 });
 
+test('a profile download folder is stored absolute', () => {
+  const store = new StateStore(':memory:');
+  try {
+    // PUTIORR_PROFILES_JSON seeds go straight into the store, so a relative
+    // folder used to be stored verbatim and re-resolved against the working
+    // directory on every read — a different directory per launch, and one no
+    // containment check can vouch for.
+    const profile = seedProfile(store, { downloadAt: './media/downloads' });
+    assert.equal(profile.download_at, path.resolve('./media/downloads'));
+
+    const updated = store.updateProfile(profile.id, { downloadAt: 'elsewhere' });
+    assert.equal(updated.download_at, path.resolve('elsewhere'));
+  } finally {
+    store.close();
+  }
+});
+
 test('upsertDownload keeps the known hash when put.io reports none', () => {
   const store = new StateStore(':memory:');
   try {

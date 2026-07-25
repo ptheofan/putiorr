@@ -27,7 +27,15 @@ export function normalizeRelativePath(value) {
     .join(path.sep);
 }
 
+// The containment check below is only worth anything when the root is
+// absolute: a relative one resolves against process.cwd(), so everything is
+// "inside" it and the resulting path names whatever happens to sit next to the
+// process. Asserted here rather than at the call sites because this is the
+// only place that can guarantee every caller pays it.
 export function resolveInside(root, ...parts) {
+  if (!path.isAbsolute(String(root ?? ''))) {
+    throw new Error(`cannot resolve a path inside ${root || '(nothing)'}: the root must be absolute`);
+  }
   const resolvedRoot = path.resolve(root);
   const resolved = path.resolve(resolvedRoot, ...parts);
   if (resolved !== resolvedRoot && !resolved.startsWith(resolvedRoot + path.sep)) {
@@ -137,24 +145,39 @@ export async function fileExistsWithSize(filePath, size) {
 // and a name to join: the folder a download is using is not always the one its
 // current name spells, and re-deriving it here from a remote-mutable name is
 // how an rm -rf ends up pointed at a directory somebody else is filling.
-export async function deleteLocalData(downloadRoot) {
-  await rm(requireDownloadRoot(downloadRoot), { recursive: true, force: true });
+export async function deleteLocalData(downloadRoot, { ownersOfPath } = {}) {
+  const localPath = requireSoleOwnedDownloadRoot(downloadRoot, ownersOfPath);
+  await rm(localPath, { recursive: true, force: true });
 }
 
-export async function deleteLocalFileData(downloadRoot, relativePath) {
-  const transferRoot = requireDownloadRoot(downloadRoot);
+export async function deleteLocalFileData(downloadRoot, relativePath, { ownersOfPath } = {}) {
+  const transferRoot = requireSoleOwnedDownloadRoot(downloadRoot, ownersOfPath);
   const localPath = resolveInside(transferRoot, relativePath);
   await rm(localPath, { force: true });
   await rm(`${localPath}.part`, { force: true });
   await removeEmptyParents(path.dirname(localPath), transferRoot);
 }
 
-function requireDownloadRoot(downloadRoot) {
+// Every recursive delete putiorr performs goes through here, and it performs
+// them on directories full of files a user cannot get back. Two questions have
+// to have answers first: is this an absolute path putiorr chose, and does it
+// belong to exactly one download? A caller that cannot say who owns the path
+// has not established that it is putiorr's to delete, so silence is refused
+// the same way a shared directory is.
+function requireSoleOwnedDownloadRoot(downloadRoot, ownersOfPath) {
   const resolved = String(downloadRoot ?? '');
   if (!path.isAbsolute(resolved)) {
     throw new Error(`refusing to delete ${resolved || '(nothing)'}: a download folder must be an absolute path`);
   }
-  return resolved;
+  if (typeof ownersOfPath !== 'function') {
+    throw new Error(`refusing to delete ${resolved}: nothing established which download owns it`);
+  }
+  const owners = ownersOfPath(resolved) ?? [];
+  if (owners.length === 1) return resolved;
+  if (owners.length === 0) {
+    throw new Error(`refusing to delete ${resolved}: no download owns it`);
+  }
+  throw new Error(`refusing to delete ${resolved}: ${owners.length} downloads own it — ${owners.join('; ')}`);
 }
 
 async function removeEmptyParents(startDir, stopDir) {
