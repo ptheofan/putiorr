@@ -26,8 +26,12 @@ test('profile wizard sends Browser sites as typed and surfaces the server respon
   assert.match(profilesJs, /browserDomains: fieldValue\(el\.wizardBrowserDomains\)\.trim\(\)/);
 
   // The save response carries the warnings under the snake_case key only, and
-  // both messages that report a completed save have to pass through them.
+  // both messages that report a completed save have to pass through them. They
+  // get their own heading: appended bare, a warning reads as one more entry in
+  // the dash-list of checks the failure message ends with.
   assert.match(profilesJs, /profile\?\.browser_domain_warnings/);
+  assert.match(profilesJs, /\[message, '', 'Browser sites:', \.\.\.warnings\]\.join\('\\n'\)/);
+  assert.match(profilesJs, /upsertProfileState\(withoutBrowserDomainWarnings\(savedProfile\)\)/);
   assert.match(profilesJs, /withBrowserDomainWarnings\('Profile tested and saved successfully!', savedProfile\)/);
   assert.match(profilesJs, /withBrowserDomainWarnings\(formatClientTestFailureMessage\(error, savedProfile\), savedProfile\)/);
 

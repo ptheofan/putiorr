@@ -189,7 +189,7 @@ export const WIZARD_HELP = {
       'The first matching profile wins, so avoid listing the same site on two profiles.',
       'putiorr rewrites what you type: sites are lowercased, unicode becomes punycode, and any scheme, port, or path is dropped.',
     ],
-    valueLabel: 'Sites routed here',
+    valueLabel: 'Sites as typed',
     value: (profile) => browserDomainsText(profile),
   },
 };
@@ -216,9 +216,19 @@ export function browserDomainWarnings(profile) {
   return Array.isArray(warnings) ? warnings.filter((warning) => typeof warning === 'string') : [];
 }
 
+// Under their own heading after a blank line: the message being appended to may
+// already end in a labelled section, such as the dash-list of checks a failed
+// client test produces, and a bare line would read as one more entry in it.
 export function withBrowserDomainWarnings(message, profile) {
   const warnings = browserDomainWarnings(profile);
-  return warnings.length ? [message, ...warnings].join('\n') : message;
+  return warnings.length ? [message, '', 'Browser sites:', ...warnings].join('\n') : message;
+}
+
+// The reply that answered for them is the only place they belong; keeping the
+// key would leave a stale note attached to the profile in state.
+export function withoutBrowserDomainWarnings(profile) {
+  const { browser_domain_warnings: warnings, ...rest } = profile;
+  return warnings === undefined ? profile : rest;
 }
 
 export function renderProfiles() {
@@ -451,7 +461,7 @@ export async function saveProfileFromWizard({
         method: 'POST',
         body: JSON.stringify(payload),
     });
-    upsertProfileState(savedProfile);
+    upsertProfileState(withoutBrowserDomainWarnings(savedProfile));
     renderProfiles();
     renderDownloadProfiles();
     el.wizardProfileId.value = savedProfile.id || '';
