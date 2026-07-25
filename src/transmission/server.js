@@ -1122,6 +1122,10 @@ export class TransmissionRpcServer {
   // configured default. Returns `{ ok: true, profile }` or the refusal to send
   // as `{ ok: false, status, error }` — tagged so a resolved profile is never
   // confused with a branch that forgot to answer.
+  //
+  // The refusals follow this file's convention: one that is about a named field
+  // opens with that field spelled exactly as the caller sends it, and one that
+  // is a plain sentence opens capitalized.
   resolveGrabProfile(body, pageHost) {
     // An unset <select> submits '' and a cleared cached pick is null; neither
     // is the caller naming a profile, so both fall through to site matching.
@@ -1148,13 +1152,24 @@ export class TransmissionRpcServer {
       : undefined;
     if (matched) return { ok: true, profile: matched };
 
-    const defaultId = Number(body.defaultProfileId);
-    if (!Number.isInteger(defaultId) || defaultId <= 0) {
+    // 0 is how the extension spells "no default profile", so it counts as an
+    // absent one rather than a bad id, as do '' and null.
+    const rawDefault = body.defaultProfileId;
+    const defaultId = Number(rawDefault);
+    const hasDefault = rawDefault !== undefined && rawDefault !== null
+      && String(rawDefault).trim() !== '' && defaultId !== 0;
+    if (!hasDefault) {
       return {
         ok: false,
         status: 400,
-        error: 'no profile matches this site and no default profile is configured',
+        error: 'No profile matches this site and no default profile is configured',
       };
+    }
+    // A caller that sent something it believed was an id is told what was wrong
+    // with it: answering "no default profile is configured" would describe a
+    // request it did not make and hide the typo that caused this one.
+    if (!Number.isInteger(defaultId) || defaultId <= 0) {
+      return { ok: false, status: 400, error: 'defaultProfileId must be a positive integer' };
     }
     // A stale cached default has to surface; routing the grab elsewhere would
     // put the transfer somewhere the user never chose.

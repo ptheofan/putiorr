@@ -450,7 +450,40 @@ test('a grab with nothing to resolve is refused with the fix in the message', as
   });
 
   assert.equal(status, 400);
-  assert.equal(body.error, 'no profile matches this site and no default profile is configured');
+  assert.equal(body.error, 'No profile matches this site and no default profile is configured');
+  assert.equal(harness.putio.added.length, 0);
+});
+
+test('a defaultProfileId that is not an id is refused as itself', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'browser', ['x.example']);
+
+  // "no default profile is configured" would describe a request the caller did
+  // not make and hide the typo that caused this one.
+  for (const defaultProfileId of ['abc', -1, 1.5]) {
+    const { status, body } = await postGrab(harness, {
+      pageHost: 'notx.example',
+      defaultProfileId,
+      magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+    });
+    assert.equal(status, 400, String(defaultProfileId));
+    assert.equal(body.error, 'defaultProfileId must be a positive integer', String(defaultProfileId));
+  }
+
+  // 0, '' and null are how a caller spells "I have no default", not a bad id.
+  for (const defaultProfileId of [0, '0', '', null]) {
+    const { body } = await postGrab(harness, {
+      pageHost: 'notx.example',
+      defaultProfileId,
+      magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+    });
+    assert.equal(
+      body.error,
+      'No profile matches this site and no default profile is configured',
+      String(defaultProfileId),
+    );
+  }
   assert.equal(harness.putio.added.length, 0);
 });
 
@@ -467,7 +500,7 @@ test('a disabled profile does not claim its browser sites', async (t) => {
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
   assert.equal(refused.status, 400);
-  assert.equal(refused.body.error, 'no profile matches this site and no default profile is configured');
+  assert.equal(refused.body.error, 'No profile matches this site and no default profile is configured');
 
   const fellBack = await postGrab(harness, {
     pageHost: 'x.example',

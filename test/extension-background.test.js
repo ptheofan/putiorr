@@ -340,8 +340,10 @@ test('a putiorr too old to name the profile still reports the grab as sent', asy
 });
 
 test('a grab with nothing to route it is refused by putiorr, not by the worker', async () => {
-  // The worker cannot know whether the site matches a profile, so it asks and
-  // relays the answer instead of inventing a local "no profile" refusal.
+  // The worker cannot know whether the site matches a profile, so it asks
+  // instead of inventing a local "no profile" refusal. With nothing configured
+  // this is the likeliest first-run failure, so the answer has to name the fix
+  // and be able to reach it — a verbatim relay is a dead end on a fresh install.
   let called = false;
   const harness = await loadWorker({
     sync: { baseUrl: 'http://putiorr.test', profiles: [] },
@@ -350,7 +352,7 @@ test('a grab with nothing to route it is refused by putiorr, not by the worker',
       return {
         ok: false,
         status: 400,
-        json: async () => ({ error: 'no profile matches this site and no default profile is configured' }),
+        json: async () => ({ error: 'No profile matches this site and no default profile is configured' }),
       };
     },
   });
@@ -364,8 +366,87 @@ test('a grab with nothing to route it is refused by putiorr, not by the worker',
   });
 
   assert.equal(called, true, 'the grab must reach putiorr');
-  assert.deepEqual(response, { ok: false, error: 'no profile matches this site and no default profile is configured' });
-  assert.equal(harness.notifications[0].message, 'no profile matches this site and no default profile is configured');
+  assert.match(harness.notifications[0].message, /No profile matches this site and no default profile is set/);
+  assert.match(harness.notifications[0].message, /click here to open the options/);
+  assert.equal(harness.notifications[0].id, 'putiorr-configure');
+  assert.equal(response.ok, false);
+  assert.equal(response.error, harness.notifications[0].message);
+
+  harness.listeners.notificationClicked('putiorr-configure');
+  assert.ok(harness.log.includes('openOptionsPage'));
+});
+
+test('a putiorr from before the message was recased still guides the first run', async () => {
+  // The extension updates on Chrome's schedule and putiorr on the user's, so
+  // the two spellings of this sentence are both live in the wild.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'no profile matches this site and no default profile is configured' }),
+    }),
+  });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.equal(harness.notifications[0].id, 'putiorr-configure');
+});
+
+test('a grab that names a default keeps putiorr\'s own 400', async () => {
+  // Here the user has configured something, so "no default profile is set" is
+  // not the fix; whatever putiorr refused is.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 4, name: 'Movies' }] },
+    fetch: async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'defaultProfileId must be a positive integer' }),
+    }),
+  });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.deepEqual(response, { ok: false, error: 'defaultProfileId must be a positive integer' });
+  assert.equal(harness.notifications[0].message, 'defaultProfileId must be a positive integer');
+  assert.equal(harness.notifications[0].id, undefined);
+});
+
+test('a 400 about the link itself is not rewritten as a missing profile', async () => {
+  // A fresh install sends no ids at all, so every 400 it gets back would match
+  // a status-only test — including the ones that have nothing to do with
+  // profiles, whose real message is the only clue the user has.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'torrentBase64 is not a valid .torrent file' }),
+    }),
+  });
+
+  await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', torrentBase64: 'bm90IGEgdG9ycmVudA==', filename: 'x.torrent', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.equal(harness.notifications[0].message, 'torrentBase64 is not a valid .torrent file');
+  assert.equal(harness.notifications[0].id, undefined);
 });
 
 test('a default profile deleted in putiorr is named as the default, not as a bare 404', async () => {

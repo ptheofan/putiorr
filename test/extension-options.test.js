@@ -284,10 +284,40 @@ test('stored settings are restored into the form', async () => {
     harness.fields.defaultProfile.children.map((option) => [option.value, option.textContent]),
     [['', 'No default profile'], ['4', 'Movies'], ['7', 'TV']],
   );
-  // Browser sites are not cached, so until profiles are fetched the page says
-  // so rather than implying the profiles route nothing.
-  assert.match(harness.profileListText(), /Test the connection to see/);
+  // The cached names are what the dropdown is built from, so the card lists
+  // them too — and says which part of the row the cache cannot know, rather
+  // than implying these profiles route nothing.
+  assert.deepEqual(harness.profileRows(), [
+    ['Movies', 'sites unknown until you load'],
+    ['TV', 'sites unknown until you load'],
+  ]);
   assert.equal(harness.legacyShown(), false);
+});
+
+test('with nothing cached the profiles card points at the connection test', async () => {
+  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
+
+  assert.match(harness.profileListText(), /Test the connection to see/);
+  assert.equal(harness.fields.profileList.children.length, 1, 'the empty state is one note, not a row list');
+});
+
+test('a load replaces the unknown-sites rows with what putiorr says', async () => {
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 4, name: 'Movies' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [{ id: 4, name: 'Movies', enabled: 1, browser_domains: [] }],
+    }),
+  });
+
+  assert.deepEqual(harness.profileRows(), [['Movies', 'sites unknown until you load']]);
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  // "no sites" is a fact putiorr just stated; the cache had no such fact.
+  assert.deepEqual(harness.profileRows(), [['Movies', 'no sites']]);
 });
 
 test('corrupt stored settings still produce a usable form', async () => {

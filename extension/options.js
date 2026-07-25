@@ -14,10 +14,15 @@ const el = (id) => document.getElementById(id);
 
 // The cached {id, name} list the worker's context menu is built from.
 let profiles = [];
-// What the last successful load said about each profile's browser sites. Not
-// stored: it would be a second copy of putiorr's own setting, stale the moment
-// someone edits a profile there.
+// One row per profile: `{ name, sites, known }`. Only a load knows the sites —
+// they are deliberately not cached, since they would be stale the moment
+// someone edits a profile in putiorr — so a restored page lists the names it
+// does have and says the sites are the part it cannot know.
 let profileSites = [];
+
+function cachedProfileRows() {
+  return profiles.map((profile) => ({ name: profile.name, sites: [], known: false }));
+}
 
 // Tones: 'note' for a request in flight, 'ok' for news that landed, 'error'
 // for a refusal — "Saved" and "Contacting putiorr…" are not the same news.
@@ -83,16 +88,17 @@ function renderProfileSites() {
     return;
   }
 
-  list.replaceChildren(...profileSites.map(({ name, sites }) => {
+  list.replaceChildren(...profileSites.map(({ name, sites, known }) => {
     const row = document.createElement('div');
     row.className = 'profile-row';
+    // "no sites" is a fact putiorr just stated; the cached list has no such
+    // fact to state, and claiming one would contradict the next load.
+    const text = known
+      ? (sites.length ? sites.join(', ') : 'no sites')
+      : 'sites unknown until you load';
     row.append(
       createCell('span', 'profile-row-name', name),
-      createCell(
-        'span',
-        sites.length ? 'profile-row-sites' : 'profile-row-sites is-empty',
-        sites.length ? sites.join(', ') : 'no sites',
-      ),
+      createCell('span', known && sites.length ? 'profile-row-sites' : 'profile-row-sites is-empty', text),
     );
     return row;
   }));
@@ -244,7 +250,11 @@ async function loadProfilesFromPutiorr() {
 
   const sitesById = new Map(rows.map((row) => [Number(row?.id), browserSitesOf(row)]));
   profiles = loaded;
-  profileSites = loaded.map((profile) => ({ name: profile.name, sites: sitesById.get(profile.id) ?? [] }));
+  profileSites = loaded.map((profile) => ({
+    name: profile.name,
+    sites: sitesById.get(profile.id) ?? [],
+    known: true,
+  }));
   renderDefaultProfileSelect(previousDefault);
   renderProfileSites();
 
@@ -275,6 +285,9 @@ async function restore() {
 
   const defaultProfileId = Number(sync.defaultProfileId) || 0;
   renderDefaultProfileSelect(defaultProfileId);
+  // The select below is built from the same cached names, so an empty card
+  // here would contradict a dropdown the user can see is populated.
+  profileSites = cachedProfileRows();
   renderProfileSites();
 
   if (Array.isArray(sync.rules) && sync.rules.length) renderLegacyRules(sync.rules);

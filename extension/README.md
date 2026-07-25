@@ -189,9 +189,11 @@ that decide the profile:
 - `pageHost` — optional, the hostname of the page the grab came from, matched
   against the profiles' **Browser sites**. Omitting it skips straight to the
   default.
-- `defaultProfileId` — optional, used only when no site matches. Missing, with
-  no match, is the `400` "no profile matches this site and no default profile
-  is configured"; present but unknown to putiorr is a `404`.
+- `defaultProfileId` — optional, used only when no site matches. Missing (or
+  `0`, `''`, `null`), with no match, is the `400` "No profile matches this site
+  and no default profile is configured"; a value that is not an id is the `400`
+  "defaultProfileId must be a positive integer"; an id putiorr does not have is
+  a `404`.
 
 The reply names the profile that answered, so the caller does not have to repeat
 its own guess back to the user:
@@ -232,6 +234,9 @@ applies to `/api/grab` like it does to every other putiorr route.
 - The extension expects a putiorr that knows about browser sites. An
   auto-captured click sends no `profileId` — that is the server's decision now —
   so against an older putiorr it comes back as "profileId is required" and only
-  the right-click menu still grabs. Update putiorr, or use the menu.
+  the right-click menu still grabs. Update putiorr, or use the menu. The skew in
+  the other direction is harmless: an extension older than putiorr always sends
+  an explicit `profileId`, which the new resolver honours ahead of any site
+  match, so those grabs keep landing exactly where they used to.
 - Chrome only. This is a Manifest V3 extension built against the `chrome.*` APIs
   and has not been adapted for other browsers.

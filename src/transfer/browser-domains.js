@@ -1,12 +1,15 @@
 // Which websites route a browser grab to which putiorr profile.
 //
-// This is a deliberate copy of the extension's proven code
-// (`extension/lib/settings.js` parse loop + `extension/lib/resolve.js`
-// matching), not an import: `src/` and `extension/` are different deployment
-// surfaces — the extension ships as an unbundled MV3 package that cannot reach
-// into the server tree, and the server must not depend on a directory that is
-// packaged and versioned separately. The behaviour is pinned on both sides by
-// test/browser-domains.test.js.
+// These rules started in the browser extension and were moved here when the
+// mapping moved onto the profile itself: the extension no longer holds a copy
+// to disagree with, it sends the page host and putiorr answers. This file is
+// the only place the rules exist, and test/browser-domains.test.js is the only
+// place they are pinned.
+//
+// Nothing is imported across the two trees in either direction: `src/` and
+// `extension/` are different deployment surfaces — the extension ships as an
+// unbundled MV3 package that cannot reach into the server tree, and the server
+// must not depend on a directory that is packaged and versioned separately.
 //
 // No node built-ins beyond the global URL parser, no side effects: the profile
 // form and grab resolution both call in here so a site is matched by exactly

@@ -15,6 +15,12 @@ const NOTIFY_CONFIGURE = 'putiorr-configure';
 // and a request timing out exactly on that line would race the teardown.
 const GRAB_TIMEOUT_MS = 25000;
 
+// putiorr's refusal when nothing routes the grab, lowercased for comparison.
+// Matching the sentence and not just the 400 matters: a fresh install sends no
+// ids at all, so every other 400 — a bad magnet, an unreadable .torrent —
+// would otherwise be rewritten as a profile problem it is not.
+const NO_PROFILE_MATCH = 'no profile matches this site and no default profile is configured';
+
 async function loadSettings() {
   const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
   const local = await chrome.storage.local.get({ username: '', password: '' });
@@ -153,6 +159,17 @@ async function handleGrab(payload) {
     // putiorr too old to have /api/grab must keep saying so.
     if (error.status === 404 && error.message === 'Profile not found' && !hasExplicitId && defaultProfileId) {
       const message = `putiorr no longer has the default profile (#${defaultProfileId}); load profiles again in the options — click here to open them`;
+      notify('putiorr grab failed', message, NOTIFY_CONFIGURE);
+      return { ok: false, error: message };
+    }
+    // Nothing configured and nothing claiming the site is the likeliest first
+    // run there is, and putiorr's sentence ends where the user has to act:
+    // in these options, which the notification can at least open. The message
+    // is matched in either casing — putiorr updates on its own schedule, and
+    // both spellings of this refusal are in the wild.
+    if (error.status === 400 && !hasExplicitId && !defaultProfileId
+      && error.message.toLowerCase() === NO_PROFILE_MATCH) {
+      const message = 'No profile matches this site and no default profile is set — click here to open the options';
       notify('putiorr grab failed', message, NOTIFY_CONFIGURE);
       return { ok: false, error: message };
     }
