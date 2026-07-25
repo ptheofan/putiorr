@@ -697,7 +697,10 @@ export class DownloadManager {
 
   downloadPolicyForFile(file) {
     const transfer = this.store.findTransferById(file.transfer_id);
-    const profile = transfer ? this.store.findProfileById(transfer.profile_id) : undefined;
+    // Through the one resolver, so phase 3 has a single place to change when
+    // profile_id stops being nullable. A missing owner falls back to the
+    // server-wide policy rather than another profile's.
+    const profile = this.service.findTransferProfile(transfer);
     return downloadPolicyForContext(this.store, this.config, { profile });
   }
 

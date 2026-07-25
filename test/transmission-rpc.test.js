@@ -2659,3 +2659,97 @@ test('a grab profile parked on the shared path cannot take that endpoint down', 
   assert.equal(added.result, 'success');
   assert.equal(harness.store.findTransferById(added.arguments['torrent-added'].id).profile_id, seeded.id);
 });
+
+// Two profiles can legitimately hold associations to one put.io transfer, so a
+// hash names a set of rows rather than a row. The cross-profile refusal must
+// only fire on something that identifies exactly one association — a numeric
+// id — or it starts refusing correctly-configured clients.
+async function profileRpc(harness, rpcPath, method, args) {
+  const url = harness.url.replace('/transmission/rpc', rpcPath);
+  const handshake = await fetch(url, { method: 'POST' });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({ method, arguments: args }),
+  });
+  return response.json();
+}
+
+test('removing the same hash twice stays a no-op when another profile still holds it', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr, radarr } = createTwoArrProfiles(harness);
+  const magnet = 'magnet:?xt=urn:btih:abcdef&dn=Shared.Release';
+
+  const sonarrAdd = await profileRpc(harness, sonarr.rpc_path, 'torrent-add', {
+    filename: magnet,
+    'download-dir': path.join(harness.config.targetDir, 'sonarr'),
+  });
+  await profileRpc(harness, radarr.rpc_path, 'torrent-add', {
+    filename: magnet,
+    'download-dir': path.join(harness.config.targetDir, 'radarr'),
+  });
+  const hash = sonarrAdd.arguments['torrent-added'].hashString;
+
+  const first = await profileRpc(harness, sonarr.rpc_path, 'torrent-remove', { ids: [hash] });
+  assert.equal(first.result, 'success');
+
+  // Sonarr's own row is gone; Radarr's survives. A retry, or the next cleanup
+  // pass, must not be told to go and use Radarr's endpoint.
+  const second = await profileRpc(harness, sonarr.rpc_path, 'torrent-remove', { ids: [hash] });
+  assert.equal(second.result, 'success');
+  assert.equal(harness.store.listActiveTransfers({ profileId: radarr.id }).length, 1);
+});
+
+test('a tombstoned row from another profile does not refuse a remove', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr, radarr } = createTwoArrProfiles(harness);
+  const radarrRow = harness.store.createOrUpdateTransfer({
+    profile_id: radarr.id,
+    putio_transfer_id: 90,
+    putio_file_id: 91,
+    hash: 'tombstonedhash',
+    name: 'Radarr.Release',
+    category: 'radarr',
+    lifecycle: 'downloading',
+  });
+  // Deleted from the dashboard but kept on put.io: the row is a tombstone.
+  await harness.service.deleteDownloadBucket(radarrRow.id, { deleteRemote: false, deleteLocal: false });
+
+  const response = await profileRpc(harness, sonarr.rpc_path, 'torrent-remove', { ids: [radarrRow.id] });
+
+  // Nothing live is being addressed, so there is nothing to correct anyone about.
+  assert.equal(response.result, 'success');
+});
+
+test('the cross-profile refusal names no owner when the row it found has none', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr } = createTwoArrProfiles(harness);
+  const orphan = harness.store.createOrUpdateTransfer({
+    putio_transfer_id: 92,
+    hash: 'noownerhash',
+    name: 'Orphan.Release',
+    lifecycle: 'downloading',
+  });
+
+  const response = await profileRpc(harness, sonarr.rpc_path, 'torrent-remove', { ids: [orphan.id] });
+
+  assert.match(response.result, /\(none\)/);
+  assert.doesNotMatch(response.result, /; use /);
+  assert.ok(harness.store.findTransferById(orphan.id));
+});

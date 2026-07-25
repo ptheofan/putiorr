@@ -74,6 +74,12 @@ export function ownerlessDownloadMessage(transfer) {
     + ' reassign it from the dashboard or delete it';
 }
 
+// A Transmission id may be our association id or a torrent hash. Only the first
+// identifies exactly one download.
+function isAssociationId(identifier) {
+  return typeof identifier === 'number' || /^\d+$/.test(String(identifier));
+}
+
 function isTransferStillListed(transfer, remoteIds, remoteHashes) {
   return (
     (transfer.putio_transfer_id != null && remoteIds.has(transfer.putio_transfer_id)) ||
@@ -165,7 +171,7 @@ export class TransferService {
     if (profiles.length === 1) return profiles[0];
     if (profiles.length === 0) throw new Error('No enabled RR profile is configured');
     throw new Error(
-      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} enabled RR profiles share it.`
+      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} enabled RR profiles could have meant it.`
       + ` Point this download client at the RPC path of the profile it means — ${this.rpcPathAdvice(profiles)}`,
     );
   }
@@ -431,8 +437,19 @@ export class TransferService {
         // another profile is not — answering "success" to that told the client
         // a download was gone while it kept downloading, and hid the fact that
         // the client is addressing the wrong endpoint.
-        const foreign = this.store.findTransfer(id);
-        if (foreign) {
+        //
+        // Only a numeric association id can say that, though. A hash names a
+        // set of associations, since two profiles may legitimately hold one
+        // put.io transfer, so "this hash exists under another profile" cannot
+        // tell a mis-addressed client apart from one whose own copy is simply
+        // gone already — and the second is routine: a repeat remove, or our own
+        // auto-remove sweep having hard-deleted the row between the client's
+        // get and its remove. A mis-addressed client has no valid ids either,
+        // so the check keeps its value.
+        const foreign = isAssociationId(id) ? this.store.findTransferById(Number(id)) : undefined;
+        // A tombstoned row is already gone as far as any client is concerned,
+        // so there is nothing to correct anyone about.
+        if (foreign && !foreign.removed_at) {
           const owner = this.findTransferProfile(foreign);
           throw new Error(
             `Download ${id} belongs to RR profile ${owner ? owner.name : '(none)'}, not ${currentProfile.name}`
@@ -472,6 +489,15 @@ export class TransferService {
       throw new Error('Download bucket not found');
     }
 
+    // Resolved before anything irreversible happens. Only the local half needs
+    // an owner, because only the local half needs a folder — but discovering
+    // that after cancelling the put.io transfer would leave a row that can
+    // never be removed again: put.io 404s on the retry and the local half
+    // throws before it gets there.
+    const localTarget = deleteLocal
+      ? path.join(this.requireTransferProfile(transfer).download_at, transfer.category ?? '')
+      : undefined;
+
     const hasOtherAssociations = this.store.hasOtherActiveAssociations(transfer);
     const remoteDeleted = deleteRemote && (
       !hasOtherAssociations || this.store.allActiveAssociationsProcessed(transfer.remote_id)
@@ -481,12 +507,8 @@ export class TransferService {
     }
 
     const fileCount = this.store.listFilesForTransfer(transfer.id).length;
-    // Only the local half needs an owner, because only the local half needs a
-    // folder. Requiring one to remove the row would strand exactly the
-    // downloads whose error message tells the user to remove them.
     if (deleteLocal) {
-      const profile = this.requireTransferProfile(transfer);
-      await deleteLocalData(path.join(profile.download_at, transfer.category ?? ''), transfer.name);
+      await deleteLocalData(localTarget, transfer.name);
     }
     // A profile association can be hard-deleted after requested remote cleanup.
     // If put.io is intentionally kept, retain a tombstone so refresh cannot
@@ -536,6 +558,12 @@ export class TransferService {
       return this.deleteDownloadBucket(transfer.id, { deleteRemote, deleteLocal });
     }
 
+    // Same rule as the bucket delete: resolve the owner before the first
+    // irreversible step, never after it.
+    const targetDir = deleteLocal
+      ? path.join(this.requireTransferProfile(transfer).download_at, transfer.category ?? '')
+      : undefined;
+
     const remoteDeleted = deleteRemote && (
       !this.store.hasOtherActiveAssociations(transfer)
       || this.store.allActiveAssociationsProcessed(transfer.remote_id)
@@ -558,8 +586,6 @@ export class TransferService {
     });
 
     if (deleteLocal) {
-      const profile = this.requireTransferProfile(transfer);
-      const targetDir = path.join(profile.download_at, transfer.category ?? '');
       for (const file of files) {
         await deleteLocalFileData(targetDir, transfer.name, file.relative_path);
       }

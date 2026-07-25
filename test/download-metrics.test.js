@@ -604,13 +604,80 @@ test('an ownerless download can still be deleted from the dashboard', async () =
     assert.equal(harness.store.findTransferById(transfer.id), undefined);
     assert.deepEqual(harness.putio.deletedTransfers, [55]);
 
-    // Asking to delete files there is no folder for is the one refusal.
-    const second = createOwnerlessTransfer(harness.store, { putio_transfer_id: 57, hash: 'ownerlesstwo' });
+    // Asking to delete files there is no folder for is the one refusal — and it
+    // has to happen before anything irreversible. Deleting the put.io transfer
+    // first and only then discovering there is no local folder would leave a row
+    // that can never be removed again: put.io 404s and the local half throws.
+    const second = createOwnerlessTransfer(harness.store, { putio_transfer_id: 57, putio_file_id: 58, hash: 'ownerlesstwo' });
     await assert.rejects(
-      () => harness.service.deleteDownloadBucket(second.id, { deleteRemote: false, deleteLocal: true }),
+      () => harness.service.deleteDownloadBucket(second.id, { deleteRemote: true, deleteLocal: true }),
       /no owning RR profile/i,
     );
     assert.ok(harness.store.findTransferById(second.id));
+    // Nothing of the second download reached put.io: 55/56 are the first one.
+    assert.deepEqual(harness.putio.deletedTransfers, [55]);
+    assert.deepEqual(harness.putio.deletedFiles, [56]);
+
+    // Still removable afterwards, which is the promise the refusal has to keep.
+    const cleaned = await harness.service.deleteDownloadBucket(second.id, {
+      deleteRemote: true,
+      deleteLocal: false,
+    });
+    assert.equal(cleaned.ok, true);
+    assert.equal(harness.store.findTransferById(second.id), undefined);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a mixed-status put.io failure is not read as "the remote is gone"', async () => {
+  // Only a unanimous 404 means the transfer is gone. A 404 on the file and a
+  // 500 on the transfer means put.io is half-broken, and deleting the local row
+  // on the strength of that would throw away a download that still exists.
+  const harness = await createHarness();
+  try {
+    const transfer = harness.store.createOrUpdateTransfer({
+      profile_id: harness.store.findProfileBySlug('default').id,
+      putio_transfer_id: 70,
+      putio_file_id: 71,
+      save_parent_id: 42,
+      hash: 'mixedstatushash',
+      name: 'Mixed.Status.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+    harness.putio.deleteFile = async () => {
+      const error = new Error('put.io file 71 not found');
+      error.status = 404;
+      throw error;
+    };
+    harness.putio.deleteTransfer = async () => {
+      const error = new Error('put.io is unavailable');
+      error.status = 503;
+      throw error;
+    };
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.ok(harness.store.findTransferById(transfer.id));
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
+    assert.equal(logged.meta.transferId, transfer.id);
   } finally {
     harness.store.close();
   }

@@ -42,6 +42,16 @@
   padding: 4px 2px 2px;
 }
 
+.topo-orphans {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--danger-border, #d9534f);
+  background: var(--danger-bg, rgba(217, 83, 79, 0.08));
+  color: var(--danger-text, inherit);
+  font-size: 0.9rem;
+}
+
 .topo-svg {
   display: block;
   width: 100%;

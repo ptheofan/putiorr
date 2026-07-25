@@ -250,3 +250,19 @@ test('the field guide explains the browser extension and how to install it', () 
   // the rest of the entry.
   assert.match(profilesJs, /setText\(el\.wizardHelpValueLabel, resolveWizardHelpContent\(help\.valueLabel, profile, settings\) \|\| 'Current effect'\)/);
 });
+
+// Phase 2 deleted category routing. These wizard tips were still teaching it,
+// which walked users into the one configuration that now hard-fails: two *arr
+// apps on the shared endpoint, told no change was needed because their
+// Categories matched their profile names.
+test('the RPC endpoint wizard help no longer teaches category routing', () => {
+  const profiles = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(profiles, /links new downloads by their category folder/);
+  assert.doesNotMatch(profiles, /No \*arr change is required when its Category matches/);
+  // What replaces them: the path is the only signal, and the shared endpoint
+  // is a single-profile convenience.
+  assert.match(profiles, /request path is the only thing that tells putiorr which profile/);
+  assert.match(profiles, /only while one RR profile could have meant it/);
+  assert.match(profiles, /Category then only names the subfolder/);
+});

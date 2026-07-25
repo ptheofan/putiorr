@@ -176,12 +176,12 @@ export const WIZARD_HELP = {
   wizardRpcPath: {
     title: 'RPC endpoint path',
     paragraphs: [
-      'This is the unique path putiorr reserves for this profile. Existing *arr clients may keep the default /transmission URL Base; putiorr then links new downloads by their category folder.',
-      'When a client uses this profile-specific endpoint, the request path selects the profile directly.',
+      'This is the unique path putiorr reserves for this profile. The request path is the only thing that tells putiorr which profile a download belongs to.',
+      'The shared /transmission/rpc endpoint works only while one RR profile could have meant it. Add a second and putiorr refuses requests there until each app uses its own path.',
     ],
     tips: [
-      'No *arr change is required when its Category matches this profile name, such as radarr or sonarr.',
-      'To use the profile-specific endpoint instead, choose a path ending in /rpc and set the app URL Base to the preceding path.',
+      'No *arr change is required while this is your only RR profile. Beyond that, set the app URL Base so it reaches this path.',
+      'Choose a path ending in /rpc and set the app URL Base to the preceding path. The app Category then only names the subfolder downloads are staged into.',
       'Do not point this at an app API path. This must be a Transmission RPC path served by putiorr.',
     ],
     valueLabel: 'Full RPC endpoint',
