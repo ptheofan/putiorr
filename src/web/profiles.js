@@ -46,6 +46,15 @@ export const ARR_STORAGE_STEP_HELP = 'This path must also be mounted in the app 
 export const GRAB_STORAGE_STEP_HELP = 'Browser grabs land directly in this folder. No *arr app asks for a category, so nothing creates a subfolder here.';
 export const ARR_AUTO_REMOVE_LABEL = 'App will not signal import completion; remove from putiorr once files download locally';
 export const GRAB_AUTO_REMOVE_LABEL = 'Nothing imports a browser grab; remove from putiorr once files download locally';
+// What the submit button promises has to be what the server runs: saving a
+// grab profile checks the download folder and nothing else, because there is no
+// download client at the other end to connect to.
+export const ARR_SAVE_BUTTON_LABEL = 'Save & test';
+export const GRAB_SAVE_BUTTON_LABEL = 'Save & check folder';
+export const ARR_SAVE_PROGRESS_MESSAGE = 'Saving profile and testing connection...';
+export const GRAB_SAVE_PROGRESS_MESSAGE = 'Saving profile and checking the download folder...';
+export const ARR_SAVE_SUCCESS_MESSAGE = 'Profile tested and saved successfully!';
+export const GRAB_SAVE_SUCCESS_MESSAGE = 'Profile saved. The download folder is writable, so browser grabs have somewhere to land.';
 
 export const WIZARD_HELP = {
   wizardProfileType: {
@@ -104,14 +113,24 @@ export const WIZARD_HELP = {
   },
   wizardPutioFolder: {
     title: 'Put.io destination folder',
-    paragraphs: [
-      'This is the remote put.io folder where putiorr asks put.io to place new transfers. It is not the local folder Sonarr or Radarr imports from.',
-      'A single put.io folder, such as putiorr, is usually enough. The local category keeps each app separated later.',
-    ],
-    tips: [
-      'Changing this affects new transfers only; it does not move existing files already on put.io.',
-      'Use a dedicated folder if you want the put.io web UI to show these app downloads separately from manual downloads.',
-    ],
+    paragraphs: (profile) => isGrabProfile(profile)
+      ? [
+        'This is the remote put.io folder where putiorr asks put.io to place the transfers this profile starts. It is not the local folder the files are downloaded into.',
+        'A single put.io folder, such as putiorr, is usually enough. Browser grabs are separated by the local folder each grab profile downloads into, not by anything on put.io.',
+      ]
+      : [
+        'This is the remote put.io folder where putiorr asks put.io to place new transfers. It is not the local folder Sonarr or Radarr imports from.',
+        'A single put.io folder, such as putiorr, is usually enough. The local category keeps each app separated later.',
+      ],
+    tips: (profile) => isGrabProfile(profile)
+      ? [
+        'Changing this affects new transfers only; it does not move existing files already on put.io.',
+        'Give browser grabs their own put.io folder if you want the put.io web UI to keep them apart from what the *arr apps queue.',
+      ]
+      : [
+        'Changing this affects new transfers only; it does not move existing files already on put.io.',
+        'Use a dedicated folder if you want the put.io web UI to show these app downloads separately from manual downloads.',
+      ],
     valueLabel: 'Remote put.io folder',
     value: (profile) => profile.putio_folder_name || DEFAULT_PUTIO_FOLDER,
   },
@@ -448,7 +467,7 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   ));
   setWizardField(el.wizardBrowserDomains, browserDomainsList(profile).join(', '));
   el.deleteProfileButton.hidden = !isExisting;
-  el.saveProfileButton.textContent = 'Save & test';
+  setText(el.saveProfileButton, saveButtonLabel(type));
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
   setWizardMessage('');
   // The dialog element is reused across opens, so the layout of the profile
@@ -526,7 +545,18 @@ export function applyProfileTypeLayout(type = fieldValue(el.wizardProfileType)) 
   // The checkbox is slot content, so its label is the element's own text; a
   // grab profile has no app to signal anything.
   setText(el.wizardAutoRemoveCompleted, isGrab ? GRAB_AUTO_REMOVE_LABEL : ARR_AUTO_REMOVE_LABEL);
+  setText(el.saveProfileButton, saveButtonLabel(type));
   renumberWizardSteps();
+}
+
+// What the wizard is showing right now, which is what its own copy has to
+// describe; the saved profile answers isGrabProfile() for everything else.
+export function wizardIsGrabPreset() {
+  return fieldValue(el.wizardProfileType) === GRAB_PROFILE_TYPE;
+}
+
+export function saveButtonLabel(type = fieldValue(el.wizardProfileType)) {
+  return type === GRAB_PROFILE_TYPE ? GRAB_SAVE_BUTTON_LABEL : ARR_SAVE_BUTTON_LABEL;
 }
 
 // The step numbers count what the user can see, so a preset that hides a step
@@ -606,7 +636,7 @@ export async function saveProfileFromWizard({
     renderDownloadProfiles();
     el.wizardProfileId.value = savedProfile.id || '';
     el.deleteProfileButton.hidden = !savedProfile.id;
-    el.saveProfileButton.textContent = 'Save & test';
+    setText(el.saveProfileButton, saveButtonLabel());
     if (close) closeProfileWizard();
     if (showMessage) setMessage('Profile saved.', 'ok');
     return savedProfile;
@@ -621,7 +651,7 @@ export async function saveProfileFromWizard({
 
 export async function saveAndTestClientSettings() {
   el.saveProfileButton.disabled = true;
-  setWizardMessage('Saving profile and testing connection...', 'info');
+  setWizardMessage(wizardIsGrabPreset() ? GRAB_SAVE_PROGRESS_MESSAGE : ARR_SAVE_PROGRESS_MESSAGE, 'info');
   let savedProfile;
   try {
     savedProfile = await saveProfileFromWizard({
@@ -635,7 +665,10 @@ export async function saveAndTestClientSettings() {
       method: 'POST',
       body: JSON.stringify(savedProfile),
     });
-    setWizardMessage(withBrowserDomainWarnings('Profile tested and saved successfully!', savedProfile), 'info');
+    setWizardMessage(withBrowserDomainWarnings(
+      wizardIsGrabPreset() ? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,
+      savedProfile,
+    ), 'info');
   } catch (error) {
     setWizardMessage(
       savedProfile
@@ -713,7 +746,7 @@ export function getClientSettingsFromProfile(profile) {
   const host = (profile.client_host ?? profile.clientHost ?? fieldValue(el.wizardClientHost).trim()) || DEFAULT_CLIENT_HOST;
   const port = (profile.client_port ?? profile.clientPort ?? fieldValue(el.wizardClientPort).trim()) || DEFAULT_CLIENT_PORT;
   const useSsl = Boolean(profile.client_use_ssl ?? profile.clientUseSsl ?? fieldChecked(el.wizardUseSsl));
-  const rpcPath = normalizeRpcPath(profile.rpc_path || defaultRpcPathForType(profile.type));
+  const rpcPath = normalizeRpcPath(profile.rpc_path || rpcPathForType(profile.type, profile.name));
   const protocol = useSsl ? 'https' : 'http';
   const portSuffix = port ? `:${port}` : '';
   return {
@@ -748,6 +781,20 @@ export function getClientSettingsText() {
 
 export function formatClientTestFailureMessage(error, profile) {
   const settings = getClientSettingsFromProfile(profile);
+  // A grab profile is only ever checked for its folder, so the *arr value dump
+  // below would answer a folder problem with a page of connection settings the
+  // wizard does not even show for this preset.
+  if (isGrabProfile(profile)) {
+    return [
+      'Profile saved, but the download folder check failed.',
+      `Reason: ${error.message}`,
+      '',
+      `Shared folder: ${settings.directory}`,
+      '',
+      'What to check:',
+      ...clientTestFailureChecks(error.message, { grab: true }).map((check) => `- ${check}`),
+    ].join('\n');
+  }
   return [
     'Profile saved, but tests failed.',
     `Reason: ${error.message}`,
@@ -767,7 +814,7 @@ export function formatClientTestFailureMessage(error, profile) {
   ].join('\n');
 }
 
-export function clientTestFailureChecks(message = '') {
+export function clientTestFailureChecks(message = '', { grab = false } = {}) {
   const lowerMessage = message.toLowerCase();
   const checks = [];
   if (
@@ -783,16 +830,23 @@ export function clientTestFailureChecks(message = '') {
       'If putiorr runs in Docker, mount that host folder into the putiorr container at the same path.',
     );
   }
-  if (lowerMessage.includes('username') || lowerMessage.includes('password') || lowerMessage.includes('401')) {
+  // Only the folder is ever checked for a grab profile, so nothing about a
+  // connection can explain its failure. 401 is matched as a word: a temp-file
+  // name with 401 in the middle of its uuid used to ask a folder error about
+  // RPC credentials.
+  if (!grab && (lowerMessage.includes('username') || lowerMessage.includes('password') || /\b401\b/.test(lowerMessage))) {
     checks.push('If RPC auth is enabled, enter the same RPC username and password in the *arr download client.');
   }
   if (
-    lowerMessage.includes('fetch failed')
-    || lowerMessage.includes('timeout')
-    || lowerMessage.includes('timed out')
-    || lowerMessage.includes('endpoint did not answer')
-    || lowerMessage.includes('transmission rpc')
-    || lowerMessage.includes('http ')
+    !grab
+    && (
+      lowerMessage.includes('fetch failed')
+      || lowerMessage.includes('timeout')
+      || lowerMessage.includes('timed out')
+      || lowerMessage.includes('endpoint did not answer')
+      || lowerMessage.includes('transmission rpc')
+      || lowerMessage.includes('http ')
+    )
   ) {
     checks.push(
       'Host and port must be reachable from putiorr for this test, and from the *arr container after you copy the settings.',
@@ -800,10 +854,12 @@ export function clientTestFailureChecks(message = '') {
       'URL Base must be the path before /rpc, such as /sonarr/transmission for a /sonarr/transmission/rpc endpoint.',
     );
   }
-  checks.push(
-    'Mount the same shared folder path into the *arr container so it can see completed downloads at that exact Directory value.',
-    'After fixing the value, click Save & test again.',
-  );
+  checks.push(...(grab
+    ? [`After fixing the folder, click ${GRAB_SAVE_BUTTON_LABEL} again.`]
+    : [
+      'Mount the same shared folder path into the *arr container so it can see completed downloads at that exact Directory value.',
+      `After fixing the value, click ${ARR_SAVE_BUTTON_LABEL} again.`,
+    ]));
   return [...new Set(checks)];
 }
 

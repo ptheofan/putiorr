@@ -2160,3 +2160,151 @@ test('web UI includes development live reload hook', async (t) => {
   controller.abort();
   assert.match(Buffer.from(value).toString('utf8'), /event: ready/);
 });
+
+// The shared /transmission/rpc endpoint binds to the one profile that owns it
+// only while there is no second profile it could have meant. A Putiorr Grab
+// profile is never one of those: no download client can reach it, and the
+// wizard tells the user its RPC step does not apply. Counting it broke
+// torrent-remove for every single-profile *arr setup that added one.
+async function sharedRpc(harness, method, args = {}) {
+  const handshake = await fetch(harness.url, { method: 'POST', headers: { 'User-Agent': 'RemoveBot/1.0' } });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  const response = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+      'User-Agent': 'RemoveBot/1.0',
+    },
+    body: JSON.stringify({ method, arguments: args }),
+  });
+  return response.json();
+}
+
+function createGrabProfile(harness, overrides = {}) {
+  return harness.store.createProfile({
+    name: 'Movies Grab',
+    type: 'grab',
+    slug: 'movies-grab',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/grab/movies-grab/rpc',
+    enabled: true,
+    ...overrides,
+  });
+}
+
+test('a Putiorr Grab profile does not make the shared RPC endpoint ambiguous', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  createGrabProfile(harness);
+
+  // The grab profile is enabled and would be counted by a plain listProfiles().
+  assert.equal(harness.store.listProfiles().length, 2);
+  assert.equal(harness.service.resolveRpcProfile(undefined).slug, 'default');
+
+  const added = await sharedRpc(harness, 'torrent-add', { filename: 'magnet:?xt=urn:btih:abcdef&dn=Shared.Release' });
+  assert.equal(added.result, 'success');
+
+  const removed = await sharedRpc(harness, 'torrent-remove', {
+    ids: [added.arguments['torrent-added'].hashString],
+  });
+  assert.equal(removed.result, 'success');
+  assert.equal(harness.store.findTransferById(added.arguments['torrent-added'].id), undefined);
+});
+
+test('a second *arr profile still makes the shared RPC endpoint ambiguous', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  createGrabProfile(harness);
+  harness.store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/sonarr/transmission/rpc',
+    enabled: true,
+  });
+
+  const removed = await sharedRpc(harness, 'torrent-remove', { ids: ['abcdef'] });
+  assert.match(removed.result, /RPC endpoint is ambiguous/);
+  assert.throws(() => harness.service.resolveRpcProfile(undefined), /RPC endpoint is ambiguous/);
+});
+
+test('a putiorr with only Putiorr Grab profiles has no *arr profile to resolve', async (t) => {
+  // Silently accepting an *arr client into a grab profile would put its
+  // downloads somewhere no app imports from.
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const seeded = harness.store.findProfileBySlug('default');
+  harness.store.updateProfile(seeded.id, { enabled: false });
+  createGrabProfile(harness);
+
+  assert.throws(
+    () => harness.service.resolveRpcProfile(undefined),
+    /No enabled RR profile is configured/,
+  );
+});
+
+test('Save & test on a grab profile checks the folder and skips the *arr endpoint probe', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  await mkdir(harness.config.targetDir, { recursive: true });
+  // A host no download client could reach: reporting success proves the
+  // Transmission probe never ran. Every *arr preset would fail here.
+  const profile = createGrabProfile(harness, {
+    clientHost: 'unreachable.invalid',
+    clientPort: '9',
+  });
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles/test-client-settings'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.testedRpcPath, false);
+  assert.match(body.message, /Shared folder write test passed/);
+  // None of these exist for a grab profile, so none of them may be reported.
+  assert.doesNotMatch(body.message, /Host|SSL|RPC|endpoint/);
+});
+
+test('Save & test on a grab profile still refuses an unusable download folder', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  await mkdir(harness.config.targetDir, { recursive: true });
+  const blockedPath = path.join(harness.config.targetDir, 'blocked-grab-file');
+  await writeFile(blockedPath, 'not a directory');
+  const profile = createGrabProfile(harness, {
+    downloadAt: blockedPath,
+    clientHost: 'unreachable.invalid',
+  });
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', '/api/profiles/test-client-settings'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profile),
+  });
+
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /Shared download folder is not writable/);
+});

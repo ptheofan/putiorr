@@ -608,3 +608,26 @@ test('the default seeded profile keeps the preset spelling config normalized', a
     store.close();
   }
 });
+
+test('updating a profile normalizes the preset the same way creating one does', async () => {
+  // Both writes end in the same column, and every comparison against it is
+  // exact: a preset normalized on create and stored raw on update would make a
+  // profile stop matching the moment it is edited.
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
+  const config = loadConfig({
+    PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
+    PUTIORR_STATE_PATH: ':memory:',
+  }, root);
+  const store = new StateStore(':memory:');
+  try {
+    store.seedFromConfig(config);
+    const profile = store.findProfileBySlug('default');
+
+    assert.equal(store.updateProfile(profile.id, { type: ' Grab ' }).type, 'grab');
+    assert.equal(store.updateProfile(profile.id, { type: 'SONARR' }).type, 'sonarr');
+    // An update that does not mention the preset leaves it alone.
+    assert.equal(store.updateProfile(profile.id, { name: 'Renamed' }).type, 'sonarr');
+  } finally {
+    store.close();
+  }
+});

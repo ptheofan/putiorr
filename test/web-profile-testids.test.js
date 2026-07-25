@@ -39,7 +39,7 @@ test('profile wizard sends Browser sites as typed and surfaces the server respon
   assert.match(profilesJs, /profile\?\.browser_domain_warnings/);
   assert.match(profilesJs, /\[message, '', 'Browser sites:', \.\.\.warnings\]\.join\('\\n'\)/);
   assert.match(profilesJs, /upsertProfileState\(withoutBrowserDomainWarnings\(savedProfile\)\)/);
-  assert.match(profilesJs, /withBrowserDomainWarnings\('Profile tested and saved successfully!', savedProfile\)/);
+  assert.match(profilesJs, /withBrowserDomainWarnings\(\s*wizardIsGrabPreset\(\) \? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,\s*savedProfile,\s*\)/);
   assert.match(profilesJs, /withBrowserDomainWarnings\(formatClientTestFailureMessage\(error, savedProfile\), savedProfile\)/);
 
   // The card ellipsizes its facts, so the joined list is only fully readable
@@ -105,6 +105,34 @@ test('the wizard swaps the *arr RPC step for the browser step on Putiorr Grab pr
   // The auto-remove checkbox is shown for both presets, so its label is
   // swapped rather than hidden: no app signals import for a browser grab.
   assert.match(profilesJs, /setText\(el\.wizardAutoRemoveCompleted, isGrab \? GRAB_AUTO_REMOVE_LABEL : ARR_AUTO_REMOVE_LABEL\)/);
+
+  // The submit button promises what the server actually runs for this preset:
+  // a grab profile is saved and its folder is checked, and nothing connects to
+  // a download client that does not exist.
+  assert.match(profilesJs, /export const ARR_SAVE_BUTTON_LABEL = 'Save & test';/);
+  assert.match(profilesJs, /export const GRAB_SAVE_BUTTON_LABEL = 'Save & check folder';/);
+  assert.match(profilesJs, /setText\(el\.saveProfileButton, saveButtonLabel\(type\)\)/);
+  // Two other places reset that label after a save, and both have to ask the
+  // same question instead of hard-coding the *arr wording back onto it.
+  assert.doesNotMatch(profilesJs, /el\.saveProfileButton\.textContent = 'Save & test'/);
+  assert.match(profilesJs, /export function saveButtonLabel[\s\S]*?GRAB_SAVE_BUTTON_LABEL : ARR_SAVE_BUTTON_LABEL/);
+
+  // A grab profile can only fail its folder check, so the failure reports the
+  // folder — not the host, port, SSL and endpoint the *arr dump lists, which
+  // this preset does not even show.
+  assert.match(
+    profilesJs,
+    /export function formatClientTestFailureMessage[\s\S]*?if \(isGrabProfile\(profile\)\) \{[\s\S]*?'Profile saved, but the download folder check failed\.'[\s\S]*?clientTestFailureChecks\(error\.message, \{ grab: true \}\)/,
+  );
+  assert.match(profilesJs, /export function clientTestFailureChecks\(message = '', \{ grab = false \} = \{\}\)/);
+  // Nothing connects to a grab profile, so no connection or credential advice
+  // may reach it — and 401 is matched as a word, because the write-test file
+  // putiorr creates carries a uuid that can contain those three digits.
+  assert.match(profilesJs, /if \(!grab && \(lowerMessage\.includes\('username'\)[\s\S]*?\/\\b401\\b\/\.test\(lowerMessage\)\)\)/);
+  assert.match(profilesJs, /if \(\s*!grab\s*&& \(\s*lowerMessage\.includes\('fetch failed'\)/);
+  // The advice that ends every failure names the button the user will click.
+  assert.match(profilesJs, /`After fixing the folder, click \$\{GRAB_SAVE_BUTTON_LABEL\} again\.`/);
+  assert.match(profilesJs, /`After fixing the value, click \$\{ARR_SAVE_BUTTON_LABEL\} again\.`/);
   assert.match(html, /id="wizardAutoRemoveCompleted"[^>]*>App will not signal import completion; remove from putiorr once files download locally</);
 
   // Switching preset must not rename a profile the user named: the 400 that a
@@ -134,6 +162,12 @@ test('grab profiles derive a hidden RPC path from the display name', () => {
   const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
 
   assert.match(profilesJs, /export function grabRpcPathForName[\s\S]*?`\/grab\/\$\{slugify\(name\)\}\/rpc`/);
+  // The preview reads the same derivation as the field does: the *arr default
+  // would put a grab profile on /grab/transmission/rpc, which is nobody's path.
+  assert.match(
+    profilesJs,
+    /export function getClientSettingsFromProfile[\s\S]*?rpcPathForType\(profile\.type, profile\.name\)/,
+  );
   // The field is hidden for grab profiles, so nothing else would refresh it;
   // every preview pass realigns it with the name the way a preset switch does.
   assert.match(profilesJs, /export function syncDerivedRpcPath[\s\S]*?grabRpcPathForName\(fieldValue\(el\.wizardProfileName\)\)/);
@@ -196,6 +230,20 @@ test('the field guide explains the browser extension and how to install it', () 
   assert.match(appPreset, /Load unpacked/);
   assert.match(appPreset, /extension\/ folder/);
   assert.match(appPreset, /putiorr URL and a default profile/);
+
+  // Every field the grab wizard shows reads as a grab field. The put.io folder
+  // entry used to answer with the category folder story that the storage help
+  // two fields away says grab profiles do not have.
+  const putioFolder = profilesJs.slice(
+    profilesJs.indexOf('wizardPutioFolder: {'),
+    profilesJs.indexOf('wizardDownloadAt: {'),
+  );
+  assert.ok(putioFolder.length > 0, 'the put.io folder help entry must still exist');
+  assert.match(putioFolder, /paragraphs: \(profile\) => isGrabProfile\(profile\)/);
+  assert.match(putioFolder, /tips: \(profile\) => isGrabProfile\(profile\)/);
+  assert.match(putioFolder, /browser grabs/i);
+  // The *arr wording that contradicts it stays, on the other arm of the branch.
+  assert.match(putioFolder, /It is not the local folder Sonarr or Radarr imports from\./);
 
   // The label above the value line is *arr wording ("Download-client
   // Category") on fields a grab profile reads differently, so it resolves like

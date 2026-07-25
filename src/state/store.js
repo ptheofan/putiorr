@@ -705,6 +705,10 @@ export class StateStore {
     if (nextAutoRemoveCompleted !== undefined) normalizedPatch.auto_remove_completed = nextAutoRemoveCompleted;
     const nextBrowserDomains = profileBrowserDomainsPatch(patch);
     if (nextBrowserDomains !== undefined) normalizedPatch.browser_domains = nextBrowserDomains;
+    // Both writes land in the same column and every read compares it exactly,
+    // so an update normalizes the preset the way createProfile does. A patch
+    // that does not mention it leaves the stored one alone.
+    if (patch.type !== undefined) normalizedPatch.type = profileTypeValue(patch);
     const allowed = [
       'name',
       'type',

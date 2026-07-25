@@ -4,6 +4,9 @@ import { deleteLocalData, deleteLocalFileData, extractCategory } from '../downlo
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
 import { calculateTransmissionProgress } from '../transmission/progress.js';
+// The preset the dashboard writes into a profile; plain data with no imports of
+// its own, so the one spelling serves both the browser and this process.
+import { GRAB_PROFILE_TYPE } from '../web/constants.js';
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined);
@@ -135,7 +138,11 @@ export class TransferService {
 
   resolveRpcProfile(profile) {
     if (profile) return this.requireProfile(profile);
-    const profiles = this.store.listProfiles();
+    // A Putiorr Grab profile serves the browser extension, which always names
+    // the profile it means. It is not a candidate for an unaddressed RPC call:
+    // counting it made the shared endpoint ambiguous for single-profile *arr
+    // setups, and picking it would drop *arr downloads where nothing imports.
+    const profiles = this.store.listProfiles().filter((candidate) => candidate.type !== GRAB_PROFILE_TYPE);
     if (profiles.length === 1) return profiles[0];
     if (profiles.length === 0) throw new Error('No enabled RR profile is configured');
     throw new Error('RPC endpoint is ambiguous; use the unique RPC path configured for this RR profile');

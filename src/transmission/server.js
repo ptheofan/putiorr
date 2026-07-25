@@ -98,25 +98,35 @@ function refuseNonGrabProfile(profile) {
 // *arr presets do show the path and derive it from the preset rather than the
 // name, so there the path is what has to change. Anything that is not a
 // uniqueness failure is passed through untouched.
-export function profileConflictError(error, input = {}) {
+export function profileConflictError(error, input = {}, store) {
   const column = UNIQUE_PROFILE_COLUMN.exec(error?.message ?? '')?.[1];
   if (!column) return error;
+  // Named after the profile that actually holds the value, never after the one
+  // being written: a grab profile's derived endpoint can collide with a Custom
+  // profile that simply uses that path, and "a profile named X already exists"
+  // would send the user looking for a profile that does not exist. A disabled
+  // owner is not findable by path, so that case stays deliberately vague.
+  const owner = column === 'slug'
+    ? store?.findProfileBySlug(input.slug)
+    : store?.findProfileByRpcPath(input.rpc_path);
+  const ownerName = String(owner?.name ?? '').trim();
   if (column === 'rpc_path' && input.type !== GRAB_PROFILE_TYPE) {
-    return new Error(
-      `RPC endpoint path ${input.rpc_path} is already used by another profile; choose a different path`,
-    );
+    return new Error(ownerName
+      ? `RPC endpoint path ${input.rpc_path} is already used by ${ownerName}; choose a different path`
+      : `RPC endpoint path ${input.rpc_path} is already used by another profile; choose a different path`);
   }
-  const name = String(input.name ?? '').trim();
-  return new Error(name
-    ? `A profile named "${name}" already exists; choose a different display name`
+  // The grab wizard shows no endpoint field, so the display name it derives
+  // that endpoint from is the only thing the user can change here.
+  return new Error(ownerName
+    ? `A profile named "${ownerName}" already exists; choose a different display name`
     : 'Another profile already uses this display name; choose a different one');
 }
 
-function writeProfile(input, write) {
+function writeProfile(store, input, write) {
   try {
     return write();
   } catch (error) {
-    throw profileConflictError(error, input);
+    throw profileConflictError(error, input, store);
   }
 }
 
@@ -422,8 +432,14 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const profiles = this.service.store.listProfiles();
-    const rpcProfile = requestPath === '/transmission/rpc' && profiles.length > 1
+    // Only a profile an *arr download client can reach makes the shared
+    // endpoint ambiguous. A Putiorr Grab profile is never one: nothing connects
+    // to it, which is why the wizard hides its RPC settings. Counting it here
+    // used to unbind this endpoint the moment a user added their first grab
+    // profile, breaking torrent-remove on a setup that had been working.
+    const rpcProfiles = this.service.store.listProfiles()
+      .filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
+    const rpcProfile = requestPath === '/transmission/rpc' && rpcProfiles.length > 1
       ? undefined
       : this.service.store.findProfileByRpcPath(requestPath);
     if (rpcProfile || requestPath === '/transmission/rpc') {
@@ -639,7 +655,9 @@ export class TransmissionRpcServer {
         // The browser extension asks for `?type=grab` so it never has to know
         // the preset vocabulary. An absent or empty value is a caller with no
         // filter, not one asking for profiles whose type is the empty string.
-        const type = (searchParams.get('type') ?? '').trim();
+        // Presets are stored lowercase wherever they enter putiorr, so the
+        // filter that reads them back normalizes the same way.
+        const type = (searchParams.get('type') ?? '').trim().toLowerCase();
         const profiles = this.service.store.listProfiles({ includeDisabled: true });
         jsonResponse(
           res,
@@ -701,7 +719,7 @@ export class TransmissionRpcServer {
 
       if (method === 'POST' && requestPath === '/api/profiles') {
         const input = normalizeProfileInput(await readJsonBody(req));
-        const profile = writeProfile(input, () => this.service.store.createProfile(input));
+        const profile = writeProfile(this.service.store, input, () => this.service.store.createProfile(input));
         jsonResponse(res, 201, profileResponse(profile, input), this.sessionId);
         return;
       }
@@ -709,7 +727,11 @@ export class TransmissionRpcServer {
       const profileMatch = requestPath.match(/^\/api\/profiles\/(\d+)$/);
       if (profileMatch && method === 'PUT') {
         const input = normalizeProfileInput(await readJsonBody(req), { partial: true });
-        const profile = writeProfile(input, () => this.service.store.updateProfile(Number(profileMatch[1]), input));
+        const profile = writeProfile(
+          this.service.store,
+          input,
+          () => this.service.store.updateProfile(Number(profileMatch[1]), input),
+        );
         if (!profile) throw new Error('Profile not found');
         jsonResponse(res, 200, profileResponse(profile, input), this.sessionId);
         return;
@@ -1248,6 +1270,19 @@ export class TransmissionRpcServer {
 
   async testClientSettings(input) {
     const profile = normalizeProfileInput(input, { partial: true });
+    // No download client connects to a grab profile, so its host, port, SSL and
+    // endpoint are defaults the wizard never shows. Probing them reports a
+    // failure in terms of every field the same wizard just said does not apply
+    // — and the folder, which is the one thing a browser grab needs, is the
+    // only thing worth checking here.
+    if (profile.type === GRAB_PROFILE_TYPE) {
+      await probeWritableDownloadFolder(profile.download_at);
+      return {
+        ok: true,
+        testedRpcPath: false,
+        message: 'Shared folder write test passed from putiorr. Browser grabs are downloaded straight into that folder.',
+      };
+    }
     const rpcPath = profile.rpc_path || normalizeRpcPath(input.rpc_path ?? input.rpcPath ?? '/transmission/rpc');
     const rpcPathIsActive = rpcPath === '/transmission/rpc' || Boolean(this.service.store.findProfileByRpcPath(rpcPath));
     const testedPath = rpcPathIsActive ? rpcPath : '/transmission/rpc';

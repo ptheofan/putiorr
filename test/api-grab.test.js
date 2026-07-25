@@ -674,6 +674,21 @@ test('GET /api/profiles without a type is unchanged, disabled profiles and all',
   assert.deepEqual(empty.body.map((profile) => profile.id).sort(), all.body.map((profile) => profile.id).sort());
 });
 
+test('GET /api/profiles?type= matches the preset however the caller capitalizes it', async (t) => {
+  // Presets are stored lowercase wherever they enter putiorr, so the filter
+  // that reads them back has to normalize too: ?type=Grab answering [] would
+  // read as a putiorr with no grab profiles at all.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const seeded = harness.store.listProfiles()[0];
+  const grab = createSiteProfile(harness, 'browser', ['x.example']);
+
+  const grabs = await getProfiles(harness, '?type=%20Grab%20');
+
+  assert.equal(grabs.status, 200);
+  assert.deepEqual(grabs.body.map((profile) => profile.id).sort(), [seeded.id, grab.id].sort());
+});
+
 test('GET /api/profiles with an unknown type returns an empty list', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
@@ -861,7 +876,7 @@ test('a duplicate *arr endpoint names the path the wizard actually shows', async
   assert.equal(duplicate.status, 400);
   assert.equal(
     duplicate.body.error,
-    'RPC endpoint path /sonarr/transmission/rpc is already used by another profile; choose a different path',
+    'RPC endpoint path /sonarr/transmission/rpc is already used by Sonarr; choose a different path',
   );
 
   // A name collision on an *arr profile is still a name collision: the slug is
@@ -900,4 +915,34 @@ test('renaming a profile onto another profile name is refused the same way', asy
     (await response.json()).error,
     'A profile named "Movies" already exists; choose a different display name',
   );
+});
+
+test('a conflict names the profile that actually holds the value', async (t) => {
+  // The endpoint a grab profile derives can collide with a Custom profile that
+  // simply uses that path. Blaming a display name nobody has would send the
+  // user looking for a profile that does not exist.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const squatter = await postProfile(harness, {
+    name: 'Legacy Endpoint',
+    slug: 'legacy-endpoint',
+    type: 'custom',
+    rpc_path: '/grab/movies-grab/rpc',
+  });
+  assert.equal(squatter.status, 201);
+
+  const grab = await postProfile(harness, {
+    name: 'Movies Grab',
+    slug: 'movies-grab',
+    type: 'grab',
+    rpc_path: '/grab/movies-grab/rpc',
+  });
+
+  assert.equal(grab.status, 400);
+  assert.match(grab.body.error, /Legacy Endpoint/);
+  assert.doesNotMatch(grab.body.error, /A profile named "Movies Grab" already exists/);
+  // The path is not a field the grab wizard shows, so the fix on offer is the
+  // display name it derives that path from.
+  assert.match(grab.body.error, /display name/);
 });
