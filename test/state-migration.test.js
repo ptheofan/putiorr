@@ -776,3 +776,133 @@ test('the collapse backs the database up first, and never for :memory:', async (
     memory.close();
   }
 });
+
+// F6a
+test('profiles with no download profile are assigned the existing default', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 3, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [
+      profileRow({ id: 1, download_profile_id: null }),
+      profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/rpc', download_profile_id: 3 }),
+    ],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.findProfileById(1).download_profile_id, 3);
+    assert.equal(store.findProfileById(2).download_profile_id, 3);
+    const columns = new Map(store.getColumns('profiles').map((column) => [column.name, column]));
+    assert.equal(columns.get('download_profile_id').notnull, 1);
+    assert.equal(columns.get('rpc_path').notnull, 0);
+    assert.equal(store.getSetting('profiles_schema_v2'), '1');
+    assert.equal(JSON.parse(store.getSetting('profiles_schema_v2_report')).downloadProfilesAssigned, 1);
+    assert.equal(store.db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
+    assert.deepEqual(store.db.prepare('PRAGMA foreign_key_check').all(), []);
+
+    // ON DELETE RESTRICT: a download profile in use cannot be deleted.
+    assert.throws(
+      () => store.db.prepare('DELETE FROM download_profiles WHERE id = 3').run(),
+      /FOREIGN KEY constraint failed/,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+// F6b
+test('a database predating download_profiles gets one created for it', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    era: 'pre-association',
+    includeDownloadProfiles: false,
+    profiles: [profileRow({ id: 1 })],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    const [downloadProfile] = store.listDownloadProfiles();
+    assert.equal(downloadProfile.slug, 'default');
+    assert.equal(store.findProfileById(1).download_profile_id, downloadProfile.id);
+    assert.equal(
+      new Map(store.getColumns('profiles').map((c) => [c.name, c])).get('download_profile_id').notnull,
+      1,
+    );
+  } finally {
+    store.close();
+  }
+});
+
+// F10
+test('grab profiles lose the RPC path they only held to satisfy NOT NULL UNIQUE', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [
+      profileRow({ id: 1, download_profile_id: 1 }),
+      profileRow({
+        id: 2, slug: 'grab-a', name: 'Grab A', type: 'grab', rpc_path: '/grab/grab-a/rpc', download_profile_id: 1,
+      }),
+      profileRow({
+        id: 3, slug: 'grab-b', name: 'Grab B', type: 'grab', rpc_path: '/grab/grab-b/rpc', download_profile_id: 1,
+      }),
+    ],
+  });
+
+  const store = new StateStore(dbPath);
+  try {
+    assert.equal(store.findProfileBySlug('grab-a').rpc_path, null);
+    assert.equal(store.findProfileBySlug('grab-b').rpc_path, null);
+    assert.equal(store.findProfileBySlug('sonarr').rpc_path, '/sonarr/transmission/rpc');
+    assert.equal(JSON.parse(store.getSetting('profiles_schema_v2_report')).grabRpcPathsCleared, 2);
+
+    // The partial unique index still refuses a duplicate *arr path...
+    assert.throws(
+      () => store.createProfile({
+        name: 'Clash',
+        slug: 'clash',
+        putio_folder_name: 'clash',
+        downloadAt: '/downloads',
+        rpc_path: '/sonarr/transmission/rpc',
+      }),
+      /UNIQUE constraint failed: profiles.rpc_path/,
+    );
+    // ...and lets any number of profiles hold no path at all.
+    const third = store.createProfile({
+      name: 'Grab C',
+      type: 'grab',
+      slug: 'grab-c',
+      putio_folder_name: 'grabc',
+      downloadAt: '/downloads',
+      rpc_path: null,
+    });
+    assert.equal(third.rpc_path, null);
+  } finally {
+    store.close();
+  }
+});
+
+// R6 — ON DELETE RESTRICT inverts the delete-then-reassign order the endpoint used.
+test('deleting a download profile in use reassigns the profiles that reference it', async () => {
+  const store = new StateStore(':memory:');
+  try {
+    const fallback = store.createDownloadProfile({ name: 'Default', slug: 'default' });
+    const fast = store.createDownloadProfile({ name: 'Fast', slug: 'fast' });
+    const profile = store.createProfile({
+      name: 'Sonarr',
+      slug: 'sonarr',
+      putio_folder_name: 'putiorr',
+      downloadAt: '/downloads',
+      rpc_path: '/sonarr/transmission/rpc',
+      download_profile_id: fast.id,
+    });
+
+    assert.throws(() => store.deleteDownloadProfile(fast.id), /FOREIGN KEY constraint failed/);
+
+    store.deleteDownloadProfile(fast.id, { reassignTo: fallback.id });
+    assert.equal(store.findDownloadProfileById(fast.id), undefined);
+    assert.equal(store.findProfileById(profile.id).download_profile_id, fallback.id);
+  } finally {
+    store.close();
+  }
+});

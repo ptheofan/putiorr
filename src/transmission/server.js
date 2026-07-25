@@ -737,10 +737,11 @@ export class TransmissionRpcServer {
         if (defaultDownloadProfile?.id === id || downloadProfile.slug === 'default') {
           throw new Error('Default download profile cannot be deleted');
         }
-        this.service.store.deleteDownloadProfile(id);
-        if (defaultDownloadProfile) {
-          this.service.store.assignMissingProfileDownloadProfiles(defaultDownloadProfile.id);
-        }
+        // ON DELETE RESTRICT: the RR profiles that use it have to be moved
+        // first, in the same transaction. Deleting and reassigning afterwards
+        // now throws FOREIGN KEY constraint failed for every download profile
+        // anything actually uses.
+        this.service.store.deleteDownloadProfile(id, { reassignTo: defaultDownloadProfile?.id });
         jsonResponse(res, 200, { ok: true }, this.sessionId);
         return;
       }

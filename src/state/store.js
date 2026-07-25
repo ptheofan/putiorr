@@ -91,6 +91,39 @@ const DOWNLOADS_DDL = `
   );
 `;
 
+// A profile has exactly one download profile (design rule 2), so
+// download_profile_id is NOT NULL and its delete is RESTRICTed. rpc_path is
+// nullable with a partial unique index: only an *arr ingress needs a
+// Transmission endpoint, and a Putiorr Grab profile held one solely because the
+// column was NOT NULL UNIQUE — which quietly turned its derived
+// /grab/<slug>/rpc into a live endpoint an *arr could add into.
+const PROFILES_DDL = `
+  CREATE TABLE IF NOT EXISTS profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'custom',
+    slug TEXT NOT NULL UNIQUE,
+    download_profile_id INTEGER NOT NULL REFERENCES download_profiles(id) ON DELETE RESTRICT,
+    auto_remove_completed INTEGER NOT NULL DEFAULT 0,
+    putio_folder_name TEXT NOT NULL,
+    putio_folder_id INTEGER,
+    download_at TEXT NOT NULL DEFAULT '',
+    rpc_path TEXT,
+    client_host TEXT NOT NULL DEFAULT 'putiorr',
+    client_port TEXT NOT NULL DEFAULT '9091',
+    client_use_ssl INTEGER NOT NULL DEFAULT 0,
+    browser_domains TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+`;
+
+const PROFILES_RPC_PATH_INDEX_DDL = `
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_rpc_path
+    ON profiles(rpc_path) WHERE rpc_path IS NOT NULL;
+`;
+
 // Created by the one-shot transfers -> transfer_associations migration rather
 // than by migrate(), because a database that has never seen them must never
 // gain them: they exist only as the middle hop of the chain
@@ -322,8 +355,14 @@ function downloadProfilePolicyPatch(input, fallback = DEFAULT_DOWNLOAD_POLICY) {
 }
 
 export class StateStore {
-  constructor(filePath = ':memory:') {
+  // config is optional and only ever used to seed the default download
+  // profile's policy from PUTIORR_SLOW_SPEED_* on a database that predates
+  // download_profiles. Without it that upgrade would silently fall back to the
+  // built-in defaults, because ensureDefaultDownloadProfile returns an existing
+  // row without applying config.
+  constructor(filePath = ':memory:', { config } = {}) {
     this.filePath = filePath;
+    this.config = config;
     if (filePath !== ':memory:') {
       mkdirSync(path.dirname(filePath), { recursive: true });
     }
@@ -357,21 +396,7 @@ export class StateStore {
         updated_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        type TEXT NOT NULL DEFAULT 'custom',
-        slug TEXT NOT NULL UNIQUE,
-        download_profile_id INTEGER REFERENCES download_profiles(id) ON DELETE SET NULL,
-        auto_remove_completed INTEGER NOT NULL DEFAULT 0,
-        putio_folder_name TEXT NOT NULL,
-        putio_folder_id INTEGER,
-        download_at TEXT NOT NULL,
-        rpc_path TEXT NOT NULL UNIQUE,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
+      ${PROFILES_DDL}
 
       ${DOWNLOADS_DDL}
     `);
@@ -404,6 +429,8 @@ export class StateStore {
       this.migrateMagnetTransferHashes();
     }
     this.migrateDownloadsCollapse();
+    this.migrateProfilesSchema();
+    this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
   }
 
   hasTable(name) {
@@ -774,6 +801,107 @@ export class StateStore {
     });
   }
 
+  profilesSchemaIsCurrent() {
+    const columns = new Map(this.getColumns('profiles').map((column) => [column.name, column]));
+    return columns.get('rpc_path')?.notnull === 0
+      && columns.get('download_profile_id')?.notnull === 1;
+  }
+
+  // Design rules 2 and 5: a profile has exactly one download profile, and only
+  // an *arr ingress needs an RPC path. One rebuild does both — two rebuilds of
+  // the same table for one release is wasted risk.
+  //
+  // A separate transaction from the collapse. A kill between them leaves the
+  // downloads collapsed but profiles unrebuilt, which is a consistent state the
+  // next boot finishes; merging them would mean one transaction that drops four
+  // tables and rebuilds a fifth, which is harder to reason about and harder to
+  // test in isolation.
+  migrateProfilesSchema() {
+    // The shape check, not just the key: a database that somehow carries the
+    // key without the shape must not be left half-done.
+    if (this.profilesSchemaIsCurrent()) {
+      if (this.getSetting('profiles_schema_v2') !== '1') this.setSetting('profiles_schema_v2', '1');
+      return;
+    }
+
+    this.db.exec('PRAGMA foreign_keys = OFF');
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      try {
+        const report = this.rebuildProfilesTable();
+        const dangling = this.db.prepare('PRAGMA foreign_key_check').all();
+        if (dangling.length > 0) {
+          throw new Error(
+            `profiles schema migration left ${dangling.length} dangling reference(s): `
+            + `${JSON.stringify(dangling)}`,
+          );
+        }
+        this.setSetting('profiles_schema_v2', '1');
+        this.setSetting('profiles_schema_v2_report', JSON.stringify(report));
+        this.db.exec('COMMIT');
+        logger.info('profiles schema migration completed', report);
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON');
+    }
+  }
+
+  rebuildProfilesTable() {
+    const timestamp = nowIso();
+    const report = { version: 2, at: timestamp, downloadProfilesAssigned: 0, grabRpcPathsCleared: 0 };
+
+    const unassigned = this.db.prepare(
+      'SELECT COUNT(*) AS total FROM profiles WHERE download_profile_id IS NULL',
+    ).get().total;
+    if (unassigned > 0) {
+      // seedFromConfig is what normally creates the default, and it runs after
+      // the constructor — so on a database predating download_profiles the
+      // migration has to create it, or NOT NULL fires on rows that were legal
+      // when they were written.
+      const fallback = this.ensureDefaultDownloadProfile(this.config ?? {});
+      this.db.prepare(`
+        UPDATE profiles SET download_profile_id = ?, updated_at = ?
+        WHERE download_profile_id IS NULL
+      `).run(fallback.id, timestamp);
+      report.downloadProfilesAssigned = Number(unassigned);
+    }
+
+    // The derived /grab/<slug>/rpc was only ever there to satisfy NOT NULL
+    // UNIQUE. Dropping it removes rows from the unique index, which can never
+    // create a conflict — the constraint is only relaxed, never tightened. It
+    // is dropped during the copy rather than by an UPDATE first, because the
+    // old column is still NOT NULL at that point.
+    report.grabRpcPathsCleared = Number(this.db.prepare(
+      "SELECT COUNT(*) AS total FROM profiles WHERE lower(type) = 'grab' AND rpc_path IS NOT NULL",
+    ).get().total);
+
+    this.db.exec(PROFILES_DDL.replace('IF NOT EXISTS profiles', 'profiles_new'));
+    this.db.exec(`
+      INSERT INTO profiles_new (
+        id, name, type, slug, download_profile_id, auto_remove_completed,
+        putio_folder_name, putio_folder_id, download_at, rpc_path, client_host,
+        client_port, client_use_ssl, browser_domains, enabled, created_at, updated_at
+      )
+      SELECT
+        id, name, type, slug, download_profile_id, auto_remove_completed,
+        putio_folder_name, putio_folder_id, download_at,
+        CASE WHEN lower(type) = 'grab' THEN NULL ELSE rpc_path END,
+        client_host, client_port, client_use_ssl, browser_domains, enabled,
+        created_at, updated_at
+      FROM profiles
+    `);
+    // Never the other order: ALTER TABLE ... RENAME rewrites other tables'
+    // foreign keys to follow the new name, so renaming the old table aside
+    // first would leave downloads pointing at profiles_old forever.
+    this.db.exec('DROP TABLE profiles');
+    this.db.exec('ALTER TABLE profiles_new RENAME TO profiles');
+    this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
+    return report;
+  }
+
   getColumns(table) {
     return this.db.prepare(`PRAGMA table_info(${table})`).all();
   }
@@ -882,7 +1010,6 @@ export class StateStore {
         });
       }
     }
-    this.assignMissingProfileDownloadProfiles(defaultDownloadProfile.id);
   }
 
   createDefaultProfile(config) {
@@ -907,14 +1034,6 @@ export class StateStore {
       slug: 'default',
       ...downloadProfilePolicyFromConfigAndSettings(this, config),
     });
-  }
-
-  assignMissingProfileDownloadProfiles(downloadProfileId) {
-    this.db.prepare(`
-      UPDATE profiles
-      SET download_profile_id = ?, updated_at = ?
-      WHERE download_profile_id IS NULL
-    `).run(downloadProfileId, nowIso());
   }
 
   createDownloadProfile(input) {
@@ -969,8 +1088,20 @@ export class StateStore {
     return this.findDownloadProfileById(id);
   }
 
-  deleteDownloadProfile(id) {
-    this.db.prepare('DELETE FROM download_profiles WHERE id = ?').run(id);
+  // ON DELETE RESTRICT means the bare delete now throws whenever any profile
+  // references it, so the reassignment the endpoint used to perform afterwards
+  // has to happen first — and in the same transaction, or a failure leaves the
+  // profiles pointing at a download profile that is about to disappear.
+  deleteDownloadProfile(id, { reassignTo } = {}) {
+    this.transaction(() => {
+      if (reassignTo != null) {
+        this.db.prepare(`
+          UPDATE profiles SET download_profile_id = ?, updated_at = ?
+          WHERE download_profile_id = ?
+        `).run(reassignTo, nowIso(), id);
+      }
+      this.db.prepare('DELETE FROM download_profiles WHERE id = ?').run(id);
+    });
   }
 
   findDownloadProfileById(id) {
@@ -993,7 +1124,14 @@ export class StateStore {
 
   createProfile(input) {
     const timestamp = nowIso();
-    const downloadProfileId = profileDownloadProfileId(input);
+    // Rule 2 makes the column NOT NULL, and the default download profile is an
+    // existing user-visible concept (the settings' defaultDownloadProfileId,
+    // preselected by the profile wizard) rather than a guessed owner — rule 4
+    // is about which profile owns a download. A store that has never been
+    // seeded has none yet, so one is created rather than refusing the profile.
+    const downloadProfileId = profileDownloadProfileId(input)
+      ?? this.findDefaultDownloadProfile()?.id
+      ?? this.ensureDefaultDownloadProfile(this.config ?? {}).id;
     const autoRemoveCompleted = profileAutoRemoveCompleted(input) ?? profileDefaultsToAutoRemoveCompleted(input);
     const result = this.db.prepare(`
       INSERT INTO profiles (
@@ -1006,7 +1144,7 @@ export class StateStore {
       input.name,
       profileTypeValue(input),
       input.slug,
-      downloadProfileId == null ? null : normalizeOptionalId(downloadProfileId),
+      normalizeOptionalId(downloadProfileId),
       autoRemoveCompleted ? 1 : 0,
       input.putio_folder_name,
       input.putio_folder_id ?? null,

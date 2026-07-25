@@ -9,7 +9,7 @@ async function main() {
   const config = loadConfig();
   ensureRuntimeDirs(config);
 
-  const store = new StateStore(config.statePath);
+  const store = new StateStore(config.statePath, { config });
   store.seedFromConfig(config);
 
   const service = new TransferService({
