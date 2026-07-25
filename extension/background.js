@@ -1,21 +1,19 @@
 import { encodeCredentials } from './lib/auth.js';
 import { isMagnetLink, resolveProfileId, sanitizeProfiles } from './lib/resolve.js';
+import { SYNC_DEFAULTS } from './lib/settings.js';
 
 const MENU_ROOT = 'putiorr-root';
 const MENU_CONFIGURE = 'putiorr-configure';
 const MENU_PREFIX = 'putiorr-profile-';
+// Same spelling as the menu entry, different namespace: menu ids and
+// notification ids never meet.
+const NOTIFY_CONFIGURE = 'putiorr-configure';
 
 // Longer than the content script's fetch budget on purpose: putiorr waits on
-// put.io during addTorrent, so the server legitimately needs the headroom.
-const GRAB_TIMEOUT_MS = 30000;
-
-const SYNC_DEFAULTS = {
-  baseUrl: '',
-  defaultProfileId: 0,
-  autoCapture: true,
-  rules: [],
-  profiles: [],
-};
+// put.io during addTorrent, so the server legitimately needs the headroom. It
+// stays under 30s all the same: that is when Chrome retires an idle MV3 worker,
+// and a request timing out exactly on that line would race the teardown.
+const GRAB_TIMEOUT_MS = 25000;
 
 async function loadSettings() {
   const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
@@ -40,14 +38,24 @@ function authHeaders(settings) {
   return headers;
 }
 
-function notify(title, message) {
-  chrome.notifications.create({
+// An id makes the notification addressable from onClicked below; passing one
+// also replaces the previous notification carrying it instead of stacking.
+function notify(title, message, id) {
+  const options = {
     type: 'basic',
     iconUrl: 'icons/icon128.png',
     title,
     message: String(message ?? ''),
-  });
+  };
+  if (id) chrome.notifications.create(id, options);
+  else chrome.notifications.create(options);
 }
+
+// "Set the URL in the options" is otherwise a dead end: the notification cannot
+// say where the options are, and nothing else on screen leads there.
+chrome.notifications.onClicked.addListener((id) => {
+  if (id === NOTIFY_CONFIGURE) chrome.runtime.openOptionsPage();
+});
 
 async function postGrab(settings, payload) {
   // The request is built outside the try below so a bad URL or unencodable
@@ -93,7 +101,7 @@ async function postGrab(settings, payload) {
 async function handleGrab(payload) {
   const settings = await loadSettings();
   if (!settings.baseUrl) {
-    notify('putiorr grab failed', 'Set the putiorr URL in the extension options first');
+    notify('putiorr grab failed', 'Set the putiorr URL in the extension options first — click here to open them', NOTIFY_CONFIGURE);
     return { ok: false, error: 'putiorr is not configured' };
   }
   const hostname = (() => {
@@ -174,7 +182,19 @@ function queueRebuild() {
   menuQueue = menuQueue.then(rebuildMenus).catch((error) => console.error('menu rebuild failed', error));
 }
 
-chrome.runtime.onInstalled.addListener(queueRebuild);
+chrome.runtime.onInstalled.addListener(async (details) => {
+  queueRebuild();
+  // A fresh install has no URL, so every link click would fail into a
+  // notification before the user ever finds the options page. An update must not
+  // reopen it: the settings are already there.
+  if (details?.reason !== 'install') return;
+  try {
+    const { baseUrl } = await chrome.storage.sync.get({ baseUrl: '' });
+    if (!baseUrl) chrome.runtime.openOptionsPage();
+  } catch (error) {
+    console.error('could not check the stored putiorr URL', error);
+  }
+});
 chrome.runtime.onStartup.addListener(queueRebuild);
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.profiles) queueRebuild();

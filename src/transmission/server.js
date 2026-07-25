@@ -1094,10 +1094,15 @@ export class TransmissionRpcServer {
     logger.info('grab from browser', {
       profile: profile.slug,
       sourceType: torrentBase64 ? 'torrent' : 'magnet',
-      sourceUrl: body.sourceUrl,
+      // The page URL is attacker-influenced and unbounded; a log line is not the
+      // place to copy an arbitrarily long one.
+      sourceUrl: String(body.sourceUrl ?? '').slice(0, 500),
     });
     const args = torrentBase64
-      ? { metainfo: torrentBase64, filename: body.filename }
+      // The upload name goes to put.io as sent; coercing it here keeps a client
+      // that posts a number or an object from naming a transfer with one.
+      // addTorrent falls back to "upload.torrent" when the result is empty.
+      ? { metainfo: torrentBase64, filename: String(body.filename ?? '').trim() }
       : { filename: magnet };
     const result = await this.service.addTorrent(args, profile);
     this.scheduleWebSocketDownloadsBroadcast('api:grab');

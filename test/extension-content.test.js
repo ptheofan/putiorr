@@ -282,6 +282,38 @@ test('content-disposition filenames follow RFC 6266', async () => {
   assert.equal(await filenameFor(undefined), fallback);
 });
 
+test('a grabbed file is always named as a torrent, whatever the server calls it', async () => {
+  // The right-click path exists for trackers whose download URL is a script, and
+  // put.io takes the upload name at face value: without this, the first thing
+  // putiorr ever hands put.io from a browser grab is a file called "download.php".
+  const bytes = new Uint8Array([0x64, 0x65]);
+  let headers = {};
+  const harness = await loadContent({ fetch: async () => torrentResponse(bytes, headers) });
+
+  // Driven through fetch-link, the route the right-click menu uses: a
+  // "download.php" URL is not a .torrent path, so click capture never sees it.
+  const filenameFor = async (url, disposition) => {
+    headers = disposition === undefined ? {} : { 'content-disposition': disposition };
+    const response = await new Promise((resolve) => {
+      harness.listeners.message({ kind: 'fetch-link', url }, { id: 'putiorr-extension-id' }, resolve);
+    });
+    assert.equal(response.ok, true, url);
+    return response.filename;
+  };
+
+  // The URL basename, which is what a "download.php?id=…" grab falls back to.
+  assert.equal(await filenameFor('https://tracker.test/download.php?id=123'), 'download.php.torrent');
+  // A disposition can name the script just as well as the URL can.
+  assert.equal(await filenameFor('https://tracker.test/dl/1.torrent', 'attachment; filename=get.php'), 'get.php.torrent');
+  assert.equal(
+    await filenameFor('https://tracker.test/dl/2.torrent', "attachment; filename*=UTF-8''Se%CC%81rie"),
+    'Série.torrent'.normalize('NFD'),
+  );
+  // An existing suffix is never doubled, in either case.
+  assert.equal(await filenameFor('https://tracker.test/dl/3.TORRENT'), '3.TORRENT');
+  assert.equal(await filenameFor('https://tracker.test/dl/4.torrent', 'attachment; filename=Real.torrent'), 'Real.torrent');
+});
+
 test('a failed .torrent fetch falls through to a normal download exactly once', async () => {
   let attempts = 0;
   const harness = await loadContent({

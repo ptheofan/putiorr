@@ -4,6 +4,19 @@
 
 import { normalizeDomain } from './resolve.js';
 
+// The single definition of what lives in chrome.storage.sync: the options page
+// writes exactly these keys and the service worker reads them with these
+// defaults, so a key added on one side only cannot go unnoticed. Credentials are
+// deliberately absent — they belong in storage.local, which is not synchronized
+// to the user's Google account.
+export const SYNC_DEFAULTS = {
+  baseUrl: '',
+  defaultProfileId: 0,
+  autoCapture: true,
+  rules: [],
+  profiles: [],
+};
+
 // What the user most likely meant when they typed a bare host, with or without
 // a port: only these get the "write http:// in front" hint, so a "data:" URL or
 // a mistyped "http:/nas" is not answered with "write http://http:/nas".

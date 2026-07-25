@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { encodeCredentials } from '../extension/lib/auth.js';
 import { matchSiteRuleProfileId } from '../extension/lib/resolve.js';
-import { parseRuleDomains, validateBaseUrl } from '../extension/lib/settings.js';
+import { SYNC_DEFAULTS, parseRuleDomains, validateBaseUrl } from '../extension/lib/settings.js';
 
 // options.js is a page script: it wires up listeners at import time and exports
 // nothing. The pure halves (URL and domain validation, credential encoding) are
@@ -652,19 +652,42 @@ test('a failed credentials write names the credentials and claims nothing', asyn
 });
 
 test('the keys written to storage.sync are exactly the ones the worker reads', async () => {
-  // The worker defaults every key it reads; a key added on one side only would
-  // be a setting the user can change and the worker never sees.
+  // Both sides now share one SYNC_DEFAULTS, so this guards the remaining gap:
+  // that save() writes every key the worker defaults, and no other.
   const expected = ['autoCapture', 'baseUrl', 'defaultProfileId', 'profiles', 'rules'];
+  assert.deepEqual(Object.keys(SYNC_DEFAULTS).sort(), expected);
 
   const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
   harness.fields.save.click();
   await settle();
   assert.deepEqual(Object.keys(harness.lastSync()).sort(), expected);
 
-  const background = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');
-  const defaults = background.match(/const SYNC_DEFAULTS = \{([\s\S]*?)\n\};/)?.[1];
-  assert.ok(defaults, 'background.js must keep a SYNC_DEFAULTS block for this guard to work');
-  assert.deepEqual([...defaults.matchAll(/^\s{2}([a-zA-Z]+):/gm)].map(([, key]) => key).sort(), expected);
+  // A local copy reintroduced on either side would drift silently.
+  for (const file of ['background.js', 'options.js']) {
+    const source = readFileSync(new URL(`../extension/${file}`, import.meta.url), 'utf8');
+    assert.match(source, /import \{[^}]*SYNC_DEFAULTS[^}]*\} from '\.\/lib\/settings\.js'/, file);
+    assert.doesNotMatch(source, /const SYNC_DEFAULTS/, file);
+  }
+});
+
+test('the save note names what is actually able to grab', async () => {
+  // "only site rules and the right-click menu will grab" is a lie with no
+  // profiles stored: the menu offers just "Configure…", and a rule cannot be
+  // saved without a profile to name.
+  const empty = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
+  empty.fields.save.click();
+  await settle();
+  assert.equal(empty.status(), 'Saved\nNo profiles loaded: nothing can grab until you load profiles and Save');
+
+  const loaded = await loadOptions({ sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] } });
+  loaded.fields.save.click();
+  await settle();
+  assert.equal(loaded.status(), 'Saved\nNo default profile: only site rules and the right-click menu will grab');
+
+  loaded.fields.defaultProfile.value = '7';
+  loaded.fields.save.click();
+  await settle();
+  assert.equal(loaded.status(), 'Saved');
 });
 
 test('with no profiles loaded every select says so and no rule can be saved', async () => {

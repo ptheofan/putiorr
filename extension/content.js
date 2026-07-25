@@ -22,6 +22,9 @@
       console.warn('[putiorr] link helpers failed to load, capture is off on this page:', error);
     });
 
+  // The one storage key this script reads, spelled out rather than imported from
+  // lib/settings.js: a content script can only import web-accessible resources,
+  // and exposing the settings module to every page is not worth one default.
   chrome.storage.sync.get({ autoCapture: true })
     .then((value) => {
       autoCapture = value.autoCapture ?? true;
@@ -78,11 +81,18 @@
     return plain[2].trim();
   }
 
+  // put.io takes the upload's name at face value, and the right-click path exists
+  // precisely for trackers whose download URLs are "download.php?id=123": neither
+  // that basename nor a disposition naming the script is a torrent name.
+  function withTorrentSuffix(name) {
+    return /\.torrent$/i.test(name) ? name : `${name}.torrent`;
+  }
+
   function filenameFrom(response, url) {
     const fromHeader = filenameFromDisposition(response.headers.get('content-disposition') ?? '').trim();
-    if (fromHeader) return fromHeader;
+    if (fromHeader) return withTorrentSuffix(fromHeader);
     const base = new URL(url, window.location.href).pathname.split('/').pop();
-    return base || 'upload.torrent';
+    return base ? withTorrentSuffix(base) : 'upload.torrent';
   }
 
   async function fetchTorrent(url) {

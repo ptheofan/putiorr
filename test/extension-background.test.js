@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 // background.js is an MV3 module worker: it registers chrome.* listeners at
@@ -57,7 +58,12 @@ function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, se
         await wait(delays.removeAll ?? 0);
       },
     },
-    notifications: { create: (item) => notifications.push(item) },
+    notifications: {
+      // chrome.notifications.create takes an optional leading id; the worker
+      // passes one only for the notification that is meant to be clickable.
+      create: (...args) => notifications.push(args.length > 1 ? { id: args[0], ...args[1] } : args[0]),
+      onClicked: register('notificationClicked'),
+    },
     tabs: {
       sendMessage: sendMessage ?? (async () => ({ ok: false, error: 'no content script stub' })),
     },
@@ -258,7 +264,16 @@ test('a stalled putiorr is reported as not responding, and the fetch carries a d
   assert.equal(harness.notifications[0].title, 'putiorr grab failed');
   // "unreachable" would send the user hunting the wrong fault: the server is
   // there, it answered the connection and then stalled.
-  assert.match(harness.notifications[0].message, /did not respond within 30s/);
+  assert.match(harness.notifications[0].message, /did not respond within 25s/);
+});
+
+test('the grab deadline stays under the idle-worker teardown', async () => {
+  // Chrome retires an idle MV3 worker at 30s. A request that expires exactly
+  // there races the teardown: the timeout error would have nowhere to be
+  // reported, and the click would end in silence rather than a notification.
+  const source = readFileSync(WORKER_URL, 'utf8');
+  const timeout = Number(source.match(/const GRAB_TIMEOUT_MS = (\d+);/)?.[1]);
+  assert.ok(timeout > 0 && timeout < 30000, `GRAB_TIMEOUT_MS must sit under 30000, got ${timeout}`);
 });
 
 test('a genuinely unreachable putiorr still reads as unreachable', async () => {
@@ -327,6 +342,60 @@ test('a missing content script asks the user to reload rather than quoting Chrom
 
   assert.equal(harness.notifications[0].title, 'putiorr grab failed');
   assert.equal(harness.notifications[0].message, 'Reload the page, then try again');
+});
+
+test('the "not configured" notification is clickable and opens the options', async () => {
+  // Without a URL every grab fails here, and the notification is the only thing
+  // on screen: if it cannot lead to the options page, the user is at a dead end.
+  const harness = await loadWorker({ sync: { baseUrl: '', profiles: [{ id: 3, name: 'Movies' }] } });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.test/page', profileId: 3 },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.deepEqual(response, { ok: false, error: 'putiorr is not configured' });
+  assert.equal(harness.notifications[0].id, 'putiorr-configure');
+  assert.match(harness.notifications[0].message, /options/);
+
+  harness.listeners.notificationClicked('putiorr-configure');
+  assert.deepEqual(harness.log.filter((entry) => entry === 'openOptionsPage'), ['openOptionsPage']);
+});
+
+test('clicking any other notification does not open the options', async () => {
+  const harness = await loadWorker({ sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'Movies' }] } });
+
+  harness.listeners.notificationClicked('some-other-notification');
+
+  assert.equal(harness.log.includes('openOptionsPage'), false);
+});
+
+test('a first install with no URL opens the options page', async () => {
+  // Otherwise the first link click is a failure notification, and nothing has
+  // told the user the extension needs configuring at all.
+  // A constant stored value, not a syncSequence: the install listener and the
+  // menu rebuild it queues both read storage, in an order that is theirs to pick.
+  const harness = await loadWorker({ sync: { baseUrl: '', profiles: [] } });
+
+  await harness.listeners.installed({ reason: 'install' });
+  await settle();
+
+  assert.ok(harness.log.includes('openOptionsPage'));
+  assert.ok(harness.log.includes('removeAll'), 'the menu must still be built on install');
+});
+
+test('an update, or an install over existing settings, does not steal a tab', async () => {
+  for (const details of [{ reason: 'update' }, { reason: 'install' }]) {
+    const harness = await loadWorker({ sync: { baseUrl: 'http://putiorr.test', profiles: [] } });
+
+    await harness.listeners.installed(details);
+    await settle();
+
+    assert.equal(harness.log.includes('openOptionsPage'), false, details.reason);
+  }
 });
 
 test('the configure menu entry opens options without touching the network', async () => {

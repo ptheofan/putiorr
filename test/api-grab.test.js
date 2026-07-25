@@ -4,6 +4,7 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
+import { logger } from '../src/logger.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
 import { TransmissionRpcServer } from '../src/transmission/server.js';
@@ -101,6 +102,61 @@ async function postGrab(harness, payload, { grabHeader = true } = {}) {
   });
   return { status: response.status, body: await response.json() };
 }
+
+// logger is a module singleton, so the warning can be observed by swapping the
+// one method and putting it back afterwards.
+function captureWarnings(t) {
+  const warnings = [];
+  const original = logger.warn;
+  logger.warn = (message, meta) => warnings.push({ message, meta });
+  t.after(() => { logger.warn = original; });
+  return warnings;
+}
+
+test('a grab into a profile that keeps completed transfers warns exactly once', async (t) => {
+  // A browser grab has no *arr app to import it and signal completion, so
+  // without auto-remove the transfer sits in the list forever. The warning is
+  // the only place a user is told; repeating it on every grab would bury it.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const warnings = captureWarnings(t);
+  const profile = harness.store.listProfiles()[0];
+  harness.store.updateProfile(profile.id, { auto_remove_completed: false });
+
+  const first = await postGrab(harness, {
+    profileId: profile.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(first.status, 200);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0].message, /enable auto-remove on the profile for browser grabs/);
+  assert.equal(warnings[0].meta.profile, profile.slug);
+
+  const second = await postGrab(harness, {
+    profileId: profile.id,
+    magnet: 'magnet:?xt=urn:btih:0123456789abcdef',
+  });
+
+  assert.equal(second.status, 200);
+  assert.equal(warnings.length, 1, 'the same profile must not warn again');
+});
+
+test('a grab into a profile with auto-remove never warns', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const warnings = captureWarnings(t);
+  const profile = harness.store.listProfiles()[0];
+  harness.store.updateProfile(profile.id, { auto_remove_completed: true });
+
+  const { status } = await postGrab(harness, {
+    profileId: profile.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(warnings, []);
+});
 
 test('grab with a magnet link adds a put.io transfer for the profile', async (t) => {
   const harness = await createHarness();

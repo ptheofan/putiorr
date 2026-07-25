@@ -1,20 +1,12 @@
 import { encodeCredentials } from './lib/auth.js';
 import { sanitizeProfiles } from './lib/resolve.js';
-import { parseRuleDomains, validateBaseUrl } from './lib/settings.js';
+import { SYNC_DEFAULTS, parseRuleDomains, validateBaseUrl } from './lib/settings.js';
 
 // This page is the only place the extension's settings can be repaired, so it
 // refuses to store a value it cannot use and reports every rewrite it makes.
 // Nothing here builds markup from data: profile names come from the server.
 
 const PROFILES_TIMEOUT_MS = 15000;
-
-const SYNC_DEFAULTS = {
-  baseUrl: '',
-  defaultProfileId: 0,
-  autoCapture: true,
-  rules: [],
-  profiles: [],
-};
 
 const el = (id) => document.getElementById(id);
 
@@ -180,7 +172,11 @@ async function save() {
   }
 
   const notes = [...collected.warnings];
-  if (!defaultProfileId) {
+  if (!profiles.length) {
+    // With no profiles stored the right-click menu offers only "Configure…" and
+    // no rule can name a profile, so nothing at all can grab yet.
+    notes.push('No profiles loaded: nothing can grab until you load profiles and Save');
+  } else if (!defaultProfileId) {
     notes.push('No default profile: only site rules and the right-click menu will grab');
   }
   setStatus(['Saved', ...notes]);

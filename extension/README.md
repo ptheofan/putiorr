@@ -95,17 +95,19 @@ Run this once after loading the extension, against a running putiorr (the
   manual escape hatch when you want the raw `.torrent`.
 - Only genuine left-clicks are captured; a click a page synthesised on a link it
   planted is ignored.
-- If a capture fails before the grab reaches putiorr — the `.torrent` fetch
-  failed or timed out, or an extension reload orphaned the page's content
-  script — the click is replayed as a normal browser action: a magnet goes to
-  the OS handler, a `.torrent` downloads. A grab that did reach putiorr and
-  failed there is reported by notification instead and is never retried this
-  way.
+- If a capture fails before the grab reaches the extension's service worker —
+  the `.torrent` fetch failed or timed out, or an extension reload orphaned the
+  page's content script — the click is replayed as a normal browser action: a
+  magnet goes to the OS handler, a `.torrent` downloads. Once the worker has the
+  grab, every outcome is reported by notification and nothing is replayed: an
+  unreachable or sleeping putiorr, rejected credentials, and an error putiorr
+  returned all end there, with no fallback download.
 - Clicking the same link again while a capture is still in flight is dropped, so
   an impatient double-click does not create two transfers.
 - Fetches have deadlines: 15s for the in-page `.torrent` fetch and for **Test
-  connection & load profiles**, 30s for the worker's request to putiorr (putiorr
-  waits on put.io while adding the transfer, so it needs the headroom).
+  connection & load profiles**, 25s for the worker's request to putiorr (putiorr
+  waits on put.io while adding the transfer, so it needs the headroom, but the
+  deadline stays under the 30s at which Chrome retires an idle worker).
 
 ## The `/api/grab` Endpoint
 

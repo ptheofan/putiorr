@@ -825,12 +825,15 @@ supersedes the block in Step 1:
   `closest()` fallback; `autoCapture` treats a removed storage key as true.
 - `test/extension-content.test.js` (21 tests, stub-chrome harness with
   `isTrusted` semantics) pins all of the above; the worker's `postGrab`
-  gained a 30s timeout so a stalled server can't leave captured anchors dead.
+  gained a 25s timeout (under Chrome's 30s idle-worker teardown) so a stalled
+  server can't leave captured anchors dead.
 
 Known gaps deferred to Task 6 docs: MV3 content-script fetch is subject to
 the page's CORS (cross-origin `.torrent` links fall back to normal download);
-iframes are not captured (`all_frames` unset); no fetch size cap (bounded by
-the sendMessage limit → refire); clickjacking overlays can harvest real
+iframes are not captured (`all_frames` unset); no fetch size cap in the
+extension, but putiorr rejects bodies over 2 MiB and base64 inflates by 4/3,
+so a `.torrent` above roughly 1.5 MiB ends in a failure notification with no
+fallback download; clickjacking overlays can harvest real
 clicks (notification is the backstop); `web_accessible_resources` allows
 extension fingerprinting (`use_dynamic_url` deliberately rejected — it broke
 dynamic import from content scripts before Chrome 132).
