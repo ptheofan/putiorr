@@ -21,6 +21,8 @@ import {
   setText,
   setHidden,
   setProfileFact,
+  browserDomainsPayload,
+  grabProfileSummary,
 } from './util.js';
 import { setMessage } from './putio.js';
 import {
@@ -389,12 +391,7 @@ export function toggleProfileFact(card, role, hidden) {
 }
 
 export function profileSummary(profile) {
-  if (isGrabProfile(profile)) {
-    const domains = browserDomainsList(profile);
-    return domains.length
-      ? `Browser grabs from ${domains.join(', ')}.`
-      : 'Browser grabs sent here by the extension.';
-  }
+  if (isGrabProfile(profile)) return grabProfileSummary(browserDomainsList(profile));
   const payload = getClientSettingsFromProfile({
     ...profile,
     name: profileDisplayName(profile),
@@ -570,7 +567,8 @@ export function getWizardPayload() {
     enabled: fieldChecked(el.wizardEnabled),
     // Sent as typed: the server normalizes the list and refuses entries no
     // hostname can match, so the wizard shows that error instead of guessing.
-    browserDomains: fieldValue(el.wizardBrowserDomains).trim(),
+    // Only the presets that show the step send it at all.
+    ...browserDomainsPayload(el.wizardBrowserStep.hidden, fieldValue(el.wizardBrowserDomains).trim()),
   };
 }
 

@@ -212,6 +212,24 @@ export function defaultRpcPathForType(type) {
   return `/${slugify(type || DEFAULT_PROFILE_TYPE)}/transmission/rpc`;
 }
 
+// The wizard only sends the sites when it is showing them. A hidden Browser
+// grabs step means the preset has none, and the field still holds whatever the
+// last profile left in it: sending that would write sites onto an *arr profile
+// nobody typed them for, and refuse the save over an entry that is off screen.
+// The update is a partial one, so omitting the key leaves a stored list alone
+// rather than clearing it.
+export function browserDomainsPayload(hidden, value) {
+  return hidden ? {} : { browserDomains: value };
+}
+
+// A grab profile has no category and no client to describe, so its card is
+// summarized by the sites whose browser grabs it claims.
+export function grabProfileSummary(domains = []) {
+  return domains.length
+    ? `Browser grabs from ${domains.join(', ')}.`
+    : 'Browser grabs sent here by the extension.';
+}
+
 export function setProfileFact(card, role, value) {
   const element = card.querySelector(`[data-role="${role}"]`);
   setText(element, value);

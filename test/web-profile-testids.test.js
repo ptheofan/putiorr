@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
+// profiles.js reaches the DOM through state.js, so the wizard itself is pinned
+// by reading its source; the parts that are only strings and values live in
+// util.js, which imports nothing but constants and runs here.
+import { browserDomainsPayload, grabProfileSummary } from '../src/web/util.js';
 
 test('profile wizard exposes stable data-testid hooks for frontend tests', () => {
   const html = readFileSync(new URL('../src/web/index.html', import.meta.url), 'utf8');
@@ -23,7 +27,10 @@ test('profile wizard sends Browser sites as typed and surfaces the server respon
 
   assert.match(html, /id="wizardBrowserDomains"[^>]*placeholder="x\.example, z\.example"/);
   assert.match(html, /Browser grabs from these sites use this profile; subdomains match automatically\. Leave empty for none\./);
-  assert.match(profilesJs, /browserDomains: fieldValue\(el\.wizardBrowserDomains\)\.trim\(\)/);
+  assert.match(
+    profilesJs,
+    /\.\.\.browserDomainsPayload\(el\.wizardBrowserStep\.hidden, fieldValue\(el\.wizardBrowserDomains\)\.trim\(\)\)/,
+  );
 
   // The save response carries the warnings under the snake_case key only, and
   // both messages that report a completed save have to pass through them. They
@@ -133,6 +140,35 @@ test('a grab profile card trades the RPC endpoint fact for its browser sites', (
   assert.match(profilesJs, /toggleProfileFact\(card, 'rpc', isGrab\)/);
   assert.match(profilesJs, /toggleProfileFact\(card, 'browser-domains', !isGrab\)/);
   assert.match(profilesJs, /export function isGrabProfile[\s\S]*?=== GRAB_PROFILE_TYPE/);
+});
+
+test('the wizard sends browser sites only while the step that owns them is shown', () => {
+  // Present but empty is still an answer: the user cleared the field and the
+  // server has to store that. Absent is the preset never having asked.
+  assert.deepEqual(browserDomainsPayload(false, 'x.example, z.example'), { browserDomains: 'x.example, z.example' });
+  assert.deepEqual(browserDomainsPayload(false, ''), { browserDomains: '' });
+  assert.ok('browserDomains' in browserDomainsPayload(false, ''));
+
+  // Switching a grab profile to an *arr preset leaves its sites in the hidden
+  // field. Sending them would persist sites onto a profile that never claims
+  // one, and a bad entry would fail the save over a field nobody can see.
+  assert.deepEqual(browserDomainsPayload(true, 'x.example'), {});
+  assert.ok(!('browserDomains' in browserDomainsPayload(true, 'x.example')));
+});
+
+test('a grab profile card is summarized by its sites, not by a category', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+
+  assert.equal(grabProfileSummary(['x.example', 'z.example']), 'Browser grabs from x.example, z.example.');
+  assert.equal(grabProfileSummary([]), 'Browser grabs sent here by the extension.');
+  assert.equal(grabProfileSummary(), 'Browser grabs sent here by the extension.');
+
+  // A grab profile never reaches the category sentence below it: it has no
+  // download client, so "Uses category movies-grab." would describe nothing.
+  assert.match(
+    profilesJs,
+    /export function profileSummary[\s\S]*?if \(isGrabProfile\(profile\)\) return grabProfileSummary\(browserDomainsList\(profile\)\);/,
+  );
 });
 
 test('the field guide explains the browser extension and how to install it', () => {
