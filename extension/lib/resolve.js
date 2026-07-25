@@ -5,7 +5,10 @@
 // different extension version, so every shape read below is treated as
 // untrusted: a throw here would become a silent no-op on a magnet click.
 
-function normalizeDomain(value) {
+// Exported so the options page can show the user the domain that will actually
+// be stored: this function quietly rewrites a lot (scheme and path stripped,
+// unicode punycoded, leading dots dropped) and returns '' for the unparseable.
+export function normalizeDomain(value) {
   const raw = String(value ?? '').trim().toLowerCase().replace(/^\.+/, '');
   if (!raw) return '';
 

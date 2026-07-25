@@ -4,9 +4,24 @@ import {
   isMagnetLink,
   isTorrentLink,
   matchSiteRuleProfileId,
+  normalizeDomain,
   resolveProfileId,
   sanitizeProfiles,
 } from '../extension/lib/resolve.js';
+
+test('normalizeDomain reduces an entry to the host matching actually uses', () => {
+  // The options page shows this result back to the user, so what it rewrites is
+  // part of the contract rather than an implementation detail.
+  assert.equal(normalizeDomain('https://x.example/dl?a=1'), 'x.example');
+  assert.equal(normalizeDomain('  X.Example:8080  '), 'x.example');
+  assert.equal(normalizeDomain('.x.example.'), 'x.example');
+  assert.equal(normalizeDomain('bücher.example'), 'xn--bcher-kva.example');
+  assert.equal(normalizeDomain('example'), 'example');
+  assert.equal(normalizeDomain('//'), '');
+  assert.equal(normalizeDomain(''), '');
+  assert.equal(normalizeDomain(undefined), '');
+  assert.equal(normalizeDomain(null), '');
+});
 
 test('isMagnetLink detects magnet URIs only', () => {
   assert.equal(isMagnetLink('magnet:?xt=urn:btih:abc'), true);

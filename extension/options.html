@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>putiorr grab options</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 42rem; padding: 0 1rem; }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-weight: 600; }
+    input[type="text"], input[type="password"], input[type="url"] { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+    table { border-collapse: collapse; width: 100%; margin: 0.5rem 0; }
+    th, td { text-align: left; padding: 0.3rem 0.5rem 0.3rem 0; vertical-align: top; }
+    td input[type="text"] { width: 100%; box-sizing: border-box; }
+    button { margin-top: 0.75rem; padding: 0.4rem 0.9rem; }
+    #status { display: block; margin: 0.5rem 0; white-space: pre-line; }
+    #status.error { color: #c0392b; }
+    .hint { color: #666; font-size: 0.9rem; margin: 0.25rem 0; }
+  </style>
+</head>
+<body>
+  <h1>putiorr grab</h1>
+
+  <label for="baseUrl">putiorr URL</label>
+  <input id="baseUrl" type="url" placeholder="http://nas:9091">
+  <p class="hint">The root URL only — putiorr cannot be served from a subpath.</p>
+
+  <label for="username">Username</label>
+  <input id="username" type="text" autocomplete="off">
+
+  <label for="password">Password</label>
+  <input id="password" type="password" autocomplete="off">
+
+  <button id="loadProfiles" type="button">Test connection &amp; load profiles</button>
+  <span id="status"></span>
+
+  <label for="defaultProfile">Default profile</label>
+  <select id="defaultProfile"></select>
+  <p class="hint">Use a dedicated profile with “auto-remove completed” enabled so finished browser grabs are cleaned up like prowlarr grabs.</p>
+
+  <label><input id="autoCapture" type="checkbox" checked> Auto-capture magnet and .torrent clicks</label>
+
+  <h2>Site rules</h2>
+  <p class="hint">Grabs from these domains use the selected profile instead of the default. Subdomains match automatically, so list the domain itself (<code>x.example</code>, not <code>*.x.example</code>). Saving rewrites each entry to the domain that is actually stored.</p>
+  <table>
+    <thead><tr><th>Domains (comma separated)</th><th>Profile</th><th></th></tr></thead>
+    <tbody id="rules"></tbody>
+  </table>
+  <button id="addRule" type="button">Add rule</button>
+
+  <div>
+    <button id="save" type="button">Save</button>
+  </div>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>
