@@ -413,7 +413,7 @@ test('test connection loads enabled profiles over UTF-8 basic auth', async () =>
   harness.fields.loadProfiles.click();
   await settle();
 
-  assert.equal(request.url, 'http://nas:9091/api/profiles');
+  assert.equal(request.url, 'http://nas:9091/api/profiles?type=grab');
   assert.equal(request.init.headers.Authorization, 'Basic dXNlcjpww6Rzc3fDtnJk');
   assert.ok(request.init.signal instanceof AbortSignal, 'the request must carry a deadline');
   assert.match(harness.status(), /^Loaded 2 profile\(s\)/);
@@ -421,6 +421,43 @@ test('test connection loads enabled profiles over UTF-8 basic auth', async () =>
     harness.fields.defaultProfile.children.map((option) => option.textContent),
     ['No default profile', 'Movies', 'TV'],
   );
+});
+
+test('only Putiorr Grab profiles are asked for, listed, offered and cached', async () => {
+  // putiorr does the filtering: an *arr profile can never reach the card, the
+  // default select, or — through the stored cache — the worker's context menu.
+  // The extension therefore never has to know the preset vocabulary itself.
+  let request;
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async (url) => {
+      request = String(url);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => [
+          { id: 4, name: 'Movies', enabled: 1, type: 'grab', browser_domains: ['x.example'] },
+          { id: 7, name: 'TV', enabled: 1, type: 'grab', browser_domains: [] },
+        ],
+      };
+    },
+  });
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  assert.equal(new URL(request).searchParams.get('type'), 'grab');
+  assert.deepEqual(harness.profileRows(), [['Movies', 'x.example'], ['TV', 'no sites']]);
+  assert.deepEqual(
+    harness.fields.defaultProfile.children.map((option) => option.textContent),
+    ['No default profile', 'Movies', 'TV'],
+  );
+
+  harness.fields.save.click();
+  await settle();
+
+  // The worker builds its menu from exactly this list and nothing else.
+  assert.deepEqual(harness.lastSync().profiles, [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }]);
 });
 
 test('loaded profiles are listed with the sites putiorr routes to them', async () => {
@@ -533,7 +570,10 @@ test('a reload that drops the default profile reports the selection it clears', 
   assert.equal(harness.fields.defaultProfile.value, '');
 });
 
-test('a putiorr with no enabled profiles says so instead of reporting success', async () => {
+test('a putiorr whose grab profiles are all disabled says which fix applies', async () => {
+  // The list is already filtered to the Putiorr Grab preset by putiorr, so a
+  // row here is a grab profile that exists and is switched off. Telling the
+  // user to create one would send them to build a duplicate.
   const harness = await loadOptions({
     sync: { baseUrl: 'http://nas:9091' },
     fetch: async () => ({ ok: true, status: 200, json: async () => [{ id: 9, name: 'Off', enabled: 0 }] }),
@@ -542,13 +582,30 @@ test('a putiorr with no enabled profiles says so instead of reporting success', 
   harness.fields.loadProfiles.click();
   await settle();
 
-  assert.match(harness.status(), /no enabled profiles/);
+  assert.equal(harness.status(), 'putiorr at http://nas:9091 has no enabled Putiorr Grab profiles; enable one there');
+  assert.equal(harness.fields.status.className, 'error');
+});
+
+test('a putiorr with no grab profiles at all names the preset that fixes it', async () => {
+  // Nothing came back for ?type=grab: the *arr profiles this putiorr may well
+  // have are invisible here on purpose, so "no profiles" would read as a broken
+  // URL. The preset is the only thing that turns this into a working setup.
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async () => ({ ok: true, status: 200, json: async () => [] }),
+  });
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  assert.match(harness.status(), /has no Putiorr Grab profiles/);
+  assert.match(harness.status(), /Putiorr Grab preset/);
   assert.equal(harness.fields.status.className, 'error');
 });
 
 test('an empty profile list must not quietly wipe a working configuration', async () => {
-  // A putiorr that is up but has every profile disabled (or a URL pointing at
-  // the wrong host) answers with []. Applying that would clear the profile list
+  // A putiorr that is up but has no grab profiles (or a URL pointing at the
+  // wrong host) answers with []. Applying that would clear the profile list
   // and the default selection, and the next Save would commit the loss under a
   // green "Saved" — taking the worker's context menu down with it.
   const harness = await loadOptions({
@@ -563,7 +620,7 @@ test('an empty profile list must not quietly wipe a working configuration', asyn
   harness.fields.loadProfiles.click();
   await settle();
 
-  assert.match(harness.status(), /no enabled profiles/);
+  assert.match(harness.status(), /no Putiorr Grab profiles/);
   assert.equal(harness.fields.defaultProfile.value, '4', 'the default selection must survive');
 
   harness.fields.save.click();

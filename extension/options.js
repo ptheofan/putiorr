@@ -186,7 +186,10 @@ async function save() {
 async function fetchProfiles(baseUrl, headers) {
   let response;
   try {
-    response = await fetch(new URL('/api/profiles', baseUrl), {
+    // ?type=grab is putiorr's filter, not one this page could apply itself: the
+    // preset vocabulary lives there. Only a Putiorr Grab profile can accept a
+    // grab, so listing any other kind here would offer a pick putiorr refuses.
+    response = await fetch(new URL('/api/profiles?type=grab', baseUrl), {
       headers,
       // A sleeping NAS accepts the connection and then says nothing; without a
       // deadline the button would stay on "Contacting putiorr…" forever.
@@ -206,9 +209,10 @@ async function fetchProfiles(baseUrl, headers) {
 
   const body = await response.json().catch(() => undefined);
   if (!Array.isArray(body)) throw new Error(`${baseUrl} did not answer with a profile list; check the URL`);
-  // The rows come back whole: the browser sites are shown from them, and only
-  // the cached {id, name} pairs are stored.
-  return body.filter((profile) => profile?.enabled);
+  // The rows come back whole and unfiltered by `enabled`: the browser sites are
+  // shown from them, only the cached {id, name} pairs are stored, and the
+  // caller needs the disabled ones to tell its two empty states apart.
+  return body;
 }
 
 async function loadProfilesFromPutiorr() {
@@ -233,14 +237,22 @@ async function loadProfilesFromPutiorr() {
     return;
   }
 
-  const loaded = sanitizeProfiles(rows);
+  // putiorr filtered by preset; `enabled` is filtered here, so a profile that
+  // exists but is switched off is still a row this page has seen.
+  const enabledRows = rows.filter((row) => row?.enabled);
+  const loaded = sanitizeProfiles(enabledRows);
 
   // An empty answer is never worth applying: it would clear the profile list and
   // every selection on the page, and the next Save would commit that loss under
-  // a green "Saved" — including to the worker's context menu. A putiorr with no
-  // enabled profiles and a URL pointing at the wrong host look identical here.
+  // a green "Saved" — including to the worker's context menu. It is also the one
+  // answer a wrong URL and a putiorr without the preset both produce, so the
+  // status has to name the fix: a putiorr full of *arr profiles answers this
+  // exactly like one with no profiles at all, since neither can accept a grab.
   if (!loaded.length) {
-    setStatus(`putiorr at ${url.baseUrl} has no enabled profiles; create one there first`, 'error');
+    const complaint = rows.length && !enabledRows.length
+      ? 'has no enabled Putiorr Grab profiles; enable one there'
+      : 'has no Putiorr Grab profiles; create one there with the Putiorr Grab preset';
+    setStatus(`putiorr at ${url.baseUrl} ${complaint}`, 'error');
     return;
   }
 
@@ -248,7 +260,7 @@ async function loadProfilesFromPutiorr() {
   // cleared by the re-render, so it is read while it is still on screen.
   const previousDefault = Number(el('defaultProfile').value) || 0;
 
-  const sitesById = new Map(rows.map((row) => [Number(row?.id), browserSitesOf(row)]));
+  const sitesById = new Map(enabledRows.map((row) => [Number(row?.id), browserSitesOf(row)]));
   profiles = loaded;
   profileSites = loaded.map((profile) => ({
     name: profile.name,

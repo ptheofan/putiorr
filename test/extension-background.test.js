@@ -154,6 +154,31 @@ test('corrupt stored profiles still produce a usable menu instead of a dead one'
   assert.equal(unhandled.length, before, 'menu rebuild must not leave unhandled rejections');
 });
 
+test('the menu is built from the cached list alone, so it inherits its filter', async () => {
+  // The options page loads /api/profiles?type=grab, so the cache holds Putiorr
+  // Grab profiles only. The worker must have no profile source of its own: an
+  // unfiltered fetch here would put an *arr profile back in the right-click
+  // menu, and picking it is exactly what putiorr now refuses.
+  let fetched = 0;
+  const harness = await loadWorker({
+    sync: { profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }] },
+    fetch: async () => {
+      fetched += 1;
+      throw new Error('the worker must not load profiles of its own');
+    },
+  });
+
+  harness.listeners.storage({ profiles: {} }, 'sync');
+  await settle();
+
+  assert.deepEqual(
+    menuSegments(harness.log).at(-1),
+    ['create:putiorr-root', 'create:putiorr-profile-4', 'create:putiorr-profile-7'],
+  );
+  assert.equal(fetched, 0, 'building the menu must not talk to putiorr');
+  assert.doesNotMatch(readFileSync(WORKER_URL, 'utf8'), /\/api\/profiles/);
+});
+
 test('a magnet menu click on corrupt storage notifies instead of rejecting', async () => {
   const before = unhandled.length;
   const harness = await loadWorker({
