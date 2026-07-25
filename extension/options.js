@@ -19,16 +19,15 @@ let profiles = [];
 // someone edits a profile there.
 let profileSites = [];
 
-// Three tones, because "Saved" and "Contacting putiorr…" are not the same
-// news: a save that landed has to be distinguishable at a glance from a
-// request that is still in flight.
-const STATUS_TONES = { note: '', ok: 'ok', error: 'error' };
-
+// Tones: 'note' for a request in flight, 'ok' for news that landed, 'error'
+// for a refusal — "Saved" and "Contacting putiorr…" are not the same news.
+// 'note' is the absence of a class; anything else is used as one, so a tone
+// this page does not style shows up unstyled instead of passing for neutral.
 function setStatus(message, tone = 'note') {
   const status = el('status');
   const lines = Array.isArray(message) ? message.filter(Boolean) : [message];
   status.textContent = lines.join('\n');
-  status.className = STATUS_TONES[tone] ?? '';
+  status.className = tone === 'note' ? '' : tone;
   // The status line sits with the connection card and Save at the bottom:
   // without this, a refused save looks like a button that does nothing at all.
   status.scrollIntoView?.({ block: 'nearest' });

@@ -145,11 +145,13 @@ async function handleGrab(payload) {
     notify(profileName ? `Sent to putiorr → ${profileName}` : 'Sent to putiorr', result.transfer?.name ?? '');
     return { ok: true };
   } catch (error) {
-    // A grab the worker did not pin to a profile can only 404 on the default it
-    // sent: a site match names a profile putiorr has just looked up. "Profile
-    // not found" alone would leave the user hunting a profile they never chose
-    // for this grab, on a page that has no idea it was deleted.
-    if (error.status === 404 && !hasExplicitId && defaultProfileId) {
+    // A missing profile on a grab the worker did not pin to one can only be the
+    // default it sent: a site match names a profile putiorr has just looked up.
+    // "Profile not found" alone would leave the user hunting a profile they
+    // never chose for this grab, on a page that has no idea it was deleted.
+    // The message is part of the test: any unrouted path answers 404 too, and a
+    // putiorr too old to have /api/grab must keep saying so.
+    if (error.status === 404 && error.message === 'Profile not found' && !hasExplicitId && defaultProfileId) {
       const message = `putiorr no longer has the default profile (#${defaultProfileId}); load profiles again in the options — click here to open them`;
       notify('putiorr grab failed', message, NOTIFY_CONFIGURE);
       return { ok: false, error: message };

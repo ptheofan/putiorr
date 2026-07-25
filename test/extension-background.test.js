@@ -299,6 +299,27 @@ test('the success notification names the profile putiorr actually used', async (
   assert.equal(harness.notifications[0].message, 'Example');
 });
 
+test('the response outranks the cached name even for an explicit pick', async () => {
+  // The cache is a fallback, never a preference: it is whatever the last Save
+  // stored, and putiorr has just told us what that profile is called now.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 3, name: 'TV shows' }, transfer: {} }),
+    }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.equal(harness.notifications[0].title, 'Sent to putiorr → TV shows');
+});
+
 test('a putiorr too old to name the profile still reports the grab as sent', async () => {
   const harness = await loadWorker({
     sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 2, name: 'Movies' }] },
@@ -371,6 +392,28 @@ test('a default profile deleted in putiorr is named as the default, not as a bar
 
   harness.listeners.notificationClicked('putiorr-configure');
   assert.ok(harness.log.includes('openOptionsPage'));
+});
+
+test('a 404 that is not a missing profile keeps its own wording', async () => {
+  // Every unrouted path answers 404 too, so a putiorr too old to have
+  // /api/grab lands here. Blaming the default profile would send the user to
+  // fix a setting that is fine and hide the only clue they had.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 4, name: 'Movies' }] },
+    fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Not Found' }) }),
+  });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.equal(harness.notifications[0].message, 'Not Found');
+  assert.equal(harness.notifications[0].id, undefined);
+  assert.deepEqual(response, { ok: false, error: 'Not Found' });
 });
 
 test('a 404 on a profile the user picked by hand stays putiorr\'s own answer', async () => {
