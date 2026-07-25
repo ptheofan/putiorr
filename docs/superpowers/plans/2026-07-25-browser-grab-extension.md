@@ -803,6 +803,38 @@ git add extension/content.js
 git commit -m "Add content script click capture with page-context torrent fetch (#59)"
 ```
 
+- [ ] **Step 4: Harden the content script (added after code review)**
+
+Applied in follow-up commits — the committed `extension/content.js`
+supersedes the block in Step 1:
+- Clicks are captured only when `event.isTrusted`, with the gate placed
+  *after* bypass consumption (a page-synthesized `a.click()` must not be able
+  to drive grabs; refire's own synthetic click must still pass). Modifier-key
+  clicks (ctrl/meta/shift/alt) are left to the browser — alt+click stays
+  Chrome's "download to disk" and doubles as the manual escape hatch.
+- The capture-failure fallback refires unconditionally (magnets included —
+  an orphaned content script after an extension reload otherwise turns every
+  magnet click into a permanent silent no-op; `anchor.click()` reaches the OS
+  protocol handler). A putiorr-reported `{ok:false}` does NOT refire.
+- Page-context fetches carry `AbortSignal.timeout(15s)`; in-flight anchors
+  are deduped via a Set (deleted in `finally`).
+- `filenameFromDisposition` follows RFC 6266: `filename*` beats `filename`,
+  percent-decoding confined to the extended form, quoted strings and LWS
+  handled, parameter names anchored so `x-filename` doesn't match.
+- Anchors are found via `event.composedPath()` (open shadow roots) with a
+  `closest()` fallback; `autoCapture` treats a removed storage key as true.
+- `test/extension-content.test.js` (21 tests, stub-chrome harness with
+  `isTrusted` semantics) pins all of the above; the worker's `postGrab`
+  gained a 30s timeout so a stalled server can't leave captured anchors dead.
+
+Known gaps deferred to Task 6 docs: MV3 content-script fetch is subject to
+the page's CORS (cross-origin `.torrent` links fall back to normal download);
+iframes are not captured (`all_frames` unset); no fetch size cap (bounded by
+the sendMessage limit → refire); clickjacking overlays can harvest real
+clicks (notification is the backstop); `web_accessible_resources` allows
+extension fingerprinting (`use_dynamic_url` deliberately rejected — it broke
+dynamic import from content scripts before Chrome 132).
+
 ---
 
 ### Task 5: Options page
