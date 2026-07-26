@@ -1,6 +1,8 @@
 import { rm, rmdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+const MAX_FOLDER_SEGMENT_BYTES = 255;
+
 export function extractCategory(targetDir, downloadDir) {
   if (!downloadDir) return '';
 
@@ -63,18 +65,30 @@ export function downloadCategoryDir(profile, download) {
   return resolveInside(profile?.download_at, download?.category ?? '');
 }
 
-// put.io names are free text, so this is the one place a name becomes a path.
-// Separators are kept — a put.io name that reads like a path nests, which is
-// what it did before and what keeps `downloadDir + name` resolving for the
-// *arr apps — while '.' and '..' name no folder at all. Anything that escapes
-// the category directory is refused by resolveInside rather than rewritten
-// into something that silently stages elsewhere.
+// put.io names are free text, so this is the one place a name becomes a path,
+// and it changes as little as it possibly can: whatever the *arr is told the
+// download is called is what it will join onto the download directory to find
+// the files. Only the separator splits — a backslash is an ordinary character
+// in a Linux filename, and trailing spaces are ordinary in torrent metadata —
+// and only segments that name nothing ('' and '.') are dropped. A '..' segment
+// survives to be refused by resolveInside rather than rewritten into a path
+// that stages somewhere else without saying so.
 export function downloadFolderSegments(value) {
-  const segments = String(value ?? '')
-    .split(/[\\/]+/)
-    .map((segment) => segment.trim())
-    .filter((segment) => segment && segment !== '.');
-  return segments.length > 0 ? segments.join(path.sep) : '';
+  return String(value ?? '')
+    .split('/')
+    .filter((segment) => segment && segment !== '.')
+    .join(path.sep);
+}
+
+// Every filesystem putiorr stages onto — ext4, APFS, SMB — caps one path
+// segment at 255 bytes, and it is bytes, not characters: 120 CJK characters
+// are 360 of them. Reported rather than truncated, because a truncated folder
+// no longer matches the name torrent-get gives the *arr, and that mismatch
+// fails silently at import time. The refusal is the caller's to make.
+export function oversizedFolderSegment(value) {
+  return downloadFolderSegments(value)
+    .split(path.sep)
+    .find((segment) => Buffer.byteLength(segment, 'utf8') > MAX_FOLDER_SEGMENT_BYTES) ?? '';
 }
 
 export async function fileExistsWithSize(filePath, size) {

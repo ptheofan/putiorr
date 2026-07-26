@@ -208,6 +208,39 @@ test('two downloads of the same name never stage into one folder', async () => {
   }
 });
 
+// I5, re-review: a name too long for the filesystem used to get all the way
+// to the per-file mkdir, which fails with ENAMETOOLONG inside the worker —
+// leaving the download at 50% with error:false and an empty errorString over
+// RPC while a worker retried the impossible mkdir on every poll. The refusal
+// belongs where every other unusable name is refused: up front, on the row.
+test('a put.io name too long for the filesystem fails on the download, loudly', async () => {
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],
+  });
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store, {
+      name: `${'W'.repeat(400)}.1080p.WEB.x264`,
+      lifecycle: 'remote',
+    });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await manager.prepareTransferSafely(harness.store.findDownloadById(transfer.id));
+
+    const row = harness.store.findDownloadById(transfer.id);
+    assert.equal(row.error, true);
+    assert.match(row.error_string, /at most 255/);
+    assert.match(row.error_string, /rename it on put\.io/);
+    assert.deepEqual(harness.store.listFilesForDownload(transfer.id), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('prepareTransfer forgets files put.io no longer has', async () => {
   const putio = new FakePutio({
     remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],

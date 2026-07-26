@@ -11,6 +11,7 @@ import {
   extractCategory,
   fileExistsWithSize,
   normalizeRelativePath,
+  oversizedFolderSegment,
   resolveInside,
 } from '../src/download/paths.js';
 
@@ -84,13 +85,48 @@ test('a download stages under the put.io name, exactly as put.io named it', () =
   );
 });
 
+test('the staging folder is the put.io name byte for byte', () => {
+  // The *arr computes the import path as `downloadDir + name` from what
+  // torrent-get reports, so anything this rewrites is a folder the *arr cannot
+  // find. Trailing spaces are common in torrent metadata and a backslash is an
+  // ordinary character in a Linux filename — both used to be rewritten.
+  const profile = { download_at: '/downloads' };
+  for (const name of [' Leading.Space', 'Trailing.Space ', 'Show\\Windows.Style', 'Odd  Spacing']) {
+    assert.equal(
+      downloadLocalRoot(profile, { id: 3, name, category: 'tv' }),
+      path.join('/downloads', 'tv', name),
+      name,
+    );
+  }
+});
+
+test('a put.io name too long for the filesystem is refused, not truncated', () => {
+  // Truncating would produce a folder that no longer matches the name
+  // torrent-get reports, which breaks the import silently. Byte length, not
+  // character count: 120 CJK characters are 360 bytes.
+  assert.equal(oversizedFolderSegment('Ordinary.Release.Name'), '');
+  assert.equal(oversizedFolderSegment('x'.repeat(255)), '');
+  assert.equal(oversizedFolderSegment('x'.repeat(256)).length, 256);
+  assert.equal(oversizedFolderSegment('日'.repeat(120)).length, 120);
+  // Only the segment that does not fit is the problem; the path may be long.
+  assert.equal(oversizedFolderSegment(`${'a'.repeat(200)}/${'b'.repeat(200)}`), '');
+});
+
 test('a name that cannot name a folder resolves to nothing at all', () => {
   // Every caller of this either writes into the answer or deletes it, and the
   // category directory holds every other download of that profile.
   const profile = { download_at: '/downloads' };
   assert.equal(downloadLocalRoot(profile, { id: 3, name: '', category: 'tv' }), undefined);
   assert.equal(downloadLocalRoot(profile, { id: 3, name: '.', category: 'tv' }), undefined);
-  assert.equal(downloadLocalRoot(profile, { id: 3, name: '  /  ', category: 'tv' }), undefined);
+  assert.equal(downloadLocalRoot(profile, { id: 3, name: '/', category: 'tv' }), undefined);
+  assert.equal(downloadLocalRoot(profile, { id: 3, name: './.', category: 'tv' }), undefined);
+  // A name made of spaces is odd, but it is a folder, and it is the folder the
+  // *arr will compute from the same name. Only names that spell no segment at
+  // all resolve to nothing.
+  assert.equal(
+    downloadLocalRoot(profile, { id: 3, name: '  ', category: 'tv' }),
+    path.join('/downloads', 'tv', '  '),
+  );
   // Escaping the category directory is refused rather than rewritten into
   // something that stages somewhere else without saying so.
   assert.throws(() => downloadLocalRoot(profile, { id: 3, name: '..', category: 'tv' }), /outside/);

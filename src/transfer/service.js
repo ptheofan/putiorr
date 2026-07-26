@@ -7,6 +7,7 @@ import {
   downloadFolderSegments,
   downloadLocalRoot,
   extractCategory,
+  oversizedFolderSegment,
 } from '../download/paths.js';
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
@@ -327,6 +328,20 @@ export class TransferService {
       throw new Error(
         `Download ${download?.id ?? '(unknown)'} has no usable put.io name (${JSON.stringify(download?.name ?? '')}),`
         + ' so putiorr cannot tell which folder its files belong in',
+      );
+    }
+    // Refused here rather than truncated, and refused before anything is
+    // written. Truncating would give the download a folder that no longer
+    // matches the name torrent-get reports, and the *arr would look for its
+    // files under the untruncated one — a failure with no symptom. Left to the
+    // filesystem it was worse: mkdir failed inside the worker, on every poll,
+    // while the download sat at 50% reporting no error at all.
+    const oversized = oversizedFolderSegment(download?.name);
+    if (oversized) {
+      throw new Error(
+        `Download ${download?.id ?? '(unknown)'} cannot be staged: put.io named it`
+        + ` "${oversized.slice(0, 40)}…", which is ${Buffer.byteLength(oversized, 'utf8')} bytes,`
+        + ' and a folder name can be at most 255; rename it on put.io and it will start',
       );
     }
     return root;
