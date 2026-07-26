@@ -750,8 +750,14 @@ export async function saveAndTestClientSettings({ takeOverCatchAllFrom } = {}) {
     ), 'info');
   } catch (error) {
     setWizardMessage(
+      // The save is what takes the fallback over; the folder check that failed
+      // afterwards did not undo it. Dropping the note here would leave the
+      // other profile silently stripped of the role.
       savedProfile
-        ? withBrowserDomainWarnings(formatClientTestFailureMessage(error, savedProfile), savedProfile)
+        ? withBrowserDomainWarnings(
+          withCatchAllTakeoverNote(formatClientTestFailureMessage(error, savedProfile), savedProfile),
+          savedProfile,
+        )
         : `Profile was not saved.\nReason: ${error.message}`,
       'warn',
     );

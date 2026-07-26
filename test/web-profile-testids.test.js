@@ -49,7 +49,7 @@ test('profile wizard sends Browser sites as typed and surfaces the server respon
   assert.match(profilesJs, /\[message, '', 'Browser sites:', \.\.\.warnings\]\.join\('\\n'\)/);
   assert.match(profilesJs, /upsertProfileState\(withoutCatchAllTakeover\(withoutBrowserDomainWarnings\(savedProfile\)\)\)/);
   assert.match(profilesJs, /withBrowserDomainWarnings\(\s*withCatchAllTakeoverNote\(\s*wizardIsGrabPreset\(\) \? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,\s*savedProfile,\s*\),\s*savedProfile,\s*\)/);
-  assert.match(profilesJs, /withBrowserDomainWarnings\(formatClientTestFailureMessage\(error, savedProfile\), savedProfile\)/);
+  assert.match(profilesJs, /withCatchAllTakeoverNote\(formatClientTestFailureMessage\(error, savedProfile\), savedProfile\),/);
 
   // The card ellipsizes its facts, so the joined list is only fully readable
   // through the title setProfileFact writes.
@@ -452,6 +452,9 @@ test('the wizard offers the fallback takeover on the refusal that names another 
   // And the profile that lost the role is named afterwards, and its own card
   // stops claiming it.
   assert.match(profilesJs, /withCatchAllTakeoverNote\(\s*wizardIsGrabPreset\(\)/);
+  // Named on the save that failed its folder check too: the save is what took
+  // the fallback over, and the check that failed afterwards did not undo it.
+  assert.match(profilesJs, /withCatchAllTakeoverNote\(formatClientTestFailureMessage\(/);
   assert.match(profilesJs, /applyCatchAllTakeoverToState\(savedProfile\)/);
   assert.match(profilesJs, /upsertProfileState\(\{ \.\.\.previous, browser_catch_all: false, browserCatchAll: false \}\)/);
 
