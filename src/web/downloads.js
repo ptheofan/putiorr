@@ -23,6 +23,7 @@ import {
   adoptionNoticeSummary,
   schemaMigrationSummary,
   stagingCollisionSummary,
+  remoteAlreadyGoneNotice,
   schemaMigrationWarning,
   setCheckboxChecked,
   isCheckboxChecked,
@@ -710,9 +711,12 @@ export function closeDeleteConfirm() {
   if (el.deleteConfirmDialog.open) el.deleteConfirmDialog.open = false;
 }
 
+// `!state.pendingDelete` covers the one case the checkboxes cannot: a delete
+// that has already run and left the dialog open to report what put.io answered.
+// Nothing is pending then, and the button must not offer to do it again.
 export function updateDeleteConfirmButtonState() {
   const anyChecked = isCheckboxChecked(el.deleteFromPutio) || isCheckboxChecked(el.deleteLocalFiles);
-  setDisabled(el.deleteConfirmButton, !anyChecked);
+  setDisabled(el.deleteConfirmButton, !anyChecked || !state.pendingDelete);
 }
 
 export function handleDeleteOptionChange(event) {
@@ -723,6 +727,20 @@ export function handleDeleteOptionChange(event) {
 export function setDeleteConfirmMessage(message, tone = 'neutral') {
   el.deleteConfirmMessage.textContent = message;
   el.deleteConfirmMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
+}
+
+// The delete is done either way; what differs is whether it has anything left
+// to say. A delete put.io had already lost the copy of is not the delete the
+// user asked for, so the dialog stays open holding that sentence rather than
+// closing on a silence that reads as "deleted from put.io".
+function finishDelete(results) {
+  const notice = remoteAlreadyGoneNotice(results);
+  if (!notice) {
+    closeDeleteConfirm();
+    return;
+  }
+  state.pendingDelete = undefined;
+  setDeleteConfirmMessage(notice, 'ok');
 }
 
 export async function confirmPendingDelete() {
@@ -736,17 +754,18 @@ export async function confirmPendingDelete() {
 
   try {
     if (pendingDelete.type === 'buckets') {
+      const results = [];
       for (const downloadId of pendingDelete.downloadIds) {
-        await api(`/api/downloads/${downloadId}/delete`, {
+        results.push(await api(`/api/downloads/${downloadId}/delete`, {
           method: 'POST',
           body: JSON.stringify({ deleteRemote, deleteLocal }),
-        });
+        }));
         state.selectedDownloadIds.delete(String(downloadId));
         state.selectedFilesByDownload.delete(String(downloadId));
         state.expandedDownloads.delete(String(downloadId));
         state.fileListScrollTops.delete(String(downloadId));
       }
-      closeDeleteConfirm();
+      finishDelete(results);
       await refreshDownloads();
       requestStateRefresh();
       return;
@@ -777,7 +796,7 @@ export async function confirmPendingDelete() {
       if (selected.size === 0) state.selectedFilesByDownload.delete(String(pendingDelete.downloadId));
     }
 
-    closeDeleteConfirm();
+    finishDelete([result]);
     await refreshDownloads();
     requestStateRefresh();
   } catch (error) {

@@ -41,6 +41,7 @@ import {
   adoptionNoticeSummary,
   schemaMigrationSummary,
   stagingCollisionSummary,
+  remoteAlreadyGoneNotice,
   schemaMigrationWarning,
 } from '../src/web/util.js';
 
@@ -685,4 +686,23 @@ test('an unanswered profile delete dialog cannot serialise into a delete', () =>
   // the whole request.
   const empty = { ...preview, downloads: { total: 0, active: 0, removed: 0, filesOnDisk: 0, localBytes: 0 } };
   assert.deepEqual(profileDeletionRequest(empty, {}), {});
+});
+
+// "putiorr deleted it" and "put.io had already lost it" are different events,
+// and the second one means there is no remote copy left to re-fetch. The delete
+// endpoints report which one happened; without this the dashboard closed the
+// dialog on both and said neither.
+test('a delete put.io had nothing left to do is reported, not folded into success', () => {
+  assert.equal(remoteAlreadyGoneNotice([]), '');
+  assert.equal(remoteAlreadyGoneNotice([{ ok: true }, { ok: true }]), '');
+  assert.equal(remoteAlreadyGoneNotice(undefined), '');
+
+  assert.equal(
+    remoteAlreadyGoneNotice({ remoteAlreadyGone: true }),
+    'Removed from putiorr. put.io no longer had 1 download, so there was nothing to delete there.',
+  );
+  assert.equal(
+    remoteAlreadyGoneNotice([{ remoteAlreadyGone: true }, { ok: true }, { remoteAlreadyGone: true }]),
+    'Removed from putiorr. put.io no longer had 2 downloads, so there was nothing to delete there.',
+  );
 });

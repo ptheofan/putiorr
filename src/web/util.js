@@ -434,6 +434,19 @@ export function profileDeletionRequest(preview, choice = {}) {
   };
 }
 
+// put.io answered 404 rather than deleting anything, so the copy the user was
+// asked about had already gone. Surfaced rather than folded into the silent
+// close a successful delete gets: "putiorr deleted it" and "put.io had already
+// lost it" are different events, and only the second one means there is no
+// remote copy left to fetch the files from again.
+export function remoteAlreadyGoneNotice(results) {
+  const list = Array.isArray(results) ? results : [results];
+  const count = list.filter((result) => result?.remoteAlreadyGone).length;
+  if (count === 0) return '';
+  return `Removed from putiorr. put.io no longer had ${pluralize(count, 'download')},`
+    + ' so there was nothing to delete there.';
+}
+
 // Two downloads put.io named the same thing, under one profile and category.
 // Only the older one stages; the other waits, and would otherwise look like a
 // download that simply stopped.
