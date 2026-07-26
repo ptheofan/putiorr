@@ -150,8 +150,13 @@
   align-content: start;
 }
 
+/* Cards stretch to their row so every card in a row ends level, whatever
+   mix of facts each profile has. `align-content` keeps the rows themselves
+   from stretching to fill leftover column height, which is what the panel
+   rule above is guarding against — a different axis from `align-items`. */
 .profiles-list {
-  align-items: start;
+  align-items: stretch;
+  align-content: start;
 }
 
 .topbar {
