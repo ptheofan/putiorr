@@ -153,6 +153,7 @@ wa-dialog::part(dialog) {
 .message-box[data-tone="error"] { border-color: rgba(244, 115, 115, 0.3); background: rgba(244, 115, 115, 0.1); }
 .message-box .message { color: var(--text); }
 .message-box .icon-button { background: rgba(255, 255, 255, 0.06); }
+.schema-migration-summary-row .icon-button { background: rgba(255, 255, 255, 0.06); }
 
 .oauth-panel { background: var(--surface); border-color: var(--line); }
 .oauth-panel a { color: var(--accent-strong); }

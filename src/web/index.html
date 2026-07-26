@@ -150,7 +150,10 @@
           <div id="downloadsList" class="downloads-list"></div>
 
           <div id="schemaMigrationNotice" class="schema-migration-notice" data-testid="schema-migration-notice" hidden>
-            <p id="schemaMigrationSummary" data-testid="schema-migration-summary"></p>
+            <div id="schemaMigrationSummaryRow" class="schema-migration-summary-row" hidden>
+              <p id="schemaMigrationSummary" data-testid="schema-migration-summary"></p>
+              <button id="schemaMigrationSummaryDismiss" class="icon-button" type="button" aria-label="Dismiss the database upgrade summary" data-testid="schema-migration-summary-dismiss">×</button>
+            </div>
             <p id="schemaMigrationWarning" class="schema-migration-warning" data-testid="schema-migration-warning" hidden></p>
           </div>
 

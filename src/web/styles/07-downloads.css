@@ -622,6 +622,26 @@
   margin: 0;
 }
 
+/* The summary can be put away; the warning below it cannot, so only this row
+   carries a control. */
+.schema-migration-summary-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+}
+
+.schema-migration-summary-row[hidden] {
+  display: none;
+}
+
+.schema-migration-summary-row .icon-button {
+  min-height: 26px;
+  padding: 2px 9px;
+  font-size: 15px;
+  line-height: 1;
+}
+
 .schema-migration-warning {
   color: var(--danger);
   font-weight: 600;

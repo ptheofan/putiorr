@@ -62,6 +62,7 @@ import {
   handleDeleteOptionChange,
   updateDeleteConfirmButtonState,
   applyDownloadsPayload,
+  dismissSchemaMigrationSummary,
 } from './downloads.js';
 import { initTheme } from './theme.js';
 import { initRouter } from './router.js';
@@ -346,6 +347,11 @@ el.downloadsSelectAll.addEventListener('change', (event) => {
   setAllDownloadSelection(event.target.checked);
 });
 el.deleteSelectedDownloadsButton.addEventListener('click', openSelectedDownloadsDelete);
+// The upgrade summary only: it is a finished fact with nothing to act on. The
+// quarantine warning under it is work still waiting and has no control.
+el.schemaMigrationSummaryDismiss.addEventListener('click', () => {
+  dismissSchemaMigrationSummary();
+});
 el.deleteFromPutio.addEventListener('change', handleDeleteOptionChange);
 el.deleteLocalFiles.addEventListener('change', handleDeleteOptionChange);
 el.profileDeleteForm.addEventListener('submit', (event) => {

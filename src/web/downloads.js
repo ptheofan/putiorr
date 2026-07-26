@@ -21,10 +21,9 @@ import {
   setHidden,
   placeChildAt,
   adoptionNoticeSummary,
-  schemaMigrationSummary,
+  schemaMigrationNoticeView,
   stagingCollisionSummary,
   remoteAlreadyGoneNotice,
-  schemaMigrationWarning,
   setCheckboxChecked,
   isCheckboxChecked,
   setDisabled,
@@ -59,13 +58,36 @@ const ORPHAN_REASON_LABELS = {
 
 export function renderSchemaMigrations() {
   const migrations = state.settings?.schemaMigrations;
-  const summary = schemaMigrationSummary(migrations);
-  const warning = schemaMigrationWarning(migrations);
-  setHidden(el.schemaMigrationNotice, !summary && !warning);
+  const { summary, warning, noticeVisible } = schemaMigrationNoticeView(migrations);
+  setHidden(el.schemaMigrationNotice, !noticeVisible);
+  setHidden(el.schemaMigrationSummaryRow, !summary);
   setText(el.schemaMigrationSummary, summary);
   setHidden(el.schemaMigrationSummary, !summary);
   setText(el.schemaMigrationWarning, warning);
   setHidden(el.schemaMigrationWarning, !warning);
+}
+
+// Only the summary. The warning beside it is downloads the user cannot see
+// until they act, so it has no control at all — and the panel stays up for it
+// even once the summary is gone.
+export async function dismissSchemaMigrationSummary() {
+  const dismiss = el.schemaMigrationSummaryDismiss;
+  const key = state.settings?.schemaMigrations?.summaryKey;
+  setDisabled(dismiss, true);
+  try {
+    state.settings = await api('/api/schema-migrations/summary/dismiss', {
+      method: 'POST',
+      body: JSON.stringify(key ? { key } : {}),
+    });
+    dismiss.removeAttribute('title');
+    renderSchemaMigrations();
+  } catch (error) {
+    // The summary is still on screen because the server still has it, so the
+    // reason it is goes on the control that failed rather than nowhere.
+    setAttribute(dismiss, 'title', error.message);
+  } finally {
+    setDisabled(dismiss, false);
+  }
 }
 
 // put.io transfers the last poll could not attribute to one RR profile. The
