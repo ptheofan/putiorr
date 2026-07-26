@@ -315,3 +315,15 @@ test('the profile delete dialog offers move, remove, and the two delete options'
   assert.match(profilesJs, /profileDeletionRequest\(pending\.preview, profileDeleteChoice\(\)\)/);
   assert.match(appJs, /el\.profileDeleteForm\.addEventListener\('submit'/);
 });
+
+// A download moved to a profile that auto-removes completed downloads leaves
+// putiorr the moment it finishes, taking the *arr's queue item with it before
+// the import runs. The picker names the preset and the confirmation names the
+// consequence, so the choice is not offered blind.
+test('the move picker names the preset it would hand the downloads to', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+  const utilJs = readFileSync(new URL('../src/web/util.js', import.meta.url), 'utf8');
+
+  assert.match(profilesJs, /option\.textContent = `\$\{target\.name\} \(\$\{profileType\(target\.type\)\.label\}\)`/);
+  assert.match(utilJs, /target\.autoRemoveCompleted && !preview\?\.profile\?\.autoRemoveCompleted/);
+});

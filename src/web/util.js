@@ -369,8 +369,18 @@ export function profileDeletionOutcome(preview, choice = {}) {
     const target = (preview?.reassignTargets ?? [])
       .find((candidate) => String(candidate.id) === String(choice.reassignTo));
     if (!target) return `Choose the RR profile that takes these ${downloads} over.`;
+    // Not about the preset — a Prowlarr profile and a hand-toggled one behave
+    // the same way — so the flag itself is what is reported. A target that
+    // auto-removes takes every one of these out of putiorr the moment it
+    // finishes downloading, which for an *arr means the queue item disappears
+    // before the import runs. The files survive; the import does not.
+    const autoRemoves = target.autoRemoveCompleted && !preview?.profile?.autoRemoveCompleted
+      ? ` ${target.name} removes completed downloads from putiorr automatically, so these will leave the`
+        + ' list as soon as they finish — before your RR software has imported them.'
+      : '';
     return `Moves ${downloads} to ${target.name}, then deletes RR profile ${name}.`
-      + ' Nothing is removed from put.io and no files are deleted.';
+      + ' Nothing is removed from put.io and no files are deleted.'
+      + autoRemoves;
   }
 
   if (choice.mode !== 'delete') return `Choose what happens to these ${downloads}.`;

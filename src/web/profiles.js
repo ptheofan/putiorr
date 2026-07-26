@@ -737,7 +737,10 @@ export function renderProfileDeleteTargets(preview) {
   for (const target of targets) {
     const option = document.createElement('wa-option');
     option.value = String(target.id);
-    option.textContent = target.name;
+    // The preset is named here because it changes what happens to a download
+    // moved there — a Putiorr Grab profile auto-removes completed downloads by
+    // default — and "Browser" alone gives the user nothing to go on.
+    option.textContent = `${target.name} (${profileType(target.type).label})`;
     el.profileDeleteTarget.appendChild(option);
   }
   el.profileDeleteTarget.value = targets.length > 0 ? String(targets[0].id) : '';

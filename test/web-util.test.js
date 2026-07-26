@@ -570,7 +570,7 @@ test('the profile deletion prompt states what each answer would do, in counts', 
   const preview = {
     profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
     downloads: { total: 4, active: 3, removed: 1, filesOnDisk: 9, localBytes: 2048, unreadableFolders: 0 },
-    reassignTargets: [{ id: 1, name: 'Sonarr' }],
+    reassignTargets: [{ id: 1, name: 'Sonarr', type: 'sonarr', autoRemoveCompleted: false }],
   };
 
   const summary = profileDeletionSummary(preview);
@@ -587,6 +587,20 @@ test('the profile deletion prompt states what each answer would do, in counts', 
     profileDeletionOutcome(preview, { mode: 'move', reassignTo: 1 }),
     /Nothing is removed from put\.io and no files are deleted/,
   );
+  // A target that auto-removes completed downloads is a different outcome, and
+  // the picker offers it alongside the others: anything moved there leaves
+  // putiorr the moment it finishes, so an *arr's queue item vanishes before it
+  // has imported. The preset does not decide this — a Prowlarr profile and a
+  // hand-toggled one do the same thing — so the flag is what is checked.
+  const autoRemoving = {
+    ...preview,
+    reassignTargets: [{ id: 2, name: 'Browser', type: 'grab', autoRemoveCompleted: true }],
+  };
+  const moved = profileDeletionOutcome(autoRemoving, { mode: 'move', reassignTo: 2 });
+  assert.match(moved, /Moves 4 downloads to Browser/);
+  assert.match(moved, /removes completed downloads from putiorr/);
+  assert.match(moved, /before your RR software has imported/);
+
   // An unanswered dialog describes nothing: the Delete button stays disabled
   // until it can name the outcome.
   assert.equal(profileDeletionOutcome(preview, {}), 'Choose what happens to these 4 downloads.');

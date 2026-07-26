@@ -3443,6 +3443,12 @@ test('the deletion preview counts what each option would touch', async (t) => {
     preview.body.reassignTargets.map((target) => target.slug),
     [harness.store.findProfileBySlug('default').slug],
   );
+  // What each target would do to a download handed to it. A profile that
+  // auto-removes takes it out of putiorr as soon as it finishes, so the
+  // dialog has to be able to say so.
+  assert.equal(preview.body.reassignTargets[0].autoRemoveCompleted, false);
+  assert.equal(preview.body.reassignTargets[0].type, harness.store.findProfileBySlug('default').type);
+  assert.equal(preview.body.profile.autoRemoveCompleted, false);
 });
 
 test('a profile cannot take over its own downloads on the way out', async (t) => {

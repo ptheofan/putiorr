@@ -1220,7 +1220,13 @@ export class TransferService {
       if (measured.unreadable) unreadableFolders += 1;
     }
     return {
-      profile: { id: profile.id, name: profile.name, slug: profile.slug, downloadAt: profile.download_at },
+      profile: {
+        id: profile.id,
+        name: profile.name,
+        slug: profile.slug,
+        downloadAt: profile.download_at,
+        autoRemoveCompleted: profile.auto_remove_completed,
+      },
       downloads: {
         total: downloads.length,
         active: downloads.filter((download) => !download.removed_at).length,
@@ -1234,6 +1240,10 @@ export class TransferService {
         name: target.name,
         slug: target.slug,
         type: target.type,
+        // The picker names the preset, and the confirmation names what
+        // auto-remove will do to a download moved here: it leaves putiorr as
+        // soon as it finishes, taking the *arr's queue item with it.
+        autoRemoveCompleted: target.auto_remove_completed,
       })),
     };
   }
