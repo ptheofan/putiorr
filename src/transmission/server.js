@@ -777,9 +777,29 @@ export class TransmissionRpcServer {
         return;
       }
 
+      // What the confirmation states before anything irreversible is offered.
+      // Read fresh rather than counted off the dashboard's list: tombstoned
+      // downloads are not in it, and they still hold put.io transfers, still
+      // hold files, and still block the delete.
+      const profilePreviewMatch = requestPath.match(/^\/api\/profiles\/(\d+)\/deletion-preview$/);
+      if (profilePreviewMatch && method === 'GET') {
+        jsonResponse(res, 200, this.service.profileDeletionPreview(Number(profilePreviewMatch[1])), this.sessionId);
+        return;
+      }
+
       if (profileMatch && method === 'DELETE') {
-        this.service.store.deleteProfile(Number(profileMatch[1]));
-        jsonResponse(res, 200, { ok: true }, this.sessionId);
+        const body = await readJsonBody(req);
+        // Neither delete flag defaults to true (design decision 5), and the
+        // third answer — move these downloads to another profile — is a
+        // different outcome for the same rows, so it is sent on its own.
+        const result = await this.service.deleteProfileWithDownloads(Number(profileMatch[1]), {
+          reassignTo: normalizeOptionalId(body.reassignTo ?? body.reassign_to),
+          deleteDownloads: body.deleteDownloads === true,
+          deleteRemote: body.deleteRemote === true,
+          deleteLocal: body.deleteLocal === true,
+        });
+        this.scheduleWebSocketDownloadsBroadcast('profiles:delete');
+        jsonResponse(res, 200, result, this.sessionId);
         return;
       }
 

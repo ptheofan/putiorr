@@ -1731,6 +1731,26 @@ export class StateStore {
       .map(normalizeDownloadRow);
   }
 
+  // Everything one profile owns, tombstones included. Deleting a profile has to
+  // account for every row that references it, and a tombstoned row references
+  // it just as hard: ON DELETE RESTRICT does not care that the dashboard has
+  // stopped showing it.
+  listDownloadsForProfile(profileId) {
+    return this.db.prepare('SELECT * FROM downloads WHERE profile_id = ? ORDER BY id ASC')
+      .all(profileId)
+      .map(normalizeDownloadRow);
+  }
+
+  // Ownership is resolved once and frozen (design rule 4), and this is the one
+  // deliberate exception: the user is answering "who owns these now?" for a
+  // profile that is about to stop existing. Nothing infers it.
+  reassignDownloads(fromProfileId, toProfileId) {
+    const result = this.db.prepare(`
+      UPDATE downloads SET profile_id = ?, updated_at = ? WHERE profile_id = ?
+    `).run(toProfileId, nowIso(), fromProfileId);
+    return Number(result.changes ?? 0);
+  }
+
   listRemovedDownloads() {
     return this.db.prepare('SELECT * FROM downloads WHERE removed_at IS NOT NULL ORDER BY id ASC')
       .all()

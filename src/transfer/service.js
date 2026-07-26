@@ -97,6 +97,10 @@ export function disabledProfileMessage(profile) {
     + ' Its existing downloads are unaffected';
 }
 
+function pluralizeDownloads(count) {
+  return `${count} download${count === 1 ? '' : 's'}`;
+}
+
 // A Transmission id may be a download id or a torrent hash. Only the first
 // identifies exactly one download: the hash is informational and not unique.
 function isDownloadId(identifier) {
@@ -1148,6 +1152,167 @@ export class TransferService {
       ? (downloadedSize / size) * 0.5
       : file.status === 'complete' ? 0.5 : 0;
     return clampUnit(remoteProgress + localProgress);
+  }
+
+  // What deleting this profile would touch, in the counts the confirmation has
+  // to state before the user commits. Read from the database rather than from
+  // whatever the dashboard happens to be showing: tombstoned downloads are not
+  // in the working list, still hold their put.io transfer and their files, and
+  // still block the profile's deletion.
+  profileDeletionPreview(profileId) {
+    const profile = this.store.findProfileById(profileId);
+    if (!profile) throw new Error('Profile not found');
+    const downloads = this.store.listDownloadsForProfile(profile.id);
+    let localBytes = 0;
+    let filesOnDisk = 0;
+    for (const download of downloads) {
+      const stats = this.store.getDownloadFileStats(download.id);
+      localBytes += Number(stats.downloaded_size ?? 0);
+      filesOnDisk += Number(stats.completed_files ?? 0);
+    }
+    return {
+      profile: { id: profile.id, name: profile.name, slug: profile.slug, downloadAt: profile.download_at },
+      downloads: {
+        total: downloads.length,
+        active: downloads.filter((download) => !download.removed_at).length,
+        removed: downloads.filter((download) => download.removed_at).length,
+        filesOnDisk,
+        localBytes,
+      },
+      reassignTargets: this.reassignTargetsFor(profile).map((target) => ({
+        id: target.id,
+        name: target.name,
+        slug: target.slug,
+        type: target.type,
+      })),
+    };
+  }
+
+  // Only a profile that stages into the same folder can take these downloads.
+  // A download's files live at `<download_at>/<category>/<frozen folder>`, and
+  // nothing here moves anything on disk — so handing a row to a profile with a
+  // different download_at points putiorr at an empty directory, and a completed
+  // download whose files are missing is deleted and cancelled on put.io.
+  // Freezing the staging folder made a put.io rename safe; it says nothing
+  // about a change of owner.
+  reassignTargetsFor(profile) {
+    const from = path.resolve(String(profile.download_at ?? ''));
+    return this.store.listProfiles({ includeDisabled: true }).filter((candidate) => (
+      candidate.id !== profile.id
+      && candidate.download_at
+      && path.resolve(candidate.download_at) === from
+    ));
+  }
+
+  // Design decision 5, plus the project owner's third answer. `ON DELETE
+  // RESTRICT` means the profile cannot go while a download references it, so
+  // this performs the answer the user gave and then deletes the profile —
+  // reporting what it did rather than leaving them to infer it.
+  //
+  // The three answers are exclusive per download and the endpoint takes one
+  // intent, never a mix: moving a download and deleting it are different
+  // outcomes for the same row, and a request asking for both has not said
+  // which one it wants.
+  async deleteProfileWithDownloads(profileId, {
+    reassignTo = null,
+    deleteDownloads = false,
+    deleteRemote = false,
+    deleteLocal = false,
+  } = {}) {
+    const profile = this.store.findProfileById(profileId);
+    if (!profile) throw new Error('Profile not found');
+    const downloads = this.store.listDownloadsForProfile(profile.id);
+    const report = {
+      total: downloads.length,
+      reassigned: 0,
+      deleted: 0,
+      remoteDeleted: 0,
+      localDeleted: 0,
+    };
+
+    if (reassignTo != null && (deleteDownloads || deleteRemote || deleteLocal)) {
+      throw new Error(
+        `RR profile ${profile.name}'s downloads cannot both be moved and deleted;`
+        + ' pick one and send it again',
+      );
+    }
+
+    if (downloads.length > 0 && reassignTo == null && !deleteDownloads) {
+      // Not a silent removal and not a bare foreign-key error: the user is told
+      // exactly what stands in the way and what the two answers are.
+      throw new Error(
+        `RR profile ${profile.name} still owns ${pluralizeDownloads(downloads.length)}.`
+        + ' Move them to another RR profile, or confirm they are to be removed from putiorr'
+        + ' — deleting the profile cannot leave them without an owner',
+      );
+    }
+
+    if (reassignTo != null) {
+      const target = this.store.findProfileById(reassignTo);
+      if (!target) throw new Error('Profile not found');
+      if (target.id === profile.id) {
+        throw new Error(`RR profile ${profile.name} cannot take over its own downloads`);
+      }
+      if (!this.reassignTargetsFor(profile).some((candidate) => candidate.id === target.id)) {
+        throw new Error(
+          `RR profile ${target.name} downloads into ${target.download_at || '(nothing)'},`
+          + ` not ${profile.download_at || '(nothing)'}, so moving these downloads to it would leave`
+          + ' their files where they are and point putiorr somewhere else — a finished download whose'
+          + ' files are missing is deleted and cancelled on put.io. Move the files first, or pick a'
+          + ` profile that downloads into ${profile.download_at || '(nothing)'}`,
+        );
+      }
+      report.reassigned = this.store.reassignDownloads(profile.id, target.id);
+      this.store.deleteProfile(profile.id);
+      logger.info('RR profile deleted, its downloads moved', {
+        profile: profile.slug,
+        to: target.slug,
+        reassigned: report.reassigned,
+      });
+      return { ok: true, profile: { id: profile.id, name: profile.name }, downloads: report };
+    }
+
+    for (const download of downloads) {
+      // Resolved and cleared for deletion before put.io is touched, the same
+      // order every other delete path uses: a refusal that arrives after the
+      // transfer is cancelled has destroyed the only remaining copy.
+      let localTarget;
+      try {
+        localTarget = deleteLocal
+          ? this.assertDeletable(this.requireStagingRoot(profile, download))
+          : undefined;
+        if (deleteRemote) {
+          await this.removeRemoteTransfer(download, { throwOnError: true });
+          report.remoteDeleted += 1;
+        }
+        if (deleteLocal) {
+          await deleteLocalData(localTarget, this.ownershipCheck());
+          report.localDeleted += 1;
+        }
+      } catch (error) {
+        // Each download is its own irreversible sequence, so there is no
+        // transaction to roll back to. The count already done is part of the
+        // message: the user has to know which half of the list is gone before
+        // they retry.
+        throw new Error(
+          `Deleted ${pluralizeDownloads(report.deleted)} of ${downloads.length} before stopping at`
+          + ` download ${download.id} (${download.name}): ${error.message}`,
+        );
+      }
+      // The row itself always goes. profile_id is NOT NULL, so there is no
+      // owner left to keep it under, and a tombstone would only block the
+      // profile's deletion. A put.io transfer the user chose to keep shows up
+      // in the dashboard's adoption notice on the next poll instead.
+      this.store.deleteDownload(download.id);
+      report.deleted += 1;
+    }
+
+    this.store.deleteProfile(profile.id);
+    logger.info('RR profile deleted with its downloads', {
+      profile: profile.slug,
+      ...report,
+    });
+    return { ok: true, profile: { id: profile.id, name: profile.name }, downloads: report };
   }
 
   // The needs-attention list. These are legacy rows the schema collapse could

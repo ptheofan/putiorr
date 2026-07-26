@@ -3186,3 +3186,288 @@ test('a put.io transfer in a disabled profile folder is not adopted, and the das
   assert.deepEqual(notice.profiles, [seeded.name]);
   assert.equal(notice.transferCount, 1);
 });
+
+// Design decision 5: deleting a profile prompts for what happens to its
+// downloads. The project owner added a third answer to the two flags — move
+// them to another profile — so the endpoint takes one intent, never a mix.
+async function deleteProfile(harness, id, body) {
+  const response = await fetch(harness.url.replace('/transmission/rpc', `/api/profiles/${id}`), {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+async function profileDeletionPreview(harness, id) {
+  const response = await fetch(
+    harness.url.replace('/transmission/rpc', `/api/profiles/${id}/deletion-preview`),
+  );
+  return { status: response.status, body: await response.json() };
+}
+
+function stageProfileWithDownload(harness, overrides = {}) {
+  const profile = harness.store.createProfile({
+    name: 'Radarr',
+    type: 'radarr',
+    slug: 'radarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/radarr/transmission/rpc',
+    enabled: true,
+    ...overrides,
+  });
+  const download = harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 909,
+    putio_file_id: 808,
+    save_parent_id: 42,
+    hash: 'ownedhash',
+    name: 'Owned.Release',
+    category: 'movies',
+    lifecycle: 'downloading',
+  });
+  return { profile, download };
+}
+
+test('deleting a profile that still owns downloads refuses until the caller says what happens to them', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile } = stageProfileWithDownload(harness);
+
+  const refused = await deleteProfile(harness, profile.id, {});
+
+  assert.equal(refused.status, 400);
+  // Counts, not vagueness: the refusal is also what the dialog reads back.
+  assert.match(refused.body.error, /still owns 1 download/);
+  assert.ok(harness.store.findProfileById(profile.id));
+  assert.deepEqual(harness.putio.deletedTransfers, []);
+});
+
+test('a profile with no downloads is deleted without a body', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile } = stageProfileWithDownload(harness);
+  harness.store.deleteDownload(harness.store.listActiveDownloads({ profileId: profile.id })[0].id);
+
+  const deleted = await deleteProfile(harness, profile.id);
+
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.downloads.total, 0);
+  assert.equal(harness.store.findProfileById(profile.id), undefined);
+});
+
+test('moving a profile downloads to another profile deletes neither the files nor the put.io copies', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  const target = harness.store.findProfileBySlug('default');
+
+  const moved = await deleteProfile(harness, profile.id, { reassignTo: target.id });
+
+  assert.equal(moved.status, 200);
+  assert.equal(moved.body.downloads.reassigned, 1);
+  assert.equal(moved.body.downloads.deleted, 0);
+  assert.equal(harness.store.findDownloadById(download.id).profile_id, target.id);
+  assert.equal(harness.store.findProfileById(profile.id), undefined);
+  assert.deepEqual(harness.putio.deletedTransfers, []);
+  assert.deepEqual(harness.putio.deletedFiles, []);
+});
+
+test('a download cannot be moved to a profile that stages somewhere else', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  const elsewhere = harness.store.createProfile({
+    name: 'Lidarr',
+    type: 'lidarr',
+    slug: 'lidarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: path.join(harness.config.targetDir, 'elsewhere'),
+    rpc_path: '/lidarr/transmission/rpc',
+    enabled: true,
+  });
+
+  // The staging folder is frozen against a put.io rename, not against a change
+  // of owner: the path is still <download_at>/<category>/<folder>. Moving the
+  // row without moving the files points putiorr at an empty directory, and a
+  // completed download whose files are missing is cancelled on put.io and
+  // re-fetched — the exact loss freezing the folder existed to prevent.
+  const refused = await deleteProfile(harness, profile.id, { reassignTo: elsewhere.id });
+
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /downloads into/);
+  assert.match(refused.body.error, /elsewhere/);
+  assert.equal(harness.store.findDownloadById(download.id).profile_id, profile.id);
+  assert.ok(harness.store.findProfileById(profile.id));
+});
+
+test('moving and deleting a profile downloads are refused together', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  const target = harness.store.findProfileBySlug('default');
+
+  const refused = await deleteProfile(harness, profile.id, {
+    reassignTo: target.id,
+    deleteDownloads: true,
+    deleteRemote: true,
+  });
+
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /cannot both be moved and deleted/);
+  assert.equal(harness.store.findDownloadById(download.id).profile_id, profile.id);
+  assert.deepEqual(harness.putio.deletedTransfers, []);
+});
+
+test('deleting a profile downloads takes put.io and the local files only when asked', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  const root = path.join(harness.config.targetDir, 'movies', 'Owned.Release');
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, 'owned.mkv'), 'data');
+
+  const deleted = await deleteProfile(harness, profile.id, {
+    deleteDownloads: true,
+    deleteRemote: true,
+    deleteLocal: true,
+  });
+
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.downloads.deleted, 1);
+  assert.equal(deleted.body.downloads.remoteDeleted, 1);
+  assert.equal(deleted.body.downloads.localDeleted, 1);
+  assert.deepEqual(harness.putio.deletedTransfers, [909]);
+  assert.equal(harness.store.findDownloadById(download.id), undefined);
+  assert.equal(harness.store.findProfileById(profile.id), undefined);
+  await assert.rejects(stat(root));
+});
+
+test('deleting a profile with neither flag keeps put.io and the disk untouched', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  const root = path.join(harness.config.targetDir, 'movies', 'Owned.Release');
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, 'owned.mkv'), 'data');
+
+  const deleted = await deleteProfile(harness, profile.id, { deleteDownloads: true });
+
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.downloads.deleted, 1);
+  assert.equal(deleted.body.downloads.remoteDeleted, 0);
+  assert.equal(deleted.body.downloads.localDeleted, 0);
+  // The row has to go — profile_id is NOT NULL ON DELETE RESTRICT, so there is
+  // no owner left to keep it under — but nothing outside putiorr is touched.
+  assert.equal(harness.store.findDownloadById(download.id), undefined);
+  assert.deepEqual(harness.putio.deletedTransfers, []);
+  assert.ok(await stat(path.join(root, 'owned.mkv')));
+});
+
+test('the deletion preview counts what each option would touch', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  harness.store.upsertDownloadFile({
+    download_id: download.id,
+    putio_file_id: 7001,
+    relative_path: 'owned.mkv',
+    size: 400,
+  });
+  harness.store.updateDownloadFile(
+    harness.store.listFilesForDownload(download.id)[0].id,
+    { downloaded_bytes: 400, status: 'complete' },
+  );
+  const tombstoned = harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 910,
+    hash: 'tombstonedhash',
+    name: 'Tombstoned.Release',
+    category: 'movies',
+  });
+  harness.store.markDownloadRemoved(tombstoned.id);
+
+  const preview = await profileDeletionPreview(harness, profile.id);
+
+  assert.equal(preview.status, 200);
+  assert.equal(preview.body.profile.name, 'Radarr');
+  // A tombstoned row still holds its put.io transfer and its files, and still
+  // blocks the profile delete, so the count the dialog states includes it.
+  assert.equal(preview.body.downloads.total, 2);
+  assert.equal(preview.body.downloads.active, 1);
+  assert.equal(preview.body.downloads.removed, 1);
+  assert.equal(preview.body.downloads.localBytes, 400);
+  // Only profiles staging into the same folder can take these downloads: the
+  // files do not move, so anything else would strand them.
+  assert.deepEqual(
+    preview.body.reassignTargets.map((target) => target.slug),
+    [harness.store.findProfileBySlug('default').slug],
+  );
+});
+
+test('a profile cannot take over its own downloads on the way out', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+
+  const refused = await deleteProfile(harness, profile.id, { reassignTo: profile.id });
+
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /cannot take over its own downloads/);
+  assert.equal(harness.store.findDownloadById(download.id).profile_id, profile.id);
+});
+
+test('a partial profile delete names how much of the list is already gone', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile } = stageProfileWithDownload(harness);
+  // A name that cannot name a folder of its own: the second download refuses
+  // its local half, after the first has already been deleted for good.
+  harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 911,
+    hash: 'namelesshash',
+    name: '.',
+    category: 'movies',
+  });
+
+  const stopped = await deleteProfile(harness, profile.id, {
+    deleteDownloads: true,
+    deleteLocal: true,
+  });
+
+  assert.equal(stopped.status, 400);
+  assert.match(stopped.body.error, /Deleted 1 download of 2 before stopping at download/);
+  assert.ok(harness.store.findProfileById(profile.id));
+});
