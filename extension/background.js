@@ -232,6 +232,23 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'sync' && changes.profiles) queueRebuild();
 });
 
+// A right-click grab happens entirely in here, so the page it came from learns
+// nothing about it unless it is told. The id ties the acknowledgement to the
+// answer, so the second resolves the first in place.
+let feedbackSeq = 0;
+
+async function drawOnTab(tabId, id, result) {
+  if (!tabId) return;
+  try {
+    await chrome.tabs.sendMessage(tabId, { kind: 'grab-feedback', id, result });
+  } catch {
+    // Every tab open before the extension loaded has no content script, and a
+    // page can navigate mid-grab. Neither is a problem with the grab, and
+    // letting this escape would report a grab that worked as a failure. The
+    // notification is the channel that is left, which is why it stays.
+  }
+}
+
 function menuErrorMessage(error) {
   const message = error?.message ?? '';
   // The content script is missing on tabs that were open when the extension
@@ -249,6 +266,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const profileId = Number(String(info.menuItemId).slice(MENU_PREFIX.length));
   const linkUrl = info.linkUrl ?? '';
   const pageUrl = tab?.url ?? info.pageUrl ?? '';
+  const feedbackId = ++feedbackSeq;
+  // Before anything else: putiorr waits on put.io, and the menu has already
+  // closed over a page that shows no sign of what was asked of it.
+  await drawOnTab(tab?.id, feedbackId, undefined);
   // Every grab path stays inside this try: an escaping rejection would be an
   // unhandled promise in an event listener, leaving the click with no feedback.
   try {
@@ -256,7 +277,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     // tab to fetch the latter would upload the handler page's HTML to put.io.
     const magnet = magnetFromLink(linkUrl);
     if (magnet) {
-      await handleGrab({ magnet, pageUrl, profileId });
+      await drawOnTab(tab?.id, feedbackId, await handleGrab({ magnet, pageUrl, profileId }));
       return;
     }
     if (!tab?.id) {
@@ -266,13 +287,17 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     // Fetch the .torrent from the page context so tracker session cookies apply.
     const fetched = await chrome.tabs.sendMessage(tab.id, { kind: 'fetch-link', url: linkUrl });
     if (!fetched?.ok) throw new Error(fetched?.error ?? 'failed to fetch the link');
-    await handleGrab({
+    await drawOnTab(tab.id, feedbackId, await handleGrab({
       torrentBase64: fetched.torrentBase64,
       filename: fetched.filename,
       pageUrl,
       profileId,
-    });
+    }));
   } catch (error) {
-    notify('putiorr grab failed', menuErrorMessage(error));
+    const message = menuErrorMessage(error);
+    notify('putiorr grab failed', message);
+    // The same words on the page, so an acknowledgement that is still up
+    // resolves into the reason rather than sitting there for its full life.
+    await drawOnTab(tab?.id, feedbackId, { ok: false, error: message });
   }
 });

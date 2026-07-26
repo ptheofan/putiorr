@@ -31,6 +31,7 @@ function onlyRequested(defaults, stored) {
 function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, sendMessage } = {}) {
   const log = [];
   const notifications = [];
+  const tabMessages = [];
   const listeners = {};
   const values = syncSequence ?? [sync];
   let getCall = 0;
@@ -73,11 +74,18 @@ function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, se
       onClicked: register('notificationClicked'),
     },
     tabs: {
-      sendMessage: sendMessage ?? (async () => ({ ok: false, error: 'no content script stub' })),
+      // Two kinds of message go to the tab now — the .torrent fetch the menu
+      // asks the page to make, and the feedback the page draws — so every one
+      // is recorded and the stub under test still sees them all.
+      sendMessage: async (tabId, message) => {
+        tabMessages.push({ tabId, ...message });
+        if (sendMessage) return sendMessage(tabId, message);
+        return { ok: false, error: 'no content script stub' };
+      },
     },
   };
 
-  return { chrome, log, notifications, listeners };
+  return { chrome, log, notifications, tabMessages, listeners };
 }
 
 async function loadWorker(options = {}) {
@@ -291,8 +299,8 @@ test('a right-clicked handler link is grabbed as its magnet, without a page fetc
   let fetchLinks = 0;
   const harness = await loadWorker({
     sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
-    sendMessage: async () => {
-      fetchLinks += 1;
+    sendMessage: async (tabId, message) => {
+      if (message.kind === 'fetch-link') fetchLinks += 1;
       return { ok: false, error: 'the menu must not have asked for this' };
     },
     fetch: async (url, init) => {
@@ -324,6 +332,7 @@ test('a right-clicked link with no magnet in it is still fetched from the page',
   const harness = await loadWorker({
     sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
     sendMessage: async (tabId, message) => {
+      if (message.kind !== 'fetch-link') return { ok: true };
       requested.push(message.url);
       return { ok: true, torrentBase64: 'ZGU=', filename: 'download.php.torrent' };
     },
@@ -342,6 +351,123 @@ test('a right-clicked link with no magnet in it is still fetched from the page',
   assert.deepEqual(requested, ['https://tracker.x.example/download.php?id=5']);
   assert.equal(body.torrentBase64, 'ZGU=');
   assert.equal(body.magnet, undefined);
+});
+
+test('a right-click grab is drawn on the page it was made from', async () => {
+  // The menu grab runs entirely here, so the page hears nothing unless the
+  // worker tells it — and it is the same wait on the same page as a click.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: { name: 'Example.S01E01' } }),
+    }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 12, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  const feedback = harness.tabMessages.filter((message) => message.kind === 'grab-feedback');
+  assert.equal(feedback.length, 2, 'the pick is acknowledged, then answered');
+  assert.deepEqual(feedback.map((message) => message.tabId), [12, 12]);
+  // The same id on both, so the answer resolves the acknowledgement in place
+  // rather than stacking a second toast on top of it.
+  assert.equal(feedback[0].id, feedback[1].id);
+  assert.notEqual(feedback[0].id, undefined);
+  assert.equal(feedback[0].result, undefined, 'nothing is claimed before putiorr answers');
+  assert.deepEqual(feedback[1].result, { ok: true, profileName: 'TV', transferName: 'Example.S01E01' });
+  // The notification stays: it is the only channel when the tab is behind
+  // another window.
+  assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
+});
+
+test('a menu grab into a tab with no content script is not reported as failed', async () => {
+  // Every tab open before the extension loaded is one of these. Letting that
+  // rejection escape would put "Reload the page, then try again" on screen
+  // under a grab that had already worked.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: { name: 'Example' } }),
+    }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
+});
+
+test('a menu grab that fails reaches the page with the same words as the notification', async () => {
+  const refusal = 'No Putiorr Grab profile claims tracker.x.example and none is set to take everything else';
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async () => ({ ok: false, status: 400, json: async () => ({ error: refusal }) }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  const feedback = harness.tabMessages.filter((message) => message.kind === 'grab-feedback');
+  assert.deepEqual(feedback.at(-1).result, { ok: false, error: refusal });
+  assert.equal(harness.notifications[0].message, refusal);
+});
+
+test('a menu grab that fails before putiorr tells the page why, not just the notification', async () => {
+  // The .torrent fetch is asked of the page, and it can fail there — a tab
+  // without a content script, a tracker that refuses. The notification says
+  // so; so must the page, when there is a page left to say it to.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async (tabId, message) => (message.kind === 'fetch-link'
+      ? { ok: false, error: 'fetch failed with 403' }
+      : { ok: true }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'https://tracker.x.example/file.torrent' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  const feedback = harness.tabMessages.filter((message) => message.kind === 'grab-feedback');
+  assert.deepEqual(feedback.at(-1).result, { ok: false, error: 'fetch failed with 403' });
+  assert.equal(harness.notifications[0].message, 'fetch failed with 403');
+});
+
+test('a menu click with no tab to draw on still grabs and still notifies', async () => {
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: { name: 'Example' } }),
+    }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+    undefined,
+  );
+  await settle();
+
+  assert.deepEqual(harness.tabMessages, []);
+  assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
 });
 
 test('an unparseable page URL is omitted rather than sent as junk', async () => {
