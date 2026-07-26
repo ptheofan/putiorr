@@ -31,8 +31,9 @@ breadth:
 - WebSocket dashboard updates
 - file-level local download progress and speed
 - safe handling of `delete-local-data`
-- automatic cleanup of completed `prowlarr`-profile transfers (removed from the
-  list and put.io, downloaded files kept on disk)
+- automatic cleanup of completed transfers for profiles nothing imports from —
+  the `prowlarr` and **Putiorr Grab** presets get it by default (removed from
+  the list and put.io, downloaded files kept on disk)
 
 Implemented Transmission RPC methods:
 
@@ -44,6 +45,93 @@ Implemented Transmission RPC methods:
 This is not a full Transmission replacement. It implements the pieces needed by
 the *arr completed-download workflow.
 
+## Upgrading From 2.0.x
+
+This release collapses the several different ways a download used to be linked
+to a profile into one: the RPC path for *arr apps, the site match for browser
+grabs, resolved once and frozen. See
+[Which profile owns a download](#which-profile-owns-a-download). Each item
+below is a setup that works on 2.0.x and stops working on upgrade.
+
+**Prowlarr on the shared endpoint with mapped categories.** The User-Agent
+bypass that let anything calling itself Prowlarr claim an add is gone, and so is
+category routing. *Fix:* point Prowlarr at its own RPC path,
+`/prowlarr/transmission/rpc`.
+
+**Any multi-profile setup where the *arr apps share `/transmission/rpc`.** That
+endpoint now serves exactly one *arr profile and refuses otherwise, naming each
+profile's path in the refusal. *Fix:* give each *arr its own RPC path,
+including the seeded profile that still holds the shared one. A single-profile
+install is unaffected.
+
+**Downloads with no owning profile no longer acquire one at boot.** They were
+handed to whichever profile sorted first; now they appear in the dashboard's
+**Needs attention** section instead of the downloads list, and the sweeps skip
+them. *Fix:* assign each one to a profile, or delete it. Their files are left
+untouched on disk either way.
+
+**The schema upgrade rewrites the database once, in place.** Before it starts it
+writes `<state>.pre-downloads-<timestamp>.bak` next to the state file and logs
+the path. The backup is never deleted automatically and is safe to delete once
+the upgrade looks right. **Restoring it is the only way to roll back to 2.0.x**,
+because the older version recreates the legacy tables and writes into storage
+this version does not read.
+
+Downloads the upgrade could not attach to a profile, could not identify (no
+put.io transfer id), or whose put.io transfer an older sibling already claimed,
+are moved to **Needs attention**. A machine-readable record of everything it did
+is kept in the `downloads_schema_v1_report` and `profiles_schema_v2_report`
+settings keys and returned by `GET /api/settings` as `schemaMigrations`. Check
+that list against the *arr queues: an *arr holding the Transmission id of a
+quarantined download gets an empty `torrent-get` until it is reassigned.
+Reassigning gives the download its original Transmission id back, so the queue
+item recovers — unless something has taken that id in the meantime, in which
+case the *arr re-grabs on its next RSS cycle.
+
+**Putiorr Grab profiles lose their `/grab/<slug>/rpc` endpoint.** It existed
+only because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a live
+Transmission endpoint an *arr could add into. The path now answers every request
+with a refusal. *Fix:* nothing — grab profiles are reached through the browser
+extension.
+
+**A disabled RR profile now refuses instead of disappearing.** Its RPC path
+answers with a refusal naming it rather than the dashboard's HTML; it still
+claims its browser sites, so a grab from one is refused instead of falling
+through to the extension's default profile; and it is still counted when the
+shared endpoint decides whether it is ambiguous, so switching a profile off no
+longer hands that endpoint to another one. Its existing downloads are
+unaffected. *Fix,* for anyone who used "disabled" to free up the shared endpoint
+or a site: delete the profile instead.
+
+**Profiles created through `POST /api/profiles` or `PUTIORR_PROFILES_JSON` with
+the Putiorr Grab preset now default to auto-removing completed downloads**, as
+the wizard and four documents already said they did. Send
+`auto_remove_completed: false` to keep the old behaviour.
+
+**Every RR profile must have a download profile.** The upgrade assigns the
+default to any profile that had none, and a download profile that is in use can
+no longer be deleted without reassigning the profiles that reference it —
+which `DELETE /api/download-profiles/:id` now does automatically, to the
+default.
+
+API changes, for anything scripted against putiorr:
+
+- **`GET /api/downloads` answers `{ downloads, orphaned }` instead of a bare
+  array.** The quarantine is a separate list so the dashboard can render it as
+  its own needs-attention section. The WebSocket downloads payload carries the
+  same two arrays. Scripts reading the old shape need `.downloads`.
+- **`DELETE /api/profiles/:id` no longer deletes a profile that owns downloads
+  without being told what happens to them.** Send `reassignTo`, or
+  `deleteDownloads: true` with the optional `deleteRemote` / `deleteLocal`
+  flags. A profile that owns nothing still deletes with no body at all. A delete
+  that stops part-way through answers `400` with the same `downloads` counts a
+  success carries, naming what it had already cancelled on put.io and removed
+  from disk.
+- **The `rpc request failed` log names `profiles` where it named
+  `enabledProfiles`,** and each entry carries `enabled`. A disabled profile is
+  one of the likelier reasons a request is in that log at all, and the old shape
+  left it out.
+
 ## Browser Extension
 
 The [`extension/`](extension) directory holds a Chrome (Manifest V3) extension
@@ -51,11 +139,12 @@ that captures `magnet:` links and `.torrent` downloads on any site and sends
 them to putiorr via `POST /api/grab`. That endpoint requires the
 `X-Putiorr-Grab` header and answers `403` without it, so a web page cannot
 trigger grabs cross-site. Grabs land only in profiles built with the **Putiorr
-Grab** app preset, which drops the *arr RPC settings from the wizard, is the
-only preset the extension is offered, and enables auto-remove completed the way
-`prowlarr` profiles have it, since nothing imports a browser grab. Each such
-profile lists the **Browser sites** whose grabs it takes, so putiorr resolves
-every grab itself, falling back to the extension's default profile.
+Grab** app preset, which is the only preset the extension is offered. Such a
+profile has no Transmission RPC endpoint at all — nothing connects to it as a
+download client — and it auto-removes completed downloads by default, the way
+`prowlarr` profiles do, since nothing imports a browser grab. Each one lists
+the **Browser sites** whose grabs it takes, so putiorr resolves every grab
+itself, falling back to the extension's default profile.
 
 See [`extension/README.md`](extension/README.md) for setup and limitations.
 
@@ -306,13 +395,6 @@ Each profile maps one *arr app to:
 - a local download folder
 - a Transmission RPC endpoint path
 
-Existing *arr clients may keep Transmission's default `/transmission/rpc`
-endpoint. On that shared endpoint, putiorr links `torrent-add` to the profile
-whose unique category appears in `download-dir` and verifies the matching label
-when the client sends one. The app User-Agent scopes later listing and removal
-operations to that persisted profile association. A profile-specific endpoint,
-when configured, remains authoritative and rejects a conflicting category.
-
 Recommended profiles:
 
 | App | put.io folder | Download folder | RPC endpoint |
@@ -322,25 +404,125 @@ Recommended profiles:
 | Lidarr | `putiorr` | `/putiorr` | `/lidarr/transmission/rpc` |
 | Readarr | `putiorr` | `/putiorr` | `/readarr/transmission/rpc` |
 
-No URL Base change is required for one profile per *arr app with unique
-categories. URL Base is an advanced setting that can optionally select the
-profile-specific endpoint; this is required when multiple profiles represent
-the same app identity, such as two Sonarr instances.
+Set each app's URL Base to the part of its path before `/rpc`, for example
+`/radarr/transmission`.
 
-The *arr download client category creates the final staging subfolder. For
-example:
+### Which Profile Owns A Download
+
+A download belongs to exactly one profile. The owner is decided once, where the
+download is created, and is never re-derived afterwards:
+
+| How it arrived | Owner |
+| --- | --- |
+| RPC on a profile's own path | that profile |
+| RPC on the shared `/transmission/rpc` | the one *arr profile, else a refusal |
+| `POST /api/grab` naming a profile | that profile |
+| `POST /api/grab` from a listed site | the grab profile listing it |
+| `POST /api/grab`, neither | the extension's default profile, else a refusal |
+
+Nothing else selects an owner. In particular:
+
+- **The category selects nothing.** The *arr download-client category is the
+  name of the staging subfolder under the owning profile's download folder,
+  computed after the owner is already known. It never picks a profile and never
+  vetoes one, so two apps may use the same category and an app may use several.
+- **The User-Agent selects nothing.** No header decides which profile a request
+  belongs to, which is why an app naming itself Prowlarr no longer bypasses
+  anything.
+
+The shared `/transmission/rpc` endpoint serves exactly one *arr profile, so a
+single-profile install needs no URL Base change at all. Create a second *arr
+profile and that endpoint refuses every request, naming the RPC path each
+profile should be pointed at instead — including the profile still sitting on
+the shared path, which needs one of its own.
+
+One put.io transfer belongs to one download, keyed on put.io's own transfer id.
+put.io de-duplicates, so a second profile grabbing a release the first already
+owns gets that same transfer back; putiorr refuses the second add and names the
+profile that holds it rather than letting two profiles share one download.
+
+### Where The Files Land
 
 ```text
-Radarr category: radarr -> /putiorr/radarr
-Sonarr category: sonarr -> /putiorr/sonarr
-Lidarr category: lidarr -> /putiorr/lidarr
+<download folder>/<category>/<the name put.io gave the transfer>
 ```
 
-That gives each app a separate staging folder while still using one shared SSD
-mount. Profiles may also share the same put.io folder. If two profiles request
-the same put.io transfer, putiorr keeps one remote transfer and independent
-profile associations/local staging copies; removing one does not remove the
-other.
+For the recommended setup that is:
+
+```text
+Radarr category: radarr -> /putiorr/radarr/<name>
+Sonarr category: sonarr -> /putiorr/sonarr/<name>
+Lidarr category: lidarr -> /putiorr/lidarr/<name>
+```
+
+Each app gets a separate staging folder while sharing one SSD mount. The name
+is put.io's, untouched, because every *arr resolves a completed download as
+`downloadDir + name` — a folder spelled any other way is a download that never
+imports. A name that will not fit in a filesystem's 255 bytes per path segment
+is refused on the download rather than truncated.
+
+That folder is **frozen the first time the download is staged**. put.io renames
+transfers, and the name putiorr reports follows the rename because that is what
+you see in the dashboard; the folder does not, because the files on disk do not
+move either.
+
+Profiles may share one put.io folder, which is what the recommended setup does.
+
+### Disabling A Profile
+
+`enabled = 0` means **the profile accepts no new work**. It is a refusal, never
+a disappearance.
+
+A disabled profile still holds its RPC path, still claims its browser sites, is
+still counted when the shared endpoint decides whether it is ambiguous, and
+still owns its put.io folder. Whether it accepts work is asked only where work
+is created: `torrent-add`, `/api/grab`, and the adoption of a put.io transfer
+putiorr did not create. Each of those refuses with one sentence naming the
+profile.
+
+It is not asked on `torrent-get`, `torrent-remove` or `session-get`. The
+downloads already queued keep downloading and stay listable, importable and
+removable, so switching a profile off does not make its *arr re-grab everything
+it can no longer see.
+
+### Deleting A Profile
+
+A download cannot be left without an owner, so `DELETE /api/profiles/:id` will
+not delete a profile that still owns downloads until it is told what happens to
+them. The dashboard asks in a dialog that states the counts first — how many
+downloads, how many of them already deleted from the list but still on put.io,
+how many files and bytes are in their staging folders, and how many of those
+folders it could not read.
+
+There are three answers:
+
+- **Move them to another RR profile** (`reassignTo`). Nothing is removed from
+  put.io and no files are deleted.
+- **Remove them from putiorr** (`deleteDownloads: true`), optionally also
+  cancelling their put.io transfers (`deleteRemote`) and deleting their staging
+  folders from disk (`deleteLocal`). Neither flag defaults to true.
+- Nothing — which is refused, by count, naming both of the above.
+
+A request carrying both a move and a delete is refused: they are different
+fates for the same rows.
+
+The move target is restricted to profiles that download into the **same**
+folder, and the refusal says why. Nothing moves on disk, and the path stays
+`<download folder>/<category>/<frozen name>`, so a target that stages elsewhere
+would point putiorr at an empty directory — and a finished download whose
+files have gone missing is deleted and its put.io transfer cancelled. The two
+folders are compared as they are written, so a symlink or bind mount naming
+the same directory counts as a different one.
+
+Whichever answer is given, the download rows themselves go: there is no owner
+left to keep them under. put.io transfers you chose to keep reappear in the
+dashboard's adoption notice on the next poll, and the dialog says so before you
+commit.
+
+`deleteLocal` is a recursive delete of the whole staging folder, so it also
+takes the `.part` file of anything still running and anything else you put in
+there. That is why the counts are measured off the disk rather than off
+putiorr's file rows.
 
 ## Configure Radarr
 
