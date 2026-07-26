@@ -31,11 +31,16 @@ function deriveHashFromSource(source) {
   return '';
 }
 
+// Only reached when put.io reports no name of its own. A magnet without a `dn`
+// used to fall through to the whole magnet URI, which then became the staging
+// folder: `magnet:?xt=urn:btih:…&tr=…` spells a path several levels deep, under
+// directories named after query parameters. The infohash is the one thing such
+// a magnet always carries, and it is a single legible segment.
 function deriveNameFromSource(source) {
   if (!source) return 'unknown';
   if (source.startsWith('magnet:')) {
     const params = new URLSearchParams(source.slice(source.indexOf('?') + 1));
-    return params.get('dn') ?? source;
+    return params.get('dn') || deriveHashFromSource(source) || 'unknown';
   }
   return path.basename(source);
 }
@@ -274,11 +279,19 @@ export class TransferService {
     try {
       const root = downloadLocalRoot(profile, download);
       if (root === target) return true;
-      // Anything above a download's folder takes that download's files with
-      // it, so it is claimed too. A quarantined row whose recorded path is a
-      // whole category directory — the shape a legacy row with no name leaves
-      // behind — is then contested by every download staging under it rather
-      // than looking like one entry's private folder.
+      // Anything holding a download's folder takes that download's files with
+      // it, so it is claimed too — and a put.io name may spell a nested path,
+      // which puts one download's folder inside another's. Without this, an
+      // ordinary "remove and delete files" on the outer download answers "one
+      // owner" and deletes the inner download's files while its row stays in
+      // the *arr's queue.
+      //
+      // The category directory is the same rule one level up, and it is
+      // checked separately because a download with no usable name of its own
+      // still has one: a quarantined row whose recorded path is a whole
+      // category directory is then contested by every download staging under
+      // it rather than looking like one entry's private folder.
+      if (root && root.startsWith(`${target}${path.sep}`)) return true;
       const categoryDir = downloadCategoryDir(profile, download);
       return target === categoryDir || categoryDir.startsWith(`${target}${path.sep}`);
     } catch {

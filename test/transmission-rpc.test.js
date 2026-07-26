@@ -1051,6 +1051,35 @@ test('a torrent upload put.io reports no hash for is stored without one', async 
   assert.equal(row.putio_transfer_id, 91);
 });
 
+test('a magnet with no name is never named after its own URI', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  // The staging folder is the name, and a magnet URI spells a path several
+  // levels deep — under directories named after query parameters — which then
+  // sits inside whatever other download happens to be above it.
+  harness.putio.addTransfer = async (source, folderId) => ({
+    id: 79,
+    name: '',
+    hash: '',
+    status: 'IN_QUEUE',
+    fileId: 89,
+    saveParentId: folderId,
+    magnetUri: source,
+  });
+
+  const added = await harness.service.addTorrent({
+    filename: 'magnet:?xt=urn:btih:namelessmagnethash&tr=udp%3A%2F%2Ftracker.example%3A80',
+  });
+
+  const row = harness.store.findDownloadById(added['torrent-added'].id);
+  assert.equal(row.name, 'namelessmagnethash');
+  assert.doesNotMatch(row.name, /magnet:|\//);
+});
+
 test('put.io\'s hash wins over the one derived from the magnet', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

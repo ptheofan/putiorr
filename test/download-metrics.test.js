@@ -693,6 +693,58 @@ test('a mixed-status put.io failure is not read as "the remote is gone"', async 
 // ever asked it for a download-dir. deleteLocalData then resolved that name
 // against process.cwd(), which satisfies resolveInside's containment check
 // trivially, and rm(recursive, force) ran on <cwd>/<name>.
+// Phase 4 re-review, RC1: a put.io name may spell a nested path — a magnet
+// with no `dn` used to store the whole magnet URI as the name, and a `dn`
+// containing a slash nests directly — so one download's staging folder can sit
+// inside another's. Deleting the outer one takes the inner one's files with
+// it, while the inner one's row stays in the *arr's queue.
+test('deleting a download refuses a folder holding another download', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const outer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 60,
+      putio_file_id: 61,
+      hash: 'outerhash',
+      name: 'Show.S01',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    const inner = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 62,
+      putio_file_id: 63,
+      hash: 'innerhash',
+      name: 'Show.S01/Extras',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+
+    const outerRoot = path.join(harness.config.targetDir, 'tv', 'Show.S01');
+    const innerRoot = path.join(outerRoot, 'Extras');
+    await mkdir(innerRoot, { recursive: true });
+    await writeFile(path.join(outerRoot, 'episode.mkv'), 'episode');
+    await writeFile(path.join(innerRoot, 'behind.mkv'), 'behind');
+
+    await assert.rejects(
+      () => harness.service.deleteDownloadBucket(outer.id, { deleteRemote: false, deleteLocal: true }),
+      /2 downloads own it/,
+    );
+
+    assert.equal(await readFile(path.join(innerRoot, 'behind.mkv'), 'utf8'), 'behind');
+    assert.equal(await readFile(path.join(outerRoot, 'episode.mkv'), 'utf8'), 'episode');
+    assert.ok(harness.store.findDownloadById(inner.id));
+
+    // The inner one is still deletable on its own: nothing else lives in it.
+    await harness.service.deleteDownloadBucket(inner.id, { deleteRemote: false, deleteLocal: true });
+    await assert.rejects(() => stat(innerRoot), { code: 'ENOENT' });
+    assert.equal(await readFile(path.join(outerRoot, 'episode.mkv'), 'utf8'), 'episode');
+  } finally {
+    harness.store.close();
+  }
+});
+
 function quarantineRow(store, overrides = {}) {
   const row = {
     putio_transfer_id: 4242,
