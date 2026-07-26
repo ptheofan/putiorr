@@ -184,6 +184,52 @@ With `ON DELETE RESTRICT`, the delete is refused while downloads remain, so
 the endpoint performs the requested cleanup first and reports what it did.
 Neither flag defaults to true.
 
+Ruled by the project owner during phase 5: a third answer, **move these
+downloads to another profile**, sits alongside the two flags. Moving and
+deleting are different fates for the same row, so the endpoint takes one
+intent — `reassignTo`, or `deleteDownloads` with its two flags — and refuses a
+request carrying both. A profile that still owns downloads and was sent
+neither is refused by count, naming both options, rather than having them
+removed by implication.
+
+The move target is restricted to profiles that stage into the same
+`download_at`, and the refusal says why. Nothing moves on disk, and the path
+is still `<download_at>/<category>/<frozen folder>`, so a target that stages
+elsewhere points putiorr at an empty directory — and a finished download whose
+files are missing is deleted and its put.io transfer cancelled. Freezing the
+staging folder made a put.io *rename* safe; it says nothing about a change of
+owner.
+
+The download rows themselves always go, whatever the flags: `profile_id` is
+`NOT NULL`, so there is no owner left to keep them under, and a tombstone
+would only block the profile's deletion. put.io transfers the user chose to
+keep surface in the adoption notice on the next poll, and the confirmation
+says so before the user commits.
+
+`GET /api/profiles/:id/deletion-preview` serves the counts the confirmation
+states. It reads the database rather than the dashboard's list: tombstoned
+downloads are not in that list and hold put.io transfers, hold files, and
+block the delete like any other row.
+
+## Disabled profiles
+
+Ruled by the project owner during phase 5, resolving the audit's "a disabled
+profile means four different things". **`enabled = 0` means the profile
+accepts no new work. It is a refusal, never an absence.**
+
+Routing resolves a disabled profile exactly like an enabled one: it still
+holds its RPC path, still claims its browser sites, is still counted when the
+shared endpoint asks how many \*arr profiles could have meant it, and still
+owns its put.io folder. Whether it accepts work is asked once, where work is
+created — `torrent-add`, `/api/grab` through all three of its resolution
+paths, and the adoption of a transfer putiorr did not create — with one
+sentence naming the profile.
+
+It is not asked on `torrent-get`, `torrent-remove` or `session-get`: the
+downloads already in the queue keep downloading and stay listable, importable
+and removable. Refusing those stranded in-flight work and made an \*arr
+re-grab everything it could no longer see.
+
 ## Migration
 
 Existing databases carry `transfers` + `transfer_associations`. The migration
@@ -276,6 +322,23 @@ stops working on upgrade, so each needs the fix spelled out.
   decision with rows that are making progress. The WebSocket downloads payload
   carries the same two arrays. Anything scripted against the old shape needs
   `.downloads`.
+- **A disabled RR profile now refuses instead of disappearing.** Its RPC path
+  answers with a refusal naming it rather than the dashboard's HTML; it still
+  claims its browser sites, so a grab from one is refused instead of falling
+  through to the extension's default profile; and it is still counted when the
+  shared endpoint decides whether it is ambiguous, so switching a profile off
+  no longer hands that endpoint to another one. Its existing downloads are
+  unaffected: they keep downloading and `torrent-get`/`torrent-remove` still
+  work on them. Fix, for anyone who was using "disabled" to free up the shared
+  endpoint or a site: delete the profile instead.
+- **`DELETE /api/profiles/:id` no longer deletes a profile that owns
+  downloads without being told what happens to them.** Send `reassignTo`, or
+  `deleteDownloads: true` with the optional `deleteRemote` / `deleteLocal`
+  flags. A profile that owns nothing still deletes with no body at all.
+- **Profiles created through `POST /api/profiles` or `PUTIORR_PROFILES_JSON`
+  with the Putiorr Grab preset now default to auto-removing completed
+  downloads**, as the wizard and four documents already said they did. Send
+  `auto_remove_completed: false` to keep the old behaviour.
 - **Every RR profile must have a download profile.** The upgrade assigns the
   default to any profile that had none, and a download profile that is in use
   can no longer be deleted without reassigning the profiles that reference it —
