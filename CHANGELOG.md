@@ -9,6 +9,21 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [3.0.1] — 2026-07-26
+
+### Fixed
+
+- **Empty legacy tables no longer raise a data-loss alarm.** An install that had
+  briefly run an older putiorr — which a stale `:latest` pull does — was told
+  `An older putiorr has written 0 downloads into storage this version cannot
+  read`, and pointed at restoring a `.pre-downloads-*.bak`. Nothing had been
+  written and nothing was missing; following the advice would have discarded
+  every download made since the upgrade. Starting an older putiorr is enough to
+  recreate the tables the 3.0.0 migration dropped, so their presence was never
+  evidence of anything. They are now dropped again on boot when they hold no
+  rows, and the warning is raised only when rows really are stranded — in which
+  case it names how many.
+
 ## [3.0.0] — 2026-07-26
 
 A major release, because it changes how a download's owning profile is decided
