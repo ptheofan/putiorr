@@ -27,15 +27,15 @@ class FakePutio {
   }
 }
 
-async function createHarness(env = {}, putio = new FakePutio()) {
-  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-download-resume-'));
+async function createHarness(env = {}, putio = new FakePutio(), { statePath = ':memory:', root: existingRoot } = {}) {
+  const root = existingRoot ?? await mkdtemp(path.join(tmpdir(), 'putiorr-download-resume-'));
   const config = loadConfig({
     PUTIORR_TARGET_DIR: path.join(root, 'downloads'),
-    PUTIORR_STATE_PATH: ':memory:',
+    PUTIORR_STATE_PATH: statePath,
     PUTIORR_PUTIO_TOKEN: 'test-token',
     ...env,
   }, root);
-  const store = new StateStore(':memory:');
+  const store = new StateStore(statePath);
   store.seedFromConfig(config);
   const service = new TransferService({
     config,
@@ -310,6 +310,85 @@ test('a put.io rename does not strand the files or cancel the transfer', async (
 // invisible — and the loser then size-matched the winner's leftover file,
 // called itself complete and finalised. The *arr imports the other release's
 // file under this one's name.
+// FC1: the freeze only ever ran from prepareTransfer, and the poll only
+// prepares rows that are not `processed` — so a completed download never
+// froze, and the sweep that deletes downloads whose files have vanished only
+// looks at completed downloads. The never-frozen set and the vulnerable set
+// were the same set, which is every finished download in every upgrading
+// install.
+test('a download completed before the upgrade survives a put.io rename', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'putiorr-preupgrade-'));
+  const statePath = path.join(root, 'state.sqlite');
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 5 }],
+  });
+  putio.deletedFiles = [];
+  putio.deletedTransfers = [];
+  putio.deleteFile = async (id) => { putio.deletedFiles.push(id); };
+  putio.deleteTransfer = async (id) => { putio.deletedTransfers.push(id); };
+
+  const before = await createHarness({}, putio, { statePath, root });
+  let transferId;
+  try {
+    const transfer = createTransfer(before.store, {
+      putio_transfer_id: 91,
+      putio_file_id: 910,
+      name: 'Finished.Before.Upgrade',
+      lifecycle: 'processed',
+      total_size: 5,
+    });
+    transferId = transfer.id;
+    before.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 901,
+      relative_path: 'movie.mkv',
+      size: 5,
+      downloaded_bytes: 5,
+      status: 'complete',
+    });
+    // An older build staged it and recorded nothing about where.
+    before.store.db.exec("UPDATE downloads SET staging_folder = ''");
+  } finally {
+    before.store.close();
+  }
+
+  const staged = path.join(root, 'downloads', 'Finished.Before.Upgrade');
+  await mkdir(staged, { recursive: true });
+  await writeFile(path.join(staged, 'movie.mkv'), 'movie');
+
+  const harness = await createHarness({}, putio, { statePath, root });
+  try {
+    putio.remoteTransfers = [{
+      id: 91,
+      fileId: 910,
+      saveParentId: 42,
+      hash: 'downloadresumehash',
+      name: 'Renamed.After.Upgrade',
+      status: 'COMPLETED',
+      percentDone: 100,
+      size: 5,
+    }];
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    // Poll A writes put.io's new name into the row; poll B is the one that
+    // sweeps for downloads whose files have disappeared.
+    await manager.pollOnce();
+    assert.equal(harness.store.findDownloadById(transferId).name, 'Renamed.After.Upgrade');
+    await manager.pollOnce();
+
+    assert.ok(harness.store.findDownloadById(transferId), 'the completed download survived the rename');
+    assert.deepEqual(putio.deletedTransfers, []);
+    assert.deepEqual(putio.deletedFiles, []);
+    assert.equal(await readFile(path.join(staged, 'movie.mkv'), 'utf8'), 'movie');
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('a download does not inherit the files of a removed rival', async () => {
   const putio = new FakePutio({
     remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 5 }],

@@ -60,6 +60,45 @@ test('upsertDownload matches later remote updates by put.io id', () => {
   }
 });
 
+test('an upgrade freezes the staging folder of every download already staged', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-freeze-backfill-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new StateStore(dbPath);
+  const ids = {};
+  try {
+    const profile = seedProfile(first);
+    for (const [lifecycle, putioTransferId] of [['processed', 95], ['downloading', 96], ['remote', 97]]) {
+      ids[lifecycle] = first.upsertDownload({
+        profile_id: profile.id,
+        putio_transfer_id: putioTransferId,
+        hash: `${lifecycle}hash`,
+        name: `${lifecycle}.Release`,
+        lifecycle,
+      }).id;
+    }
+    // The shape every upgrading install has: rows an older build already
+    // staged, with no record of where it put them.
+    first.db.exec("UPDATE downloads SET staging_folder = ''");
+  } finally {
+    first.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    // A row that has been written to disk is frozen to the name it was written
+    // under. Empty would mean "wherever put.io says it is called now", and a
+    // rename then reads as files the user deleted — which deletes the download
+    // and cancels its put.io transfer.
+    assert.equal(reopened.findDownloadById(ids.processed).staging_folder, 'processed.Release');
+    assert.equal(reopened.findDownloadById(ids.downloading).staging_folder, 'downloading.Release');
+    // Nothing has been written for a remote transfer, so there is nothing to
+    // freeze and it takes whatever name it has when it is first staged.
+    assert.equal(reopened.findDownloadById(ids.remote).staging_folder, '');
+  } finally {
+    reopened.close();
+  }
+});
+
 test('an upgrade gives an existing downloads table its staging folder column', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-staging-folder-'));
   const dbPath = path.join(dir, 'state.sqlite');

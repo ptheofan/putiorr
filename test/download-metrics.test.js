@@ -1089,6 +1089,36 @@ test('deleting a quarantined download refuses a whole category folder', async ()
   }
 });
 
+// FI1: the other three delete paths ask who owns the files before touching
+// put.io; this one did not. It is the worst place for it — a quarantined row
+// has no live download, so the put.io copy is the only recoverable one, and
+// the local half then refuses anyway.
+test('a quarantined download refused locally never loses its put.io copy first', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: 999,
+      putio_file_id: 9990,
+      // A path putiorr never staged into, so the local half refuses.
+      name: 'Somewhere.Else',
+      legacy_download_dir: path.join(await mkdtemp(path.join(tmpdir(), 'putiorr-elsewhere-')), 'Somewhere.Else'),
+    });
+    assert.ok(profile);
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteRemote: true, deleteLocal: true }),
+      /cannot tell which files belong to/,
+    );
+
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.ok(harness.store.findOrphanedDownloadById(orphanId));
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('deleting a quarantined download from put.io needs put.io ids to delete', async () => {
   const harness = await createHarness();
   try {

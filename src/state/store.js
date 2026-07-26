@@ -451,16 +451,37 @@ export class StateStore {
       this.migrateMagnetTransferHashes();
     }
     this.migrateDownloadsCollapse();
-    // Databases collapsed by an earlier build of phase 4 predate the frozen
-    // staging folder. An empty value means "not staged yet", which is the
-    // right answer for every row that has not been prepared since.
     if (this.hasTable('downloads')) {
       this.ensureColumn('downloads', 'staging_folder', "TEXT NOT NULL DEFAULT ''");
+      this.freezeStagedDownloadFolders();
     }
     this.migrateProfilesSchema();
     this.absolutizeProfileDownloadFolders();
     this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
     this.warnAboutDowngradedWrites();
+  }
+
+  // Every download an older build already staged, frozen to the name it was
+  // staged under. For those rows an empty staging folder does not mean "not
+  // staged yet" — it means "staged, and we no longer know where", which
+  // resolves to whatever put.io calls the transfer today. A rename then points
+  // putiorr at an empty directory, the sweep reads that as files the user
+  // deleted, and it deletes the download and cancels the put.io transfer.
+  //
+  // Only rows that have been written to disk are frozen. A 'remote' transfer
+  // has nothing on disk yet, so it takes whatever name it has when it is first
+  // staged. Idempotent, and a no-op on every boot after the first.
+  freezeStagedDownloadFolders() {
+    const result = this.db.prepare(`
+      UPDATE downloads
+      SET staging_folder = name
+      WHERE staging_folder = '' AND lifecycle IN ('downloading', 'processed')
+    `).run();
+    if (result.changes > 0) {
+      logger.info('froze the staging folder of downloads staged before the upgrade', {
+        downloads: Number(result.changes),
+      });
+    }
   }
 
   // Rows written before profiles stored their folder absolute. Every local

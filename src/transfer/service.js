@@ -1164,6 +1164,12 @@ export class TransferService {
     const row = this.store.findOrphanedDownloadById(orphanId);
     if (!row) throw new Error('Quarantined download not found');
 
+    // Resolved and cleared for deletion before put.io is touched, the way
+    // every other delete path does it. This is the worst place to get that
+    // order wrong: a quarantined row has no live download, so the put.io copy
+    // is the only recoverable one, and the local half goes on to refuse.
+    const localTarget = deleteLocal ? this.assertDeletable(this.quarantinedDownloadFolder(row)) : undefined;
+
     // Refused rather than reported as done: removeRemoteTransfer with both ids
     // null calls put.io zero times and returns no errors, so the user would be
     // told the remote copy was deleted when nothing was even asked.
@@ -1189,7 +1195,7 @@ export class TransferService {
     // cannot say which files those are — silently skipping reported success
     // for a deletion that never happened.
     if (deleteLocal) {
-      await deleteLocalData(this.quarantinedDownloadFolder(row), this.ownershipCheck());
+      await deleteLocalData(localTarget, this.ownershipCheck());
     }
     this.store.deleteOrphanedDownload(orphanId);
     logger.info('quarantined download deleted', {
