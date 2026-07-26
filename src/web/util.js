@@ -269,9 +269,14 @@ export function catchAllTakeoverPayload(holderId) {
 // fallback. Under its own line after a blank one, for the reason the browser
 // site warnings are: the message being appended to may already end in a
 // labelled list, and a bare line would read as one more entry in it.
-export function withCatchAllTakeoverNote(message, profile) {
+export function catchAllTakenFrom(profile) {
   const taken = profile?.catch_all_taken_from ?? profile?.catchAllTakenFrom;
-  return taken?.name ? `${message}\n\n${taken.name} is no longer the fallback grab profile.` : message;
+  return taken?.name ? taken : undefined;
+}
+
+export function withCatchAllTakeoverNote(message, profile) {
+  const taken = catchAllTakenFrom(profile);
+  return taken ? `${message}\n\n${taken.name} is no longer the fallback grab profile.` : message;
 }
 
 // It answered on the reply that carried it; keeping the key would leave a

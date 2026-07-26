@@ -47,8 +47,8 @@ test('profile wizard sends Browser sites as typed and surfaces the server respon
   // the dash-list of checks the failure message ends with.
   assert.match(profilesJs, /profile\?\.browser_domain_warnings/);
   assert.match(profilesJs, /\[message, '', 'Browser sites:', \.\.\.warnings\]\.join\('\\n'\)/);
-  assert.match(profilesJs, /upsertProfileState\(withoutBrowserDomainWarnings\(savedProfile\)\)/);
-  assert.match(profilesJs, /withBrowserDomainWarnings\(\s*wizardIsGrabPreset\(\) \? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,\s*savedProfile,\s*\)/);
+  assert.match(profilesJs, /upsertProfileState\(withoutCatchAllTakeover\(withoutBrowserDomainWarnings\(savedProfile\)\)\)/);
+  assert.match(profilesJs, /withBrowserDomainWarnings\(\s*withCatchAllTakeoverNote\(\s*wizardIsGrabPreset\(\) \? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,\s*savedProfile,\s*\),\s*savedProfile,\s*\)/);
   assert.match(profilesJs, /withBrowserDomainWarnings\(formatClientTestFailureMessage\(error, savedProfile\), savedProfile\)/);
 
   // The card ellipsizes its facts, so the joined list is only fully readable
@@ -427,4 +427,38 @@ test('api() throws the whole reply, not only its sentence', () => {
   assert.match(apiJs, /import \{ apiError \} from '\.\/util\.js';/);
   assert.match(apiJs, /if \(!response\.ok\) throw apiError\(response\.status, body\);/);
   assert.doesNotMatch(apiJs, /throw new Error\(body\.error/);
+});
+
+// The dead end this removes: the refusal named another profile, and moving the
+// fallback meant leaving the dialog, unticking it there, saving, coming back
+// and re-typing whatever the wizard had lost. The offer is decided on the
+// code, and the click re-submits the same save with the intent added.
+test('the wizard offers the fallback takeover on the refusal that names another profile', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+  const utilJs = readFileSync(new URL('../src/web/util.js', import.meta.url), 'utf8');
+  const formsCss = readFileSync(new URL('../src/web/styles/04-forms.css', import.meta.url), 'utf8');
+
+  // Branched on the discriminator, never on the sentence.
+  assert.match(profilesJs, /if \(error\?\.code !== CATCH_ALL_CONFLICT_CODE\) return false;/);
+  assert.doesNotMatch(profilesJs, /already takes grabs/);
+  // Offered from both refusal paths: the save button's, and the plain save.
+  assert.equal(profilesJs.match(/^ +offerCatchAllTakeover\(error\);$/gm).length, 2);
+  // The same payload, with the intent added — nothing the user typed is lost.
+  assert.match(
+    profilesJs,
+    /\{ \.\.\.getWizardPayload\(\), \.\.\.catchAllTakeoverPayload\(takeOverCatchAllFrom\) \}/,
+  );
+  assert.match(profilesJs, /saveAndTestClientSettings\(\{ takeOverCatchAllFrom: target\.id \}\)/);
+  // And the profile that lost the role is named afterwards, and its own card
+  // stops claiming it.
+  assert.match(profilesJs, /withCatchAllTakeoverNote\(\s*wizardIsGrabPreset\(\)/);
+  assert.match(profilesJs, /applyCatchAllTakeoverToState\(savedProfile\)/);
+  assert.match(profilesJs, /upsertProfileState\(\{ \.\.\.previous, browser_catch_all: false, browserCatchAll: false \}\)/);
+
+  // No inline handler, and the text is set as text.
+  assert.match(utilJs, /link\.addEventListener\('click'/);
+  assert.doesNotMatch(utilJs, /onclick|innerHTML/);
+  assert.match(utilJs, /link\.textContent = CATCH_ALL_TAKEOVER_LABEL;/);
+  assert.match(utilJs, /export const CATCH_ALL_TAKEOVER_LABEL = 'Make this the fallback grab profile';/);
+  assert.match(formsCss, /\.message-link \{/);
 });

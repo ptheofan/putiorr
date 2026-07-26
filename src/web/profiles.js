@@ -9,6 +9,7 @@ import {
   DEFAULT_CLIENT_HOST,
   DEFAULT_CLIENT_PORT,
   DEFAULT_HELP_FIELD,
+  CATCH_ALL_CONFLICT_CODE,
 } from './constants.js';
 import {
   fieldChecked,
@@ -30,6 +31,11 @@ import {
   profileDeletionSummary,
   profileDeletionOutcome,
   profileDeletionRequest,
+  catchAllTakenFrom,
+  catchAllTakeoverPayload,
+  renderCatchAllTakeover,
+  withCatchAllTakeoverNote,
+  withoutCatchAllTakeover,
 } from './util.js';
 import { setMessage } from './putio.js';
 import {
@@ -669,9 +675,13 @@ export async function saveProfileFromWizard({
   showMessage = true,
   manageButton = true,
   throwOnError = false,
+  // Set only by the takeover offer the refusal renders. The payload is read
+  // off the form as it stands, so re-submitting keeps every edit the user made
+  // before the save was refused and everything they typed after it.
+  takeOverCatchAllFrom,
 } = {}) {
   const id = el.wizardProfileId.value;
-  const payload = getWizardPayload();
+  const payload = { ...getWizardPayload(), ...catchAllTakeoverPayload(takeOverCatchAllFrom) };
   const needsRpcPath = payload.type !== GRAB_PROFILE_TYPE;
   if (!payload.name || !payload.putio_folder_name || !payload.downloadAt || (needsRpcPath && !payload.rpc_path)) {
     setWizardMessage(needsRpcPath
@@ -690,25 +700,27 @@ export async function saveProfileFromWizard({
         method: 'POST',
         body: JSON.stringify(payload),
     });
-    upsertProfileState(withoutBrowserDomainWarnings(savedProfile));
+    upsertProfileState(withoutCatchAllTakeover(withoutBrowserDomainWarnings(savedProfile)));
+    applyCatchAllTakeoverToState(savedProfile);
     renderProfiles();
     renderDownloadProfiles();
     el.wizardProfileId.value = savedProfile.id || '';
     el.deleteProfileButton.hidden = !savedProfile.id;
     setText(el.saveProfileButton, saveButtonLabel());
     if (close) closeProfileWizard();
-    if (showMessage) setMessage('Profile saved.', 'ok');
+    if (showMessage) setMessage(withCatchAllTakeoverNote('Profile saved.', savedProfile), 'ok');
     return savedProfile;
   } catch (error) {
     if (throwOnError) throw error;
     setWizardMessage(error.message, 'error');
+    offerCatchAllTakeover(error);
     return undefined;
   } finally {
     if (manageButton) el.saveProfileButton.disabled = false;
   }
 }
 
-export async function saveAndTestClientSettings() {
+export async function saveAndTestClientSettings({ takeOverCatchAllFrom } = {}) {
   el.saveProfileButton.disabled = true;
   setWizardMessage(wizardIsGrabPreset() ? GRAB_SAVE_PROGRESS_MESSAGE : ARR_SAVE_PROGRESS_MESSAGE, 'info');
   let savedProfile;
@@ -718,14 +730,21 @@ export async function saveAndTestClientSettings() {
       showMessage: false,
       manageButton: false,
       throwOnError: true,
+      takeOverCatchAllFrom,
     });
     if (!savedProfile) return;
     await api('/api/profiles/test-client-settings', {
       method: 'POST',
       body: JSON.stringify(savedProfile),
     });
+    // The takeover note sits directly under the confirmation, ahead of the
+    // browser site warnings: it is not advice about what was typed, it is a
+    // second profile this save changed.
     setWizardMessage(withBrowserDomainWarnings(
-      wizardIsGrabPreset() ? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,
+      withCatchAllTakeoverNote(
+        wizardIsGrabPreset() ? GRAB_SAVE_SUCCESS_MESSAGE : ARR_SAVE_SUCCESS_MESSAGE,
+        savedProfile,
+      ),
       savedProfile,
     ), 'info');
   } catch (error) {
@@ -735,9 +754,38 @@ export async function saveAndTestClientSettings() {
         : `Profile was not saved.\nReason: ${error.message}`,
       'warn',
     );
+    offerCatchAllTakeover(error);
   } finally {
     el.saveProfileButton.disabled = false;
   }
+}
+
+// The one refusal the dialog can act on. Everything else is shown exactly as
+// it was: the sentence already says what to do, and there is nothing here to
+// click. Rendered onto the message that was just set, so the prose the user
+// reads and the action they can take are the same paragraph.
+export function offerCatchAllTakeover(error) {
+  if (error?.code !== CATCH_ALL_CONFLICT_CODE) return false;
+  const holder = error.catchAllHolder;
+  if (!holder?.name) return false;
+  renderCatchAllTakeover(el.profileWizardMessage, holder, (target) => {
+    // The same save, with the intent added — not a separate call that would
+    // either drop the rest of the form or need a second round trip to carry it.
+    saveAndTestClientSettings({ takeOverCatchAllFrom: target.id })
+      .catch((takeoverError) => setWizardMessage(takeoverError.message, 'error'));
+  });
+  return true;
+}
+
+// The profile that lost the fallback is a second row this save changed, and it
+// may well be on screen. Without this its card goes on claiming a role it no
+// longer holds until something reloads the list.
+export function applyCatchAllTakeoverToState(savedProfile) {
+  const taken = catchAllTakenFrom(savedProfile);
+  if (!taken) return undefined;
+  const previous = state.profiles.find((profile) => String(profile.id) === String(taken.id));
+  if (previous) upsertProfileState({ ...previous, browser_catch_all: false, browserCatchAll: false });
+  return taken;
 }
 
 // Deleting a profile is irreversible and reaches put.io and the disk, so it
