@@ -887,7 +887,13 @@ export class TransmissionRpcServer {
       jsonResponse(res, 404, { error: 'Not Found' }, this.sessionId);
     } catch (error) {
       logger.warn('api request failed', { path: requestPath, error: error.message });
-      jsonResponse(res, 400, { error: error.message }, this.sessionId);
+      // A delete that stopped part-way through carries what it had already
+      // done. Answering with the message alone would leave the caller to parse
+      // a sentence to find out that the put.io copies are gone.
+      jsonResponse(res, 400, {
+        error: error.message,
+        ...(error.downloadsReport ? { downloads: error.downloadsReport } : {}),
+      }, this.sessionId);
     }
   }
 

@@ -101,6 +101,23 @@ function pluralizeDownloads(count) {
   return `${count} download${count === 1 ? '' : 's'}`;
 }
 
+// Everything already done, in the order it was done, so a half-finished delete
+// reads as the record of what is gone rather than as a row count.
+function describeProfileDeletionProgress(report, total) {
+  const parts = [`removing ${pluralizeDownloads(report.deleted)} of ${total}`];
+  if (report.remoteDeleted > 0) parts.push(`${report.remoteDeleted} already cancelled on put.io`);
+  if (report.localDeleted > 0) parts.push(`${report.localDeleted} already deleted from disk`);
+  return parts.join(', ');
+}
+
+// The counts travel with the refusal, so the endpoint can answer a 400 with the
+// same shape its success carries and a caller never has to parse the sentence.
+function profileDeletionError(message, report) {
+  const error = new Error(message);
+  error.downloadsReport = { ...report };
+  return error;
+}
+
 // A Transmission id may be a download id or a torrent hash. Only the first
 // identifies exactly one download: the hash is informational and not unique.
 function isDownloadId(identifier) {
@@ -889,8 +906,9 @@ export class TransferService {
       : undefined;
 
     const remoteDeleted = deleteRemote;
+    let remoteAlreadyGone = false;
     if (remoteDeleted) {
-      await this.removeRemoteTransfer(transfer, { throwOnError: true });
+      ({ alreadyGone: remoteAlreadyGone } = await this.removeRemoteTransfer(transfer, { throwOnError: true }));
     }
 
     const fileCount = this.store.listFilesForDownload(transfer.id).length;
@@ -919,6 +937,9 @@ export class TransferService {
       bucketDeleted: true,
       transferId: transfer.id,
       filesDeleted: fileCount,
+      // put.io answered 404 rather than deleting anything: the caller's sweep
+      // logs that as a different event from a delete it performed.
+      remoteAlreadyGone,
     };
   }
 
@@ -1035,15 +1056,28 @@ export class TransferService {
     return errors;
   }
 
+  // A 404 is put.io agreeing, not put.io failing: the caller asked for the
+  // remote copy to be gone and it is. Treated as an error it made every delete
+  // that got half-way through unretryable — the first attempt cancels the
+  // transfer, the local half then throws, and every attempt after that dies on
+  // the 404 for a transfer nobody has. `pruneProcessedTransfersMissingLocalData`
+  // already had to special-case this one caller deep; it belongs here, where
+  // put.io is actually being asked.
+  //
+  // Returns `{ errors, alreadyGone }` — the second is what the prune's log
+  // called `remoteMissing`, kept because "put.io had already lost it" is a
+  // different event from "putiorr deleted it".
   async removeRemoteTransfer(transfer, { throwOnError = false } = {}) {
     const errors = [];
+    let alreadyGone = false;
     const putio = this.getPutio();
     if (transfer.putio_file_id) {
       try {
         await putio.deleteFile(transfer.putio_file_id);
       } catch (error) {
-        errors.push(error);
-        logger.warn('failed to delete put.io file', {
+        if (error?.status === 404) alreadyGone = true;
+        else errors.push(error);
+        logger.warn(error?.status === 404 ? 'put.io no longer has the file' : 'failed to delete put.io file', {
           id: transfer.id,
           putioFileId: transfer.putio_file_id,
           error: error.message,
@@ -1055,8 +1089,9 @@ export class TransferService {
       try {
         await putio.deleteTransfer(transfer.putio_transfer_id);
       } catch (error) {
-        errors.push(error);
-        logger.warn('failed to delete put.io transfer', {
+        if (error?.status === 404) alreadyGone = true;
+        else errors.push(error);
+        logger.warn(error?.status === 404 ? 'put.io no longer has the transfer' : 'failed to delete put.io transfer', {
           id: transfer.id,
           putioTransferId: transfer.putio_transfer_id,
           error: error.message,
@@ -1066,7 +1101,7 @@ export class TransferService {
     if (errors.length > 0 && throwOnError) {
       throw remoteDeleteError(errors);
     }
-    return errors;
+    return { errors, alreadyGone };
   }
 
   toTransmissionTorrent(row, requestedFields = []) {
@@ -1291,12 +1326,15 @@ export class TransferService {
         }
       } catch (error) {
         // Each download is its own irreversible sequence, so there is no
-        // transaction to roll back to. The count already done is part of the
-        // message: the user has to know which half of the list is gone before
-        // they retry.
-        throw new Error(
-          `Deleted ${pluralizeDownloads(report.deleted)} of ${downloads.length} before stopping at`
-          + ` download ${download.id} (${download.name}): ${error.message}`,
+        // transaction to roll back to, and the user has to be told which half
+        // of the list is gone before they retry. Every counter is quoted, not
+        // just the rows: a delete that cancelled the put.io transfer and then
+        // failed on the files had already destroyed the last copy while
+        // "deleted 0 downloads" said nothing happened.
+        throw profileDeletionError(
+          `Stopped at download ${download.id} (${download.name}) after`
+          + ` ${describeProfileDeletionProgress(report, downloads.length)}: ${error.message}`,
+          report,
         );
       }
       // The row itself always goes. profile_id is NOT NULL, so there is no

@@ -290,34 +290,31 @@ export class DownloadManager {
       let remoteMissing = false;
       try {
         if (this.service.getPutioToken()) {
-          await this.service.deleteDownloadBucket(transfer.id, {
+          // A 404 says put.io no longer has it either, which is the outcome
+          // this sweep wanted. That used to be caught here, because the delete
+          // threw on it and would otherwise leave the row failing the same way
+          // on every tick forever; removeRemoteTransfer now answers it where
+          // put.io is actually asked, and reports it rather than raising it.
+          const result = await this.service.deleteDownloadBucket(transfer.id, {
             deleteRemote: true,
             deleteLocal: false,
           });
+          remoteMissing = Boolean(result?.remoteAlreadyGone);
         } else {
           this.store.deleteDownload(transfer.id);
         }
       } catch (error) {
-        // A 404 says put.io no longer has it either, which is the outcome this
-        // sweep wanted — but deleteDownloadBucket throws before it deletes
-        // anything locally, so the row would otherwise survive and fail exactly
-        // the same way on every tick forever. Finish the job here, the way
-        // prepareTransferSafely already treats a 404, and the way the no-token
-        // branch above does it. Only a genuinely transient error is worth
+        // Only a genuinely transient error reaches this now, and it is worth
         // leaving for the next tick.
-        if (error.status !== 404) {
-          logger.warn('failed to prune processed transfer with missing local data', {
-            transferId: transfer.id,
-            putioTransferId: transfer.putio_transfer_id,
-            putioFileId: transfer.putio_file_id,
-            name: transfer.name,
-            error: error.message,
-            stack: error.stack,
-          });
-          continue;
-        }
-        remoteMissing = true;
-        this.store.deleteDownload(transfer.id);
+        logger.warn('failed to prune processed transfer with missing local data', {
+          transferId: transfer.id,
+          putioTransferId: transfer.putio_transfer_id,
+          putioFileId: transfer.putio_file_id,
+          name: transfer.name,
+          error: error.message,
+          stack: error.stack,
+        });
+        continue;
       }
       logger.info('processed transfer pruned after local data disappeared', {
         transferId: transfer.id,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
@@ -3454,6 +3454,10 @@ test('a profile cannot take over its own downloads on the way out', async (t) =>
   assert.equal(harness.store.findDownloadById(download.id).profile_id, profile.id);
 });
 
+// The cheap half of the pair: the failure lands before anything irreversible.
+// The expensive half — a failure after put.io has already been cancelled — is
+// covered separately, because that is the one where the message is the only
+// record of what has been destroyed.
 test('a partial profile delete names how much of the list is already gone', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
@@ -3477,6 +3481,73 @@ test('a partial profile delete names how much of the list is already gone', asyn
   });
 
   assert.equal(stopped.status, 400);
-  assert.match(stopped.body.error, /Deleted 1 download of 2 before stopping at download/);
+  assert.match(stopped.body.error, /Stopped at download \d+ \([^)]*\) after removing 1 download of 2/);
+  assert.equal(stopped.body.downloads.deleted, 1);
+  assert.equal(stopped.body.downloads.remoteDeleted, 0);
   assert.ok(harness.store.findProfileById(profile.id));
+});
+
+test('a delete that fails after put.io says what it has already destroyed', async (t) => {
+  const harness = await createHarness();
+  const { profile } = stageProfileWithDownload(harness);
+  const category = path.join(harness.config.targetDir, 'movies');
+  const root = path.join(category, 'Owned.Release');
+  await mkdir(root, { recursive: true });
+  await writeFile(path.join(root, 'owned.mkv'), 'data');
+  // The local half fails only after put.io has already been cancelled, which
+  // is the sequence that destroys the last copy. A read-only parent is the
+  // cheapest way to make rm fail for real rather than by stubbing it.
+  await chmod(category, 0o500);
+  t.after(async () => {
+    await chmod(category, 0o700);
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const stopped = await deleteProfile(harness, profile.id, {
+    deleteDownloads: true,
+    deleteRemote: true,
+    deleteLocal: true,
+  });
+
+  assert.equal(stopped.status, 400);
+  assert.deepEqual(harness.putio.deletedTransfers, [909]);
+  // "Deleted 0 downloads" was true of the row count and false of everything the
+  // user cares about: the put.io copy was already gone when they read it.
+  assert.match(stopped.body.error, /1 already cancelled on put\.io/);
+  // The same counts the success path reports, so a caller does not have to
+  // parse the sentence to find out what happened.
+  assert.equal(stopped.body.downloads.remoteDeleted, 1);
+  assert.equal(stopped.body.downloads.deleted, 0);
+  assert.ok(harness.store.findProfileById(profile.id));
+});
+
+test('a retried delete finishes when put.io has already forgotten the transfer', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+  // What put.io answers on the second attempt: the first one worked. Without
+  // this the retry throws forever and the row can never be cleared.
+  const notFound = async () => {
+    const error = new Error('put.io transfer 909 not found');
+    error.status = 404;
+    throw error;
+  };
+  harness.putio.deleteTransfer = notFound;
+  harness.putio.deleteFile = notFound;
+
+  const deleted = await deleteProfile(harness, profile.id, {
+    deleteDownloads: true,
+    deleteRemote: true,
+  });
+
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.downloads.deleted, 1);
+  // Counted as done, because it is: put.io does not have it.
+  assert.equal(deleted.body.downloads.remoteDeleted, 1);
+  assert.equal(harness.store.findDownloadById(download.id), undefined);
+  assert.equal(harness.store.findProfileById(profile.id), undefined);
 });
