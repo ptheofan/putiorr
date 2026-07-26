@@ -1,4 +1,5 @@
-// Captures clicks on magnet:/.torrent links and forwards them to the service
+// Captures clicks on magnet:/.torrent links — and on the http(s) handler links
+// that carry a magnet in their query — and forwards them to the service
 // worker. .torrent files are fetched here, in the page context, so
 // private-tracker session cookies apply. Not a module (content scripts can't
 // be), so shared helpers load via dynamic import.
@@ -142,9 +143,11 @@
     // its mark behind to swallow the next genuine click on that link.
     if (!event.isTrusted) return;
     const href = anchor.href;
-    // isMagnetLink must be asked first: isTorrentLink would otherwise claim a
-    // magnet URI whose payload happens to end in ".torrent".
-    const magnet = lib.isMagnetLink(href);
+    // magnetFromLink covers both a magnet: href and a magnet carried inside an
+    // http(s) handler URL, and it must be asked first: isTorrentLink would
+    // otherwise claim a magnet URI whose payload happens to end in ".torrent",
+    // and a handler URL whose path does.
+    const magnet = lib.magnetFromLink(href);
     if (!magnet && !lib.isTorrentLink(href)) return;
     event.preventDefault();
     event.stopPropagation();
@@ -156,7 +159,7 @@
     (async () => {
       try {
         const payload = magnet
-          ? { kind: 'grab', magnet: href, pageUrl: window.location.href }
+          ? { kind: 'grab', magnet, pageUrl: window.location.href }
           : { kind: 'grab', ...(await fetchTorrent(href)), pageUrl: window.location.href };
         await chrome.runtime.sendMessage(payload);
       } catch (error) {
@@ -164,7 +167,8 @@
         // out, or an extension reload orphaned this content script and
         // sendMessage has nothing left to talk to. Refire the click so the
         // browser does what it would have without the extension — download the
-        // .torrent, or hand the magnet to the OS protocol handler. A grab that
+        // .torrent, hand a magnet: href to the OS protocol handler, or follow a
+        // handler link to the page it points at. A grab that
         // did reach putiorr and failed there resolves normally and was already
         // reported by the service worker, so it must never land here.
         console.warn('[putiorr] capture failed, falling back to the browser:', error);

@@ -11,6 +11,12 @@ import test from 'node:test';
 const CONTENT_URL = new URL('../extension/content.js', import.meta.url);
 const RESOLVE_URL = new URL('../extension/lib/resolve.js', import.meta.url);
 const PAGE_URL = 'https://tracker.test/browse/page';
+// The https "send to put.io" link the project owner clicked, magnet and all.
+const HANDLER_URL = 'https://put.io/default/magnet?url=magnet:?xt=urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F90123456789ABCD'
+  + '&dn=Little.Chicks.5.1994.1080p.BluRay.x264-GROUP'
+  + '&tr=udp%3A%2F%2Fz.mercax.com%3A53%2Fannounce'
+  + '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce'
+  + '&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce';
 
 let contentLoad = 0;
 
@@ -148,10 +154,11 @@ async function loadContent(options = {}) {
   return harness;
 }
 
-test('the dynamic import target is a real module exposing the link predicates', async () => {
+test('the dynamic import target is a real module exposing the link helpers', async () => {
   const module = await import(RESOLVE_URL.href);
   assert.equal(typeof module.isMagnetLink, 'function');
   assert.equal(typeof module.isTorrentLink, 'function');
+  assert.equal(typeof module.magnetFromLink, 'function');
 });
 
 test('a magnet click is captured and forwarded without touching the network', async () => {
@@ -190,6 +197,67 @@ test('a magnet whose payload ends in .torrent is still sent as a magnet', async 
   assert.equal(harness.sent.length, 1);
   assert.equal(harness.sent[0].magnet, href);
   assert.equal(harness.sent[0].torrentBase64, undefined, 'no page fetch should have been attempted');
+});
+
+test('a magnet wrapped in an http handler link is captured whole', async () => {
+  // The link the project owner clicked. The browser followed it and put.io
+  // opened its own add-magnet page, because neither predicate claimed an
+  // https href whose query happens to carry the magnet.
+  const harness = await loadContent();
+
+  const anchor = harness.anchor(HANDLER_URL);
+  const event = harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(event.prevented, true, 'the browser must not also follow the handler link');
+  assert.equal(event.stopped, true);
+  assert.equal(harness.sent.length, 1);
+  const { magnet } = harness.sent[0];
+  assert.deepEqual(harness.sent, [{ kind: 'grab', magnet, pageUrl: PAGE_URL }]);
+  // Not just the infohash: reading the "url" parameter would have sent that
+  // alone, because the inner "&dn=" and "&tr=" are the outer URL's parameters
+  // as far as any URL parser is concerned.
+  const params = new URLSearchParams(magnet.slice(magnet.indexOf('?') + 1));
+  assert.equal(params.get('xt'), 'urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F90123456789ABCD');
+  assert.equal(params.get('dn'), 'Little.Chicks.5.1994.1080p.BluRay.x264-GROUP');
+  assert.equal(params.getAll('tr').length, 3);
+  assert.equal(anchor.clicks, 0, 'a captured link must not fall through to the handler page');
+});
+
+test('a handler link ending in .torrent is sent as its magnet, not fetched', async () => {
+  // magnetFromLink has to be asked before isTorrentLink: this path really is a
+  // .torrent one, and fetching it would upload the handler's HTML to put.io.
+  const href = 'https://tracker.test/dl/file.torrent?url=magnet:?xt=urn:btih:abc&dn=Wrapped';
+  const resolve = await import(RESOLVE_URL.href);
+  assert.equal(resolve.isTorrentLink(href), true, 'the input must be claimed by both to discriminate');
+
+  const harness = await loadContent();
+  harness.dispatch(harness.anchor(href));
+  await settle();
+
+  assert.deepEqual(harness.sent, [{
+    kind: 'grab',
+    magnet: 'magnet:?xt=urn:btih:abc&dn=Wrapped',
+    pageUrl: PAGE_URL,
+  }]);
+});
+
+test('a wrapped magnet that never reaches the worker falls back to the handler link', async () => {
+  // Same contract as a bare magnet: a capture that fails before the worker has
+  // the grab replays the click, so the user gets the handler page they would
+  // have got without the extension rather than a dead link.
+  const harness = await loadContent({
+    sendMessage: async () => {
+      throw new Error('Extension context invalidated.');
+    },
+  });
+
+  const anchor = harness.anchor(HANDLER_URL);
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(anchor.clicks, 1, 'the browser must still get its turn at the link');
+  assert.equal(harness.warnings.length, 1);
 });
 
 test('a .torrent click is fetched with page credentials and forwarded byte-exact', async () => {
