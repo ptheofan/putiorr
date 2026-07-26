@@ -9,6 +9,23 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [3.0.2] — 2026-07-27
+
+### Changed
+
+- **The database upgrade summary can now be dismissed.** `The last database
+  upgrade migrated N downloads. Files on disk were not touched.` was written
+  once and never cleared, so it stayed on the dashboard for the life of the
+  database. It now carries a dismiss control, recorded on the server so it
+  survives a reload, a restart and a different browser. The migration reports
+  themselves are kept — they remain in `GET /api/settings` as the record of the
+  run — and the dismissal is keyed to the upgrade it was read for, so a later
+  migration shows its own summary again.
+
+  The quarantine warning beside it has no dismiss control and never will: those
+  downloads stay invisible until someone acts on them, so the panel stays up
+  for the warning even once the summary is gone.
+
 ## [3.0.1] — 2026-07-26
 
 ### Fixed
