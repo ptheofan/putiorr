@@ -81,12 +81,10 @@ one that does.
 putiorr normalizes what you save and the profile card shows the stored result,
 so what is listed is what will be matched: a unicode domain is stored in
 punycode, a scheme, port, or path is stripped, and leading dots and a trailing
-dot are dropped. Underscore hostnames (`media_server.lan`) are accepted because
-they really do match on a home LAN. Wildcards are refused — `*.x.example` is
-answered with the entry you actually want, `x.example`, and the profile is not
-saved until you fix it. A single-label site saves with a warning next to the
-confirmation, because suffix matching makes `lan` a rule over every host ending
-in `.lan`.
+dot are dropped. Only the hostname is ever compared. Underscore hostnames
+(`media_server.lan`) are accepted because they really do match on a home LAN.
+An entry no hostname could equal — an empty label, a leading `-` — is refused
+and the profile is not saved until you fix it.
 
 ## Configure The Extension
 
@@ -147,6 +145,11 @@ showing them until you press **Dismiss**, which deletes them from storage. They
 are never pushed to putiorr: only you know whether that mapping is still what
 you want. Recreate it as **Browser sites** on the profiles you want, then
 dismiss.
+
+Recreate it deliberately, because the entries no longer mean what they did:
+those rules matched by suffix, so `x.example` covered `dl.x.example` too.
+A plain **Browser sites** entry matches that host and nothing under it. The
+entry that carries the old meaning over is `*.x.example`.
 
 ## Claim A Site From The Toolbar
 

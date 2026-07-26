@@ -292,15 +292,22 @@ Phased per the audit's plan, each phase independently shippable:
 Phase 6 turns these into release notes. Each is a setup that works today and
 stops working on upgrade, so each needs the fix spelled out.
 
-- **Prowlarr on the shared endpoint with mapped categories.** The User-Agent
-  bypass that let anything calling itself Prowlarr claim an add is gone
-  (phase 1), and so is category routing (phase 2). Fix: point Prowlarr at its
-  own RPC path, `/prowlarr/transmission/rpc`.
-- **Any multi-profile setup where the *arr apps share `/transmission/rpc`.**
-  The shared endpoint now serves exactly one *arr profile and refuses
-  otherwise, naming each profile's path in the refusal. Fix: give each *arr
-  its own RPC path, including the seeded profile that still holds the shared
-  one. A single-profile install is unaffected.
+- **Category routing is gone.** The download-client category no longer picks a
+  profile, vetoes one, or has to agree with the app's labels (phase 2): it
+  names the staging subfolder under the owning profile's download folder and
+  nothing more. Fix: nothing for the recommended setup. Prowlarr's per-release
+  mapped categories, which used to need the User-Agent bypass to get past the
+  category check, simply work.
+- **A download client that does not name itself, on a multi-profile install.**
+  The shared `/transmission/rpc` endpoint identifies the calling app from its
+  `User-Agent` — the bypass phase 1 deleted came back as the general rule, not
+  as Prowlarr's exemption — so the five *arr apps need no change. Anything
+  else, a script or a generic Transmission client, resolves to no profile
+  there and is refused `torrent-add` and `torrent-remove`, naming each
+  profile's path in the refusal; `torrent-get` still answers, with every
+  download. Fix: give that client the RPC path of the profile it means, which
+  always wins over the header. The same applies to two profiles answering to
+  one name, such as a second Sonarr instance.
 - **Downloads with no owning profile no longer acquire one at boot.** They
   appear in the dashboard's **Needs attention** section rather than in the
   downloads list, and are skipped by the sweeps rather than being handed to
@@ -335,8 +342,9 @@ stops working on upgrade, so each needs the fix spelled out.
   `.downloads`.
 - **A disabled RR profile now refuses instead of disappearing.** Its RPC path
   answers with a refusal naming it rather than the dashboard's HTML; it still
-  claims its browser sites, so a grab from one is refused instead of falling
-  through to the extension's default profile; and it is still counted when the
+  claims its browser sites, and the catch-all role if it holds that, so a grab
+  from one is refused instead of falling through to the next profile; and it is
+  still counted when the
   shared endpoint decides whether it is ambiguous, so switching a profile off
   no longer hands that endpoint to another one. Its existing downloads are
   unaffected: they keep downloading and `torrent-get`/`torrent-remove` still
@@ -362,3 +370,12 @@ stops working on upgrade, so each needs the fix spelled out.
   can no longer be deleted without reassigning the profiles that reference it —
   which `DELETE /api/download-profiles/:id` now does automatically, to the
   default.
+- **A plain browser-site entry no longer covers subdomains.** `x.example`
+  matches that host and nothing under it; `*.x.example` matches the apex and
+  every subdomain of it, at any depth, and the longest wildcard base wins.
+  Not a 2.0.x release note — the extension and per-profile **Browser sites**
+  are both new in this release, and 2.0.3 shipped neither. It is only a change
+  against a pre-release unpacked build, where both the extension's own site
+  rules and the first cut of **Browser sites** matched by suffix. The
+  extension's read-only **Old site rules** panel says so, and says the entry
+  that carries the old meaning over is `*.x.example`.
