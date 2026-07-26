@@ -257,17 +257,21 @@ export class TransferService {
     return matches.length === 1 ? matches[0] : undefined;
   }
 
-  // The one mechanism. An RPC request is owned by the profile whose path it
-  // arrived on; the shared path serves exactly one *arr profile, or refuses.
-  // Nothing else may select an owner — not the download-dir category, not the
-  // client's name, not row order.
+  // The two mechanisms, in order. An RPC request is owned by the profile whose
+  // path it arrived on; failing that, by the profile the calling app named
+  // itself as. The shared path with neither serves a single-profile install, or
+  // refuses — and torrent-add and torrent-remove are the methods that must
+  // refuse, because one decides where files go and the other destroys them.
+  // Nothing else may select an owner: not the download-dir category, not the
+  // labels, not row order.
   //
   // This resolves; it does not admit. Whether the profile it names is switched
   // on is asked once, at the point new work would be created — so a disabled
   // profile's *arr can still list, remove and finish the downloads it already
   // has instead of having its whole queue answered with a refusal.
-  resolveRpcProfile(profile) {
+  resolveRpcProfile(profile, clientProfile) {
     if (profile) return profile;
+    if (clientProfile) return clientProfile;
     const profiles = this.listArrProfiles();
     if (profiles.length === 1) return profiles[0];
     if (profiles.length === 0) throw new Error('No RR profile is configured');
@@ -578,18 +582,21 @@ export class TransferService {
     return this.store.updateProfile(current.id, { putio_folder_id: folderId });
   }
 
-  async addTorrent(args = {}, profile) {
-    // Resolved exactly like torrent-get and torrent-remove. It used to resolve
-    // by download-dir category instead, so an ambiguous shared endpoint
-    // accepted adds it would then refuse to list or remove: the *arr grabbed
-    // releases it could never see, import or clean up, and re-grabbed them on
-    // every RSS cycle.
+  async addTorrent(args = {}, profile, clientProfile) {
+    // The path, then the calling app's own name, then a refusal — the same
+    // order torrent-remove uses, and one step stricter than torrent-get, which
+    // may end at nobody. This has to know where the files go, so an add it
+    // cannot attribute is refused rather than guessed at. It used to resolve by
+    // download-dir category instead, so an ambiguous shared endpoint accepted
+    // adds it would then refuse to list or remove: the *arr grabbed releases it
+    // could never see, import or clean up, and re-grabbed them every RSS cycle.
+    //
     // The only RPC method that creates new work, so the only one that asks
     // whether the resolved profile accepts any. torrent-get and torrent-remove
     // deliberately do not: a disabled profile's queue still has to be
     // listable and clearable.
     const currentProfile = await this.ensureProfileFolder(
-      this.requireProfile(this.resolveRpcProfile(profile)),
+      this.requireProfile(this.resolveRpcProfile(profile, clientProfile)),
     );
     const filename = firstDefined(args.filename, args.url);
     const magnetLink = firstDefined(args.magnetLink, args['magnet-link']);
@@ -884,8 +891,11 @@ export class TransferService {
     return { torrents };
   }
 
-  async removeTorrents(args = {}, profile) {
-    const currentProfile = this.resolveRpcProfile(profile);
+  async removeTorrents(args = {}, profile, clientProfile) {
+    // Destructive, so it refuses what it cannot attribute rather than falling
+    // back to everything the way the listing does: a remove that resolved to no
+    // one would delete across every profile at once.
+    const currentProfile = this.resolveRpcProfile(profile, clientProfile);
     const ids = Array.isArray(args.ids) ? args.ids : [];
     const deleteLocal = Boolean(args['delete-local-data'] ?? args.deleteLocalData);
 

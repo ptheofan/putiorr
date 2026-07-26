@@ -1281,14 +1281,14 @@ export class TransmissionRpcServer {
           version: '2.94',
         };
       case 'torrent-add':
-        return this.service.addTorrent(args, profile);
+        return this.service.addTorrent(args, profile, clientProfile);
       case 'torrent-get':
         return this.service.getTorrents(args, profile, clientProfile);
       case 'torrent-set':
       case 'queue-move-top':
         return {};
       case 'torrent-remove':
-        return this.service.removeTorrents(args, profile);
+        return this.service.removeTorrents(args, profile, clientProfile);
       default:
         logger.debug('unsupported rpc method', { method });
         return {};
