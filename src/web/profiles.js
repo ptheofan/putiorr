@@ -25,7 +25,7 @@ import {
   grabProfileSummary,
   presetDisplayName,
   setCheckboxChecked,
-  setButtonDisabled,
+  setDisabled,
   profileDeletionSummary,
   profileDeletionOutcome,
 } from './util.js';
@@ -411,7 +411,9 @@ export function createProfileCard(profile) {
   setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
 
   card.querySelector('[data-action="edit"]').addEventListener('click', () => openProfileWizard(profile));
-  card.querySelector('[data-action="delete"]').addEventListener('click', () => deleteProfileById(profile.id));
+  card.querySelector('[data-action="delete"]').addEventListener('click', () => {
+    deleteProfileById(profile.id).catch((error) => setMessage(error.message, 'error'));
+  });
   return card;
 }
 
@@ -744,6 +746,9 @@ export function renderProfileDeleteTargets(preview) {
       + ' so these downloads have nowhere to move to without their files being left behind.'
     : '');
   setHidden(el.profileDeleteTargetEmpty, !empty);
+  // Offering a choice that cannot be completed is worse than not offering it:
+  // the radio is switched off and the sentence above says why.
+  setDisabled(el.profileDeleteModeMove, empty);
 }
 
 export function profileDeleteChoice() {
@@ -769,7 +774,7 @@ export function updateProfileDeleteState() {
   const answered = !hasDownloads
     || choice.mode === 'delete'
     || (choice.mode === 'move' && Boolean(choice.reassignTo));
-  setButtonDisabled(el.profileDeleteButton, !answered);
+  setDisabled(el.profileDeleteButton, !answered);
 }
 
 // Coloured the way the download delete confirmation colours its own message,
@@ -795,7 +800,7 @@ export function profileDeleteBody(preview, choice) {
 export async function confirmProfileDelete() {
   const pending = state.pendingProfileDelete;
   if (!pending) return;
-  setButtonDisabled(el.profileDeleteButton, true);
+  setDisabled(el.profileDeleteButton, true);
   setProfileDeleteMessage('Deleting...');
   try {
     const result = await api(`/api/profiles/${pending.id}`, {

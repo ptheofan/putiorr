@@ -26,7 +26,7 @@ import {
   schemaMigrationWarning,
   setCheckboxChecked,
   isCheckboxChecked,
-  setButtonDisabled,
+  setDisabled,
 } from './util.js';
 import { renderTopology } from './topology.js';
 
@@ -712,7 +712,7 @@ export function closeDeleteConfirm() {
 
 export function updateDeleteConfirmButtonState() {
   const anyChecked = isCheckboxChecked(el.deleteFromPutio) || isCheckboxChecked(el.deleteLocalFiles);
-  setButtonDisabled(el.deleteConfirmButton, !anyChecked);
+  setDisabled(el.deleteConfirmButton, !anyChecked);
 }
 
 export function handleDeleteOptionChange(event) {
@@ -729,7 +729,7 @@ export async function confirmPendingDelete() {
   const pendingDelete = state.pendingDelete;
   if (!pendingDelete) return;
 
-  setButtonDisabled(el.deleteConfirmButton, true);
+  setDisabled(el.deleteConfirmButton, true);
   setDeleteConfirmMessage('Deleting...', 'neutral');
   const deleteRemote = isCheckboxChecked(el.deleteFromPutio);
   const deleteLocal = isCheckboxChecked(el.deleteLocalFiles);

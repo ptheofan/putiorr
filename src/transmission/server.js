@@ -105,7 +105,8 @@ export function profileConflictError(error, input = {}, store) {
   // Named after the profile that actually holds the value, never after the one
   // being written: "a profile named X already exists" about the name the user
   // just typed sends them looking for a profile that does not exist. A disabled
-  // owner is not findable by path, so that case stays deliberately vague.
+  // profile is named here like any other — it still holds its path, which is
+  // exactly why the save was refused.
   const owner = column === 'slug'
     ? store?.findProfileBySlug(input.slug)
     : store?.findProfileByRpcPath(input.rpc_path);

@@ -161,6 +161,7 @@ export const el = {
   profileDeleteSummary: document.querySelector('#profileDeleteSummary'),
   profileDeleteClose: document.querySelector('#profileDeleteClose'),
   profileDeleteMode: document.querySelector('#profileDeleteMode'),
+  profileDeleteModeMove: document.querySelector('#profileDeleteModeMove'),
   profileDeleteTarget: document.querySelector('#profileDeleteTarget'),
   profileDeleteTargetEmpty: document.querySelector('#profileDeleteTargetEmpty'),
   profileDeleteOptions: document.querySelector('#profileDeleteOptions'),

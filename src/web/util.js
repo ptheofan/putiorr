@@ -330,9 +330,11 @@ export function isCheckboxChecked(checkbox) {
   return Boolean(checkbox.checked || checkbox.hasAttribute('checked'));
 }
 
-export function setButtonDisabled(button, disabled) {
-  button.disabled = disabled;
-  button.toggleAttribute('disabled', disabled);
+// Any control, not only a button: a radio whose choice cannot be completed is
+// switched off the same way.
+export function setDisabled(control, disabled) {
+  control.disabled = disabled;
+  control.toggleAttribute('disabled', disabled);
 }
 
 // Deleting an RR profile is irreversible and reaches put.io and the disk, so
