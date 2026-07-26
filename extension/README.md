@@ -130,7 +130,9 @@ grab profile and every grab from a site nobody listed lands there; leave it off
 everywhere and such a grab is refused rather than guessed at. It is a fallback,
 not a wildcard: a profile that lists a site still wins for everything that site
 covers. Only one profile may hold it, and a second save is refused, naming the
-one that does.
+one that does — with an offer to hand the role over: **Make this the fallback
+grab profile** saves what you have typed and unticks the box on that profile in
+the same step, and the confirmation names the profile that lost it.
 
 putiorr normalizes what you save and the profile card shows the stored result,
 so what is listed is what will be matched: a unicode domain is stored in

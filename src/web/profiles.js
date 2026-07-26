@@ -311,6 +311,7 @@ export const WIZARD_HELP = {
     ],
     tips: [
       'Only one profile may take the rest. Saving a second is refused, naming the profile that already holds it, because two would leave every unlisted site ambiguous.',
+      'That refusal offers to hand the role over: "Make this the fallback grab profile" saves what you have typed and unticks the box on the other profile in the same step, and the confirmation names the profile that lost it.',
       'A profile can do both: list the sites it cares about and take everything else. The two settings answer different grabs.',
       'Switching this profile off does not release the role. A grab from an unlisted site is then refused by name rather than landing in some other profile\'s folder.',
       'With no profile ticked, putiorr refuses such a grab with a message naming this very checkbox. Nothing is dropped in silence.',
