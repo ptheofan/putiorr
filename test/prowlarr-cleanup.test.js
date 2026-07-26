@@ -257,7 +257,11 @@ test('poll removes an already processed prowlarr download that still has local f
   }
 });
 
-test('processed auto-remove uses the stored RPC profile, not category inference', async () => {
+// Auto-remove is a property of the profile that owns the download, read off
+// `profile_id`. The download's category is the name of a staging subfolder and
+// says nothing about who owns it — a download of Lidarr's staged under
+// `prowlarr/` is still Lidarr's, and Lidarr imports it.
+test('processed auto-remove follows the owning profile flag, not the download category', async () => {
   const harness = await createHarness();
   try {
     const prowlarr = harness.store.createProfile({

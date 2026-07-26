@@ -368,7 +368,11 @@ function createSiteProfile(harness, slug, browserDomains, { enabled = true, type
     slug,
     putio_folder_name: slug,
     downloadAt: path.join(harness.config.targetDir, slug),
-    rpc_path: `/${slug}/transmission/rpc`,
+    // A grab profile holds no RPC path at all — nothing connects to one over
+    // Transmission, and the derived /grab/<slug>/rpc that used to satisfy
+    // NOT NULL UNIQUE was a live endpoint an *arr could add into. Fixtures that
+    // give one a path describe a database no wizard and no seed can produce.
+    rpc_path: type === 'grab' ? null : `/${slug}/transmission/rpc`,
     browser_domains: browserDomains,
     enabled,
   });
@@ -830,9 +834,9 @@ test('a profile whose browser sites are all unambiguous carries no warning key',
 });
 
 test('a duplicate grab profile name is refused by name, not by a hidden column', async (t) => {
-  // The wizard hides the RPC endpoint path for grab profiles and derives it
-  // from the display name, so "UNIQUE constraint failed: profiles.rpc_path"
-  // would point at a field that is not on the form.
+  // The colliding column is `slug`, which the wizard derives from the display
+  // name and never shows. A raw "UNIQUE constraint failed: profiles.slug" would
+  // name a field that is not on the form, so the refusal names the one that is.
   const harness = await createHarness();
   t.after(closeHarness(harness));
 

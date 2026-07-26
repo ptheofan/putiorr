@@ -1810,7 +1810,11 @@ test('labels and download-dir never override the profile the RPC path names', as
   assert.equal(harness.store.listActiveDownloads({ profileId: harness.store.findProfileBySlug('sonarr').id }).length, 0);
 });
 
-test('put.io refresh preserves the RPC-selected profile association', async (t) => {
+// The owner is resolved once and frozen, so the poll may correct a download's
+// remote fields and must never touch its `profile_id` — least of all by the
+// put.io folder, which two profiles are free to share and the README recommends
+// they do.
+test('put.io refresh never re-owns a download when two profiles share a put.io folder', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -2924,9 +2928,12 @@ test('torrent-remove refuses an id owned by another profile instead of reporting
 });
 
 test('a grab profile parked on the shared path cannot take that endpoint down', async (t) => {
-  // The grab refusal keys on the request path matching a grab profile's
-  // rpc_path. A grab profile holding '/transmission/rpc' would otherwise refuse
-  // every *arr on the box, so the shared path is never a grab path.
+  // handle() looks the request path up in `profiles.rpc_path` before it decides
+  // anything, and on the shared path it throws that lookup away: the endpoint is
+  // answered by the single *arr profile or by nobody. A grab profile cannot
+  // answer Transmission RPC, so one holding this path — which nothing derives
+  // any more, but POST /api/profiles will still store — must not be able to take
+  // the endpoint off the *arr that owns it.
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
