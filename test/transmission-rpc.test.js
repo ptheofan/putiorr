@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
-import { downloadFolderName } from '../src/download/paths.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
 import { TRANSMISSION_STATUS } from '../src/transmission/progress.js';
@@ -230,20 +229,19 @@ test('torrent-add persists category and torrent-get returns Transmission shape',
   assert.equal(getBody.result, 'success');
   assert.equal(getBody.arguments.torrents.length, 1);
   // Every *arr resolves the files as downloadDir + name (Sonarr's
-  // TransmissionBase.GetOutputPath), so the name reported over RPC is the
-  // folder the files are staged into — id prefix and all — rather than the
-  // put.io name it is built from. Reporting the put.io name would point every
-  // completed-download import at a path that does not exist.
+  // TransmissionBase.GetOutputPath), so these two have to join into the folder
+  // the files are actually staged into — which is why the name reported here
+  // is the put.io name, untouched, and the folder is named for it.
   assert.deepEqual(getBody.arguments.torrents[0], {
     id: 1,
     hashString: 'abcdef',
-    name: '1-Example.Release',
+    name: 'Example.Release',
     downloadDir: path.join(harness.config.targetDir, 'tv'),
     percentDone: 0,
   });
   assert.equal(
     path.join(getBody.arguments.torrents[0].downloadDir, getBody.arguments.torrents[0].name),
-    path.join(harness.config.targetDir, 'tv', downloadFolderName(harness.store.findDownloadById(1))),
+    path.join(harness.config.targetDir, 'tv', 'Example.Release'),
   );
 });
 
@@ -400,8 +398,7 @@ test('torrent-remove with delete-local-data deletes local staging files', async 
     }),
   });
 
-  const staged = harness.store.findDownloadByHash('abcdef');
-  const stagedPath = path.join(harness.config.targetDir, 'radarr', downloadFolderName(staged));
+  const stagedPath = path.join(harness.config.targetDir, 'radarr', 'Example.Release');
   await mkdir(stagedPath, { recursive: true });
   await writeFile(path.join(stagedPath, 'Example.Release.mkv'), 'movie');
 
@@ -455,7 +452,7 @@ test('dashboard bucket delete can leave put.io data and tombstone the download',
     status: 'complete',
   });
 
-  const stagedPath = path.join(profile.download_at, 'radarr', downloadFolderName(transfer));
+  const stagedPath = path.join(profile.download_at, 'radarr', 'Bucket.Delete');
   await mkdir(stagedPath, { recursive: true });
   await writeFile(path.join(stagedPath, 'Bucket.Delete.mkv'), 'movie');
 
@@ -530,7 +527,7 @@ test('dashboard file delete removes one file locally and optionally from put.io'
     status: 'complete',
   });
 
-  const stagedPath = path.join(profile.download_at, 'sonarr', downloadFolderName(transfer));
+  const stagedPath = path.join(profile.download_at, 'sonarr', 'File.Delete');
   await mkdir(stagedPath, { recursive: true });
   await writeFile(path.join(stagedPath, 'Episode.One.mkv'), 'one');
   await writeFile(path.join(stagedPath, 'Episode.Two.mkv'), 'two');
@@ -594,7 +591,7 @@ test('dashboard deleting all selected files deletes the whole bucket', async (t)
     status: 'complete',
   });
 
-  const stagedPath = path.join(profile.download_at, 'lidarr', downloadFolderName(transfer));
+  const stagedPath = path.join(profile.download_at, 'lidarr', 'All.Files.Delete');
   await mkdir(stagedPath, { recursive: true });
   await writeFile(path.join(stagedPath, 'Disc.One.flac'), 'one');
   await writeFile(path.join(stagedPath, 'Disc.Two.flac'), 'two');
@@ -646,7 +643,7 @@ test('dashboard bucket delete keeps local files when deleteLocal is omitted', as
     status: 'complete',
   });
 
-  const stagedPath = path.join(profile.download_at, 'radarr', downloadFolderName(transfer));
+  const stagedPath = path.join(profile.download_at, 'radarr', 'Keep.Local');
   await mkdir(stagedPath, { recursive: true });
   await writeFile(path.join(stagedPath, 'Keep.Local.mkv'), 'movie');
 
@@ -758,7 +755,7 @@ test('dashboard file delete keeps local files when deleteLocal is omitted', asyn
     status: 'complete',
   });
 
-  const stagedPath = path.join(profile.download_at, 'sonarr', downloadFolderName(transfer));
+  const stagedPath = path.join(profile.download_at, 'sonarr', 'Keep.File');
   await mkdir(stagedPath, { recursive: true });
   await writeFile(path.join(stagedPath, 'Episode.One.mkv'), 'one');
   await writeFile(path.join(stagedPath, 'Episode.Two.mkv'), 'two');
@@ -1310,7 +1307,7 @@ test('RPC listing is scoped to the profile selected by the request path', async 
   assert.deepEqual(getBody.arguments.torrents, [{
     id: 1,
     hashString: 'defaulthash',
-    name: '1-Default.Release',
+    name: 'Default.Release',
     downloadDir: path.join(harness.config.targetDir, 'default'),
   }]);
 });
@@ -1754,7 +1751,7 @@ test('a second profile grabbing an already-owned release is refused by name', as
   const sonarrPath = path.join(
     harness.config.targetDir,
     'sonarr',
-    downloadFolderName(harness.store.findDownloadById(sonarrId)),
+    harness.store.findDownloadById(sonarrId).name,
   );
   await mkdir(sonarrPath, { recursive: true });
   await writeFile(path.join(sonarrPath, 'Shared.Release.mkv'), 'movie');

@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, readFile, stat, unlink, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DownloadManager } from '../src/download/manager.js';
-import { downloadFolderName } from '../src/download/paths.js';
 import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
@@ -49,14 +48,6 @@ async function createHarness(remoteTransfers = []) {
     putioFactory: () => putio,
   });
   return { config, store, service, putio };
-}
-
-function createManager(harness) {
-  return new DownloadManager({
-    config: harness.config,
-    store: harness.store,
-    service: harness.service,
-  });
 }
 
 function createDownloadingTransfer(store) {
@@ -290,7 +281,7 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     const stagedFile = path.join(
       harness.config.targetDir,
       'radarr',
-      downloadFolderName(transfer),
+      'Prune.Missing.Local.Release',
       'movie.mkv',
     );
     await mkdir(path.dirname(stagedFile), { recursive: true });
@@ -312,160 +303,6 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     assert.deepEqual(harness.putio.deletedFiles, [23]);
     assert.deepEqual(harness.putio.deletedTransfers, [22]);
     assert.deepEqual(harness.service.listDownloads(), []);
-  } finally {
-    harness.store.close();
-  }
-});
-
-// Phase 4 of the ownership cleanup (#67): the staging folder gained the
-// download's id, so an install upgrading into this version has every file in
-// the old `<category>/<put.io name>` layout. The poll moves them before it
-// does anything else — the very next thing it does is delete downloads whose
-// local data has disappeared, and "moved" would otherwise read as "gone".
-test('the poll moves an upgraded install into the per-download folders', async () => {
-  const harness = await createHarness();
-  try {
-    const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.upsertDownload({
-      profile_id: profile.id,
-      putio_transfer_id: 30,
-      putio_file_id: 31,
-      save_parent_id: 42,
-      hash: 'legacylayouthash',
-      name: 'Legacy.Layout.Release',
-      category: 'radarr',
-      lifecycle: 'processed',
-      putio_status: 'COMPLETED',
-      percent_done: 100,
-      total_size: 5,
-      downloaded_ever: 5,
-    });
-    harness.store.upsertDownloadFile({
-      download_id: transfer.id,
-      putio_file_id: 32,
-      relative_path: 'movie.mkv',
-      size: 5,
-      downloaded_bytes: 5,
-      status: 'complete',
-    });
-
-    const legacyPath = path.join(harness.config.targetDir, 'radarr', 'Legacy.Layout.Release');
-    await mkdir(legacyPath, { recursive: true });
-    await writeFile(path.join(legacyPath, 'movie.mkv'), 'movie');
-
-    await createManager(harness).pollOnce();
-
-    const moved = path.join(harness.config.targetDir, 'radarr', downloadFolderName(transfer), 'movie.mkv');
-    assert.equal(await readFile(moved, 'utf8'), 'movie');
-    await assert.rejects(() => stat(legacyPath), { code: 'ENOENT' });
-    // The download survived the sweep that deletes downloads whose files are
-    // gone, and its put.io transfer was not cancelled.
-    assert.ok(harness.store.findDownloadById(transfer.id));
-    assert.deepEqual(harness.putio.deletedTransfers, []);
-    assert.equal(harness.store.getSetting('download_layout_v2'), '1');
-  } finally {
-    harness.store.close();
-  }
-});
-
-test('the layout sweep leaves a download it cannot move, and the poll keeps it', async () => {
-  const harness = await createHarness();
-  try {
-    const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.upsertDownload({
-      profile_id: profile.id,
-      putio_transfer_id: 33,
-      putio_file_id: 34,
-      hash: 'conflictlayouthash',
-      name: 'Conflict.Layout.Release',
-      lifecycle: 'processed',
-      putio_status: 'COMPLETED',
-      percent_done: 100,
-    });
-
-    // Both layouts populated: merging them is a guess about which copy is the
-    // real one, so the sweep refuses and says so. The files stay where they
-    // are, and the prune must still not read this as data that disappeared.
-    const legacyPath = path.join(harness.config.targetDir, 'Conflict.Layout.Release');
-    const newPath = path.join(harness.config.targetDir, downloadFolderName(transfer));
-    await mkdir(legacyPath, { recursive: true });
-    await mkdir(newPath, { recursive: true });
-    await writeFile(path.join(legacyPath, 'old.mkv'), 'old');
-
-    await createManager(harness).pollOnce();
-
-    assert.equal(await readFile(path.join(legacyPath, 'old.mkv'), 'utf8'), 'old');
-    assert.ok(harness.store.findDownloadById(transfer.id));
-    assert.deepEqual(harness.putio.deletedTransfers, []);
-  } finally {
-    harness.store.close();
-  }
-});
-
-// Phase 4 of the ownership cleanup (#67), audit finding 9: adoption of a
-// transfer putiorr did not create maps the put.io folder to a profile, and is
-// skipped unless exactly one profile owns that folder. Every profile defaults
-// to the same `putiorr` folder, which the README recommends — so in the
-// documented setup nothing is ever adopted, and it used to say nothing at all.
-test('put.io transfers a shared folder cannot attribute are reported, not skipped in silence', async () => {
-  const harness = await createHarness();
-  try {
-    harness.store.createProfile({
-      name: 'Radarr',
-      type: 'radarr',
-      slug: 'radarr',
-      putio_folder_name: 'putiorr',
-      downloadAt: harness.config.targetDir,
-      rpc_path: '/radarr/transmission/rpc',
-      enabled: true,
-    });
-
-    harness.putio.remoteTransfers = [
-      { id: 80, fileId: 81, saveParentId: 42, hash: 'sharedfolderhash', name: 'Shared.Folder.Release', status: 'COMPLETED', percentDone: 100 },
-      { id: 82, fileId: 83, saveParentId: 99, hash: 'unwatchedhash', name: 'Unwatched.Release', status: 'COMPLETED', percentDone: 100 },
-    ];
-
-    const logs = [];
-    const originalLog = console.log;
-    console.log = (line) => logs.push(line);
-    try {
-      await harness.service.refreshRemoteTransfers();
-    } finally {
-      console.log = originalLog;
-    }
-
-    assert.deepEqual(harness.store.listActiveDownloads(), []);
-    const notices = harness.store.adoptionNotices();
-    const shared = notices.find((notice) => notice.putioFolderId === 42);
-    assert.deepEqual(shared.profiles, ['Custom', 'Radarr']);
-    assert.equal(shared.transferCount, 1);
-    assert.deepEqual(shared.transfers, [{ id: 80, name: 'Shared.Folder.Release' }]);
-    const unwatched = notices.find((notice) => notice.putioFolderId === 99);
-    assert.deepEqual(unwatched.profiles, []);
-    assert.equal(unwatched.transferCount, 1);
-
-    const logged = logs.map((line) => JSON.parse(line))
-      .find((entry) => entry.message === 'put.io transfers cannot be attributed to one RR profile');
-    assert.equal(logged.meta.folders.length, 2);
-  } finally {
-    harness.store.close();
-  }
-});
-
-test('the adoption notice clears once nothing is left unattributed', async () => {
-  const harness = await createHarness();
-  try {
-    harness.store.saveAdoptionNotices([{ putioFolderId: 42, folderName: 'putiorr', profiles: [], transfers: [], transferCount: 3 }]);
-
-    harness.putio.remoteTransfers = [
-      { id: 84, fileId: 85, saveParentId: 42, hash: 'adoptablehash', name: 'Adoptable.Release', status: 'COMPLETED', percentDone: 100 },
-    ];
-    await harness.service.refreshRemoteTransfers();
-
-    // One profile owns folder 42, so the transfer is adopted and the notice
-    // has nothing left to report.
-    assert.equal(harness.store.findDownloadByPutioTransferId(84).name, 'Adoptable.Release');
-    assert.deepEqual(harness.store.adoptionNotices(), []);
   } finally {
     harness.store.close();
   }

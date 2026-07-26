@@ -123,16 +123,31 @@ one later.
 
 ## Local paths
 
-The destination gains a component unique to the download so two profiles can
-never resolve to the same directory:
+Ruled by the project owner during phase 4, overriding an earlier draft of this
+section that prefixed the download id onto the folder name: **"no id no
+nothing. As it was. Exactly as it was downloaded."**
 
 ```text
-<profile.download_at>/<category>/<download.id>-<sanitised put.io name>/<relative_path>
+<profile.download_at>/<category>/<put.io name>/<relative_path>
 ```
 
-The id prefix is what makes it collision-proof and rename-stable; the name is
-kept for human legibility. `deleteLocalData` asserts the resolved path belongs
-to exactly one download before removing anything.
+The name is the one put.io reports, untouched, and `torrent-get` reports that
+same name. The two are one decision, not two: every *arr resolves a completed
+download as `downloadDir + name` (Sonarr's `TransmissionBase.GetOutputPath`,
+which Radarr and Lidarr share), so a folder spelled differently from the
+reported name is a download that never imports.
+
+The collision this section once existed to prevent — two profiles staging one
+release into one directory — is unrepresentable after phase 3: one put.io
+transfer is one download of one profile, and a second profile grabbing an
+already-owned release is refused. What remains is two *distinct* put.io
+transfers with the same name under one profile and category. Those are not
+interleaved: the second one to reach the downloader is refused, logged, and
+surfaced in the dashboard, so no two downloads ever write the same `.part`.
+
+`deleteLocalData` asserts the resolved path belongs to exactly one download
+before removing anything, and refuses any path at or above a profile's staging
+root or a category directory whatever the answer.
 
 ## Profile deletion
 
@@ -228,21 +243,6 @@ stops working on upgrade, so each needs the fix spelled out.
     download its original Transmission id back, so the *arr's queue item
     recovers — unless something has taken that id in the meantime, in which case
     the *arr re-grabs on its next RSS cycle.
-- **Downloaded files move into a folder per download** (phase 4). Staging is
-  `<download_at>/<category>/<download.id>-<put.io name>/…` instead of
-  `<download_at>/<category>/<put.io name>/…`. The first poll after the upgrade
-  moves each download's existing files into its new folder and logs every move;
-  anything it cannot move — no owner, both layouts populated, a failed rename —
-  is named in the log and left untouched on disk, and the "local data
-  disappeared" sweep keeps looking in both layouts so nothing is deleted over a
-  move that did not happen. Fix for a folder left behind: move it by hand, or
-  delete the copy you do not want.
-- **`torrent-get` reports the staging folder as the torrent name** (phase 4).
-  Every *arr resolves a download's files as `downloadDir + name`, so the name
-  has to be the folder the files are in — `17-Example.Release`, not
-  `Example.Release`. Queues show the prefixed name. Nothing needs fixing; a
-  download grabbed before the upgrade keeps its id, so its folder and its
-  reported name change together.
 - **Putiorr Grab profiles lose their `/grab/<slug>/rpc` endpoint.** It only
   existed because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a
   live Transmission endpoint. The path now answers every request with a refusal.

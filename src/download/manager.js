@@ -7,9 +7,7 @@ import { downloadPolicyForContext, isSlowSpeedResetEnabled } from './policy.js';
 import {
   downloadLocalRoot,
   fileExistsWithSize,
-  legacyDownloadLocalRoot,
   normalizeRelativePath,
-  resolveDownloadRoot,
   resolveInside,
 } from './paths.js';
 
@@ -97,7 +95,6 @@ export class DownloadManager {
   }
 
   async pollOnce() {
-    await this.migrateLocalLayout();
     await this.pruneProcessedTransfersMissingLocalData();
     const purgedFiles = this.store.purgeDeletedFilesForProcessedDownloads();
     if (purgedFiles > 0) {
@@ -111,81 +108,6 @@ export class DownloadManager {
         await this.prepareTransferSafely(row);
       }
     }
-  }
-
-  // Phase 4 gave the staging folder the download's id, so every install that
-  // upgrades into this version has its files one directory up from where the
-  // downloader now looks. They are moved, once, rather than resolved in two
-  // layouts forever: two live layouts is a second place for a path to be
-  // computed differently, which is the class of bug this phase exists to
-  // close. It runs before the "local data disappeared" prune, because to that
-  // sweep a file in the old layout is a file the user deleted — and its answer
-  // is to delete the download and cancel its put.io transfer.
-  //
-  // A download whose files cannot be moved is left exactly as it is, and
-  // hasLocalTransferData still looks in both layouts, so nothing is deleted
-  // over a move that did not happen.
-  async migrateLocalLayout() {
-    if (this.store.getSetting('download_layout_v2') === '1') return;
-
-    const downloads = [...this.store.listActiveDownloads(), ...this.store.listRemovedDownloads()];
-    let moved = 0;
-    let failed = 0;
-    for (const download of downloads) {
-      try {
-        if (await this.moveDownloadIntoOwnFolder(download)) moved += 1;
-      } catch (error) {
-        failed += 1;
-        logger.warn('could not move downloaded files into the per-download folder', {
-          transferId: download.id,
-          name: download.name,
-          error: error.message,
-        });
-      }
-    }
-
-    if (moved > 0 || failed > 0) {
-      logger.info('moved downloaded files into per-download folders', { moved, failed });
-    }
-    // Only a clean pass is recorded as done: a failure that a later boot can
-    // fix (a permission fixed, an owner reassigned) gets another chance, and
-    // the pass costs one stat per download when there is nothing to move.
-    if (failed === 0) this.store.setSetting('download_layout_v2', '1');
-  }
-
-  async moveDownloadIntoOwnFolder(download) {
-    const profile = this.service.findDownloadOwner(download);
-    if (!profile) {
-      this.warnOwnerlessDownload(download, 'cannot move its files into the per-download folder');
-      throw new Error('download has no owning RR profile');
-    }
-
-    const legacyRoot = legacyDownloadLocalRoot(profile, download);
-    const downloadRoot = downloadLocalRoot(profile, download);
-    if (!legacyRoot || legacyRoot === downloadRoot) return false;
-    if (!await this.pathExists(legacyRoot)) return false;
-
-    // Both layouts hold files. Merging them is a guess about which copy is
-    // the real one, so it says where both are and leaves them alone.
-    if (await this.pathExists(downloadRoot)) {
-      logger.warn('left downloaded files in the old layout: the per-download folder already exists', {
-        transferId: download.id,
-        name: download.name,
-        from: legacyRoot,
-        to: downloadRoot,
-      });
-      return false;
-    }
-
-    await mkdir(path.dirname(downloadRoot), { recursive: true });
-    await rename(legacyRoot, downloadRoot);
-    logger.info('moved downloaded files into the per-download folder', {
-      transferId: download.id,
-      name: download.name,
-      from: legacyRoot,
-      to: downloadRoot,
-    });
-    return true;
   }
 
   // A single transfer failing must never abort the whole poll, or every other transfer
@@ -294,7 +216,7 @@ export class DownloadManager {
       error: false,
       error_string: '',
     });
-    const downloadRoot = await resolveDownloadRoot(profile, updated);
+    const downloadRoot = this.service.requireStagingRoot(profile, updated);
     const remoteFileIds = [];
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
@@ -432,24 +354,17 @@ export class DownloadManager {
     });
   }
 
-  // Answering "no" here deletes the download and its put.io transfer, so it
-  // looks in both layouts: an install upgrading to the id-prefixed folders has
-  // its files under the old one until the boot sweep moves them, and a sweep
-  // that could not move one must not read that as the user having deleted it.
+  // Answering "no" deletes the download and cancels its put.io transfer, so a
+  // download whose folder cannot even be resolved is reported as still having
+  // its data rather than as data that disappeared.
   async hasLocalTransferData(profile, transfer) {
-    const roots = [await resolveDownloadRoot(profile, transfer)];
-    const legacyRoot = legacyDownloadLocalRoot(profile, transfer);
-    if (legacyRoot && !roots.includes(legacyRoot)) roots.push(legacyRoot);
+    const root = downloadLocalRoot(profile, transfer);
+    if (!root) return true;
     const files = this.store.listFilesForDownload(transfer.id);
+    if (files.length === 0) return this.pathExists(root);
 
-    for (const root of roots) {
-      if (files.length === 0) {
-        if (await this.pathExists(root)) return true;
-        continue;
-      }
-      for (const file of files) {
-        if (await this.pathExists(resolveInside(root, file.relative_path))) return true;
-      }
+    for (const file of files) {
+      if (await this.pathExists(resolveInside(root, file.relative_path))) return true;
     }
     return false;
   }
@@ -530,7 +445,7 @@ export class DownloadManager {
     const profile = this.service.requireDownloadOwner(transfer);
 
     const targetPath = resolveInside(
-      await resolveDownloadRoot(profile, transfer),
+      this.service.requireStagingRoot(profile, transfer),
       file.relative_path,
     );
     await mkdir(path.dirname(targetPath), { recursive: true });

@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { loadConfig } from '../src/config.js';
-import { downloadFolderName } from '../src/download/paths.js';
 import { DownloadManager } from '../src/download/manager.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
@@ -87,7 +86,7 @@ async function seedCompleteTransfer(harness, profile, patch = {}) {
     downloaded_bytes: 10,
     status: 'complete',
   });
-  const filePath = path.join(profile.download_at, transfer.category ?? '', downloadFolderName(transfer), 'movie.mkv');
+  const filePath = path.join(profile.download_at, transfer.category ?? '', transfer.name, 'movie.mkv');
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, 'downloaded!!');
   return { transfer, filePath };
@@ -219,7 +218,7 @@ test('processFile removes a completed download for a profile with auto-remove en
     assert.deepEqual(harness.putio.deletedFiles, [20]);
     assert.deepEqual(harness.putio.deletedTransfers, [10]);
     assert.equal(
-      await readFile(path.join(profile.download_at, downloadFolderName(transfer), 'movie.mkv'), 'utf8'),
+      await readFile(path.join(profile.download_at, transfer.name, 'movie.mkv'), 'utf8'),
       'done',
     );
   } finally {

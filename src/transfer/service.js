@@ -3,9 +3,8 @@ import {
   deleteLocalData,
   deleteLocalFileData,
   downloadCategoryDir,
+  downloadLocalRoot,
   extractCategory,
-  legacyDownloadLocalRoot,
-  resolveDownloadRoot,
 } from '../download/paths.js';
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
@@ -252,20 +251,15 @@ export class TransferService {
 
   downloadClaimsPath(profile, download, target) {
     try {
-      const categoryDir = downloadCategoryDir(profile, download);
-      if (
-        path.dirname(target) === categoryDir
-        && path.basename(target).startsWith(`${download.id}-`)
-      ) {
-        return true;
-      }
+      const root = downloadLocalRoot(profile, download);
+      if (root === target) return true;
       // Anything above a download's folder takes that download's files with
       // it, so it is claimed too. A quarantined row whose recorded path is a
       // whole category directory — the shape a legacy row with no name leaves
       // behind — is then contested by every download staging under it rather
       // than looking like one entry's private folder.
-      if (target === categoryDir || categoryDir.startsWith(`${target}${path.sep}`)) return true;
-      return legacyDownloadLocalRoot(profile, download) === target;
+      const categoryDir = downloadCategoryDir(profile, download);
+      return target === categoryDir || categoryDir.startsWith(`${target}${path.sep}`);
     } catch {
       // A profile with no usable download folder cannot claim anything; it
       // must not make an unrelated path look unowned or contested either.
@@ -275,6 +269,23 @@ export class TransferService {
 
   ownershipCheck() {
     return { ownersOfPath: (localPath) => this.localPathOwners(localPath) };
+  }
+
+  // Where this download's files go: `<download_at>/<category>/<put.io name>`,
+  // the name exactly as put.io named it. Every caller either writes into the
+  // answer or deletes it, so a name that cannot name a folder of its own — an
+  // empty one, or one made only of separators and dots — is an error here
+  // rather than a path that quietly resolves to the category directory holding
+  // every other download of that profile.
+  requireStagingRoot(profile, download) {
+    const root = downloadLocalRoot(profile, download);
+    if (!root) {
+      throw new Error(
+        `Download ${download?.id ?? '(unknown)'} has no usable put.io name (${JSON.stringify(download?.name ?? '')}),`
+        + ' so putiorr cannot tell which folder its files belong in',
+      );
+    }
+    return root;
   }
 
   async ensureProfileFolder(profile) {
@@ -556,10 +567,7 @@ export class TransferService {
       ? requestedIds.map((id) => this.store.findDownload(id, { profileId: currentProfile.id })).filter(Boolean)
       : this.store.listActiveDownloads({ profileId: currentProfile.id });
 
-    const torrents = [];
-    for (const row of rows) {
-      torrents.push(this.toTransmissionTorrent(row, fields, await this.localFolderName(currentProfile, row)));
-    }
+    const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
     return { torrents };
   }
 
@@ -604,7 +612,7 @@ export class TransferService {
       await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
         // The row was found scoped to this profile, so this is that profile.
-        await deleteLocalData(await resolveDownloadRoot(currentProfile, transfer), this.ownershipCheck());
+        await deleteLocalData(this.requireStagingRoot(currentProfile, transfer), this.ownershipCheck());
       }
       this.store.deleteDownload(transfer.id);
       logger.info('torrent removed', {
@@ -629,7 +637,7 @@ export class TransferService {
     // never be removed again: put.io 404s on the retry and the local half
     // throws before it gets there.
     const localTarget = deleteLocal
-      ? await resolveDownloadRoot(this.requireDownloadOwner(transfer), transfer)
+      ? this.requireStagingRoot(this.requireDownloadOwner(transfer), transfer)
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -690,7 +698,7 @@ export class TransferService {
     // Same rule as the bucket delete: resolve the owner before the first
     // irreversible step, never after it.
     const downloadRoot = deleteLocal
-      ? await resolveDownloadRoot(this.requireDownloadOwner(transfer), transfer)
+      ? this.requireStagingRoot(this.requireDownloadOwner(transfer), transfer)
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -813,22 +821,7 @@ export class TransferService {
     return errors;
   }
 
-  // Every *arr resolves a download's files as `downloadDir + name` — Sonarr's
-  // TransmissionBase.GetOutputPath, which Radarr and Lidarr share — so the
-  // name reported over RPC is the folder the files are actually in, not the
-  // put.io name it is built from. Reporting the put.io name while staging into
-  // `<id>-<name>` would point every completed-download import at a path that
-  // does not exist. It is also what Transmission itself reports: a multi-file
-  // torrent's name is its directory.
-  async localFolderName(profile, row) {
-    try {
-      return path.basename(await resolveDownloadRoot(profile, row));
-    } catch {
-      return row.name;
-    }
-  }
-
-  toTransmissionTorrent(row, requestedFields = [], localFolderName = undefined) {
+  toTransmissionTorrent(row, requestedFields = []) {
     // Rows reach here only from getTorrents, which selects them scoped to a
     // resolved profile, so an ownerless one is a bug rather than a state to
     // render around.
@@ -843,7 +836,7 @@ export class TransferService {
     const torrent = {
       id: row.id,
       hashString: row.hash,
-      name: localFolderName || row.name,
+      name: row.name,
       eta: row.eta ?? -1,
       status: progress.status,
       downloadDir: path.join(profile.download_at, row.category ?? ''),

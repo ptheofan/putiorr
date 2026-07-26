@@ -7,15 +7,11 @@ import { mkdtemp } from 'node:fs/promises';
 import {
   deleteLocalData,
   deleteLocalFileData,
-  downloadFolderName,
   downloadLocalRoot,
   extractCategory,
   fileExistsWithSize,
-  legacyDownloadLocalRoot,
   normalizeRelativePath,
-  resolveDownloadRoot,
   resolveInside,
-  sanitizeDownloadName,
 } from '../src/download/paths.js';
 
 test('extractCategory returns category relative to target dir', () => {
@@ -73,64 +69,32 @@ test('deleting a download folder needs exactly one download to own it', async ()
   await assert.rejects(stat(shared), { code: 'ENOENT' });
 });
 
-test('a download folder is named for the one download that owns it', () => {
-  // The put.io name is remote-mutable and put.io does not deduplicate it, so
-  // it cannot be the whole folder name: two profiles grabbing releases of the
-  // same name into the same folder and category used to resolve to one
-  // directory, and write the same .part file into it.
-  assert.equal(downloadFolderName({ id: 7, name: 'Example.Release' }), '7-Example.Release');
-  assert.notEqual(
-    downloadFolderName({ id: 7, name: 'Same.Name' }),
-    downloadFolderName({ id: 8, name: 'Same.Name' }),
-  );
-  assert.throws(() => downloadFolderName({ name: 'No.Id' }), /download id/);
-});
-
-test('a put.io name never escapes its own folder', () => {
-  // put.io names are free text. Anything that could make the name more than
-  // one path segment, or name the parent, is flattened rather than rejected:
-  // the download still has to land somewhere.
-  assert.equal(sanitizeDownloadName('season/../../etc'), 'season .. .. etc');
-  assert.equal(sanitizeDownloadName('..'), 'download');
-  assert.equal(sanitizeDownloadName('  '), 'download');
-  assert.equal(sanitizeDownloadName('trailing.'), 'trailing');
-  assert.equal(sanitizeDownloadName('a\u0000b'), 'a b');
-  assert.equal(sanitizeDownloadName('x'.repeat(400)).length, 120);
+test('a download stages under the put.io name, exactly as put.io named it', () => {
+  // The *arr apps resolve a completed download as `downloadDir + name`, and a
+  // user opening the staging folder expects the release they grabbed. Nothing
+  // is prefixed onto it and nothing is rewritten: a put.io name that reads
+  // like a path nests, the way it always has.
   assert.equal(
-    downloadLocalRoot({ download_at: '/downloads' }, { id: 3, name: '../escape', category: 'tv' }),
-    path.join('/downloads', 'tv', '3-escape'),
+    downloadLocalRoot({ download_at: '/downloads' }, { id: 3, name: 'Example.Release', category: 'tv' }),
+    path.join('/downloads', 'tv', 'Example.Release'),
+  );
+  assert.equal(
+    downloadLocalRoot({ download_at: '/downloads' }, { id: 3, name: 'Season 1/Episode.mkv', category: '' }),
+    path.join('/downloads', 'Season 1', 'Episode.mkv'),
   );
 });
 
-test('the legacy local root is the pre-phase-4 layout, or nothing', () => {
-  assert.equal(
-    legacyDownloadLocalRoot({ download_at: '/downloads' }, { id: 3, name: 'Old.Release', category: 'tv' }),
-    path.join('/downloads', 'tv', 'Old.Release'),
-  );
-  // An unnamed download's legacy root would be the category directory itself,
-  // which holds every other download of that profile.
-  assert.equal(legacyDownloadLocalRoot({ download_at: '/downloads' }, { id: 3, name: '', category: 'tv' }), undefined);
-  assert.equal(legacyDownloadLocalRoot({ download_at: '/downloads' }, { id: 3, name: '.', category: 'tv' }), undefined);
-});
-
-test('a download keeps the folder it is already using when put.io renames it', async () => {
-  const targetDir = await mkdtemp(path.join(tmpdir(), 'putiorr-rename-'));
-  const profile = { download_at: targetDir };
-  const download = { id: 5, name: 'Original.Name', category: 'tv' };
-  const inFlight = path.join(targetDir, 'tv', '5-Original.Name');
-  await mkdir(inFlight, { recursive: true });
-  await writeFile(path.join(inFlight, 'movie.mkv.part'), 'partial');
-
-  // put.io renames transfers under putiorr's feet. Resolving on the name
-  // alone pointed the workers at an empty directory and left the partial file
-  // behind — which the "local data disappeared" sweep then read as a download
-  // whose files a user had deleted.
-  assert.equal(await resolveDownloadRoot(profile, { ...download, name: 'Renamed.Release' }), inFlight);
-  // Nothing on disk yet: the folder is named for the download as it is now.
-  assert.equal(
-    await resolveDownloadRoot(profile, { id: 6, name: 'Fresh.Release', category: 'tv' }),
-    path.join(targetDir, 'tv', '6-Fresh.Release'),
-  );
+test('a name that cannot name a folder resolves to nothing at all', () => {
+  // Every caller of this either writes into the answer or deletes it, and the
+  // category directory holds every other download of that profile.
+  const profile = { download_at: '/downloads' };
+  assert.equal(downloadLocalRoot(profile, { id: 3, name: '', category: 'tv' }), undefined);
+  assert.equal(downloadLocalRoot(profile, { id: 3, name: '.', category: 'tv' }), undefined);
+  assert.equal(downloadLocalRoot(profile, { id: 3, name: '  /  ', category: 'tv' }), undefined);
+  // Escaping the category directory is refused rather than rewritten into
+  // something that stages somewhere else without saying so.
+  assert.throws(() => downloadLocalRoot(profile, { id: 3, name: '..', category: 'tv' }), /outside/);
+  assert.throws(() => downloadLocalRoot(profile, { id: 3, name: '../elsewhere', category: 'tv' }), /outside/);
 });
 
 test('deleteLocalData deletes only the requested transfer path', async () => {
