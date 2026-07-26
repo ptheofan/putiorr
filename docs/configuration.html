@@ -344,6 +344,32 @@ Lidarr URL: http://lidarr:8686</code></pre>
               <code>/api/grab</code> is the only way in.
             </p>
             <p>
+              The extension's toolbar icon opens a popup about the page in the
+              current tab. It names that page's site and says which profile a
+              grab from it would land in — the profile that lists it, the profile
+              that takes the sites nobody lists, or nobody at all — and, when no
+              profile lists it, offers to claim it for one of them. What it
+              stores is the page's hostname exactly as the popup shows it,
+              <code>www.</code> and all; it never shortens a host to the
+              registrable domain behind it, because the rule that would turn
+              <code>www.x.example</code> into <code>x.example</code> would also
+              turn <code>x.co.uk</code> into <code>co.uk</code>. Subdomain
+              matching then covers whatever sits under what was stored.
+            </p>
+            <p>
+              A site another profile already claims is not offered a second time:
+              the popup names that profile and stops. Listing one site on two
+              profiles changes nothing — resolution stops at the first profile
+              that matches — and moving it is two profiles changing at once,
+              which belongs on the profiles themselves. The popup writes through
+              <code>POST /api/profiles/&lt;id&gt;/browser-sites</code>, which
+              appends one site to one Putiorr Grab profile, normalizes it exactly
+              as <strong>Browser sites</strong> does, answers with that profile's
+              resulting list, and refuses with <code>409</code> — naming the
+              profile — when another one already claims the site. It requires the
+              same <code>X-Putiorr-Grab</code> header <code>/api/grab</code> does.
+            </p>
+            <p>
               Switching a grab profile off does not release its sites, or the
               catch-all if it holds it. It still claims them, and such a grab is
               refused by name rather than falling through to the next profile,
@@ -358,6 +384,7 @@ Lidarr URL: http://lidarr:8686</code></pre>
               <li>Choose Load unpacked and select the repository's <code>extension/</code> folder.</li>
               <li>Open the extension options and enter the putiorr URL, such as <code>http://nas:9091</code>, plus the Basic auth credentials if putiorr uses them.</li>
               <li>Click Test connection &amp; load profiles and press Save. The card lists what putiorr routes to each profile, including which one takes the sites no profile claims.</li>
+              <li>On a tracker page, click the extension's toolbar icon to see which profile a grab from that site would land in, and to claim the site for one of them.</li>
             </ol>
             <p class="doc-note">
               The extension only ever lists Putiorr Grab profiles, so create at

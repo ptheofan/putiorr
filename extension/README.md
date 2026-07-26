@@ -20,6 +20,10 @@ There are two ways to grab:
 `.torrent` files are fetched from inside the page, so private-tracker session
 cookies apply.
 
+The toolbar icon grabs nothing. It opens a popup about the page you are on:
+which profile a grab from this site would land in, and — when no profile claims
+it yet — a way to claim it for one without opening the dashboard.
+
 ## Install
 
 The extension is not on the Chrome Web Store yet; until it is, load it unpacked.
@@ -34,7 +38,10 @@ The extension is not on the Chrome Web Store yet; until it is, load it unpacked.
 ## Configure The Sites In putiorr
 
 Which site grabs into which profile is a putiorr setting, kept on the profile
-itself — the extension holds no copy of it. In the putiorr dashboard, open a
+itself — the extension holds no copy of it. The toolbar popup can add one site
+to one profile without leaving the page you are on (see
+[Claim A Site From The Toolbar](#claim-a-site-from-the-toolbar)); everything
+below is where the whole list lives. In the putiorr dashboard, open a
 profile's setup wizard and set **App preset** to **Putiorr Grab**. The wizard
 then drops the RPC endpoint step — no *arr download client connects to a grab
 profile, so its path, host, port, and SSL are not asked for, and no path is
@@ -122,6 +129,50 @@ are never pushed to putiorr: only you know whether that mapping is still what
 you want. Recreate it as **Browser sites** on the profiles you want, then
 dismiss.
 
+## Claim A Site From The Toolbar
+
+Click the extension's icon on any page and the popup names that page's site,
+then says who handles it:
+
+- **A profile claims it.** "Movies claims this site; grabs from here go there."
+  If it matched as a subdomain, the popup names the site that was actually
+  listed — "Movies claims x.example, and dl.x.example is a subdomain of it" —
+  because otherwise you would go looking for an entry no profile has.
+- **The catch-all takes it.** "No profile claims this site. Everything takes
+  every site no profile claims, so grabs from here go there for now."
+- **Nobody.** "No profile claims this site, and no profile takes the sites
+  nobody claims: a grab from here is refused." This is the popup telling you, in
+  advance, what a click on the next magnet link would answer.
+
+A profile that is switched off still claims its sites, so it is named like any
+other, with the reason its grabs fail added: "That profile is switched off, so
+such a grab is refused rather than routed."
+
+When no profile claims the site, the popup lists the enabled Putiorr Grab
+profiles with a **Claim `<site>`** button. **The site it stores is the page's
+hostname exactly as shown on the button** — `www.x.example` stays
+`www.x.example`. Nothing here shortens it to the registrable domain behind it:
+an extension carries no public-suffix list, and the only rule available for
+turning `www.x.example` into `x.example` would turn `x.co.uk` into `co.uk` and
+claim a whole TLD with it. putiorr matches subdomains of whatever is stored, so
+claim from the bare domain if you want the whole site, or add it in the
+dashboard.
+
+A site another profile already claims is **not** offered again. The popup names
+that profile and stops. Listing the same site twice would change nothing —
+resolution stops at the first profile that matches, so the second entry routes
+nothing at all — and moving a site is two profiles changing at once, which is
+worth seeing whole on the profiles themselves. The two buttons at the bottom go
+where that edit is made: **Options** and **Open putiorr**.
+
+The popup reads putiorr on every open and caches nothing: a site claimed from
+another window a minute ago would otherwise make it a confident, wrong answer,
+and answering that exact question is what it is for. When it cannot read
+putiorr it says which of the failures it was, and offers no picker: no putiorr
+URL set yet, a tab with no site to claim at all (`chrome://`, `about:blank`, a
+local file), an unreachable, stalled, credential-rejecting or non-putiorr
+server, and a putiorr with no Putiorr Grab profiles — or none enabled.
+
 ## Which Profile A Grab Lands In
 
 putiorr resolves this on every grab, in this order, and every path ends at a
@@ -197,6 +248,11 @@ Run this once after loading the extension, against a running putiorr (the
    catch-all, and the transfer lands under its folder. Nothing in the extension
    is touched for this: the options page shows the new site after the next
    **Test connection & load profiles**, but grabs route correctly before that.
+5. On a site no profile lists, click the toolbar icon → the popup says no
+   profile claims it, offers the enabled grab profiles, and the button reads
+   **Claim `<that exact host>`**. Click it → the popup says that profile now
+   claims the site, and a `magnet:` click on the same page lands there. Open the
+   popup again → it no longer offers the claim, and names the profile instead.
 
 ## What To Expect
 
@@ -278,14 +334,62 @@ its own guess back to the user:
 {"ok":true,"profile":{"id":4,"name":"browser"},"transfer":{"id":9,"name":"…"}}
 ```
 
+## The `/api/profiles/<id>/browser-sites` Endpoint
+
+What the toolbar popup writes. It appends one site to one Putiorr Grab
+profile's **Browser sites** and answers with the list that profile now holds:
+
+```bash
+curl -X POST http://nas:9091/api/profiles/4/browser-sites \
+  -H 'X-Putiorr-Grab: 1' \
+  -H 'Content-Type: application/json' \
+  -d '{"host":"x.example"}'
+```
+
+```json
+{"ok":true,"profile":{"id":4,"name":"movies"},"browser_domains":["z.example","x.example"],"added":"x.example"}
+```
+
+The endpoint appends rather than replacing because the popup must not
+read-modify-write the list: two popups open in two windows would each save the
+list they had read, and the later save would drop the other's site silently,
+under a reply that said the claim had worked.
+
+- `host` is one site, normalized exactly as the wizard's **Browser sites** field
+  normalizes one: punycoded, scheme and path stripped, leading and trailing dots
+  dropped. A value that could never match a hostname is a `400` naming the
+  entry, as it is in the wizard, and a comma-separated list is a `400` too —
+  the popup names one site before you click, and editing several at once is the
+  profile form's job.
+- `added` is the site that was stored, or `null` when that profile already
+  handled the host — the same site twice, or a subdomain of one it already
+  lists. Both are `200`: claiming twice is not an error, and neither adds a
+  second entry.
+- A site another Putiorr Grab profile already claims is a `409` naming it:
+  "`Movies` already claims x.example; remove the site there first if it should
+  belong to another profile". When the claim was a suffix match, the message
+  names the entry that exists rather than the host you asked about: "already
+  claims dl.x.example through x.example". Disabled profiles hold their claims
+  here exactly as they do for a grab.
+- A profile of any other preset is refused by name, like every other grab path:
+  "`<name>` is not a Putiorr Grab profile; set its App preset to Putiorr Grab in
+  putiorr". A profile putiorr does not have is a `404`.
+- The `X-Putiorr-Grab` header is required, and answered `403` without it
+  ("claiming a site requires the X-Putiorr-Grab header"), for the same reason
+  `/api/grab` requires it — see below.
+
+## Why Both Endpoints Want The Header
+
 The header is an anti-CSRF measure, not authentication. Without it, any web page
 you visit could POST a grab to your putiorr as a cross-site "simple" request
 (no preflight, credentials attached) and spend your put.io account; the response
 would be unreadable to the attacker, but the transfer would still be created.
-A custom header forces the browser to preflight, and putiorr never answers
-preflights, so the request never leaves the attacker's page. The extension is
-exempt from CORS through its `host_permissions`. Basic auth, if configured,
-applies to `/api/grab` like it does to every other putiorr route.
+The same page could hand its own hostname to one of your profiles and collect
+every grab you made from it afterwards. A custom header forces the browser to
+preflight, and putiorr never answers preflights, so the request never leaves the
+attacker's page. The extension is exempt from CORS through its
+`host_permissions`. Basic auth, if configured, applies to both routes like it
+does to every other putiorr route.
 
 ## Known Limitations
 
