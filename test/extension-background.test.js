@@ -225,14 +225,13 @@ test('credentials are sent as UTF-8 basic auth rather than Latin-1', async () =>
   assert.equal(harness.notifications[0].title, 'Sent to putiorr → Movies');
 });
 
-test('a captured grab hands putiorr the page host and the configured default', async () => {
-  // The worker no longer knows which profile claims a site: putiorr does, and
-  // it needs the host plus the extension's own default to answer.
+test('a captured grab hands putiorr the page host and nothing else to route by', async () => {
+  // The worker no longer knows which profile claims a site, nor which one takes
+  // the sites nobody claims: putiorr holds both, and the host is all it needs.
   let body;
   const harness = await loadWorker({
     sync: {
       baseUrl: 'http://putiorr.test',
-      defaultProfileId: 2,
       profiles: [{ id: 2, name: 'Movies' }],
     },
     fetch: async (url, init) => {
@@ -251,17 +250,16 @@ test('a captured grab hands putiorr the page host and the configured default', a
 
   assert.deepEqual(body, {
     pageHost: 'tracker.x.example',
-    defaultProfileId: 2,
     magnet: 'magnet:?xt=urn:btih:abc',
     sourceUrl: 'https://tracker.x.example/page',
   });
   assert.equal('profileId' in body, false, 'a captured click names no profile');
 });
 
-test('an explicit menu pick is sent as profileId and the default is left out', async () => {
+test('an explicit menu pick is sent as profileId, and it is the only id there is', async () => {
   let body;
   const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 3, name: 'TV' }] },
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
     fetch: async (url, init) => {
       body = JSON.parse(init.body);
       return { ok: true, status: 200, json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: {} }) };
@@ -276,10 +274,12 @@ test('an explicit menu pick is sent as profileId and the default is left out', a
 
   assert.equal(body.profileId, 3);
   assert.equal(body.pageHost, 'tracker.x.example');
-  assert.equal('defaultProfileId' in body, false, 'an explicit pick is not second-guessed by a default');
+  // The setting that used to ride along here lives on the putiorr profile now,
+  // so there is nothing left for the worker to second-guess the pick with.
+  assert.equal('defaultProfileId' in body, false);
 });
 
-test('an unset default and an unparseable page URL are omitted rather than sent as junk', async () => {
+test('an unparseable page URL is omitted rather than sent as junk', async () => {
   let body;
   const harness = await loadWorker({
     sync: { baseUrl: 'http://putiorr.test', profiles: [] },
@@ -304,7 +304,7 @@ test('the success notification names the profile putiorr actually used', async (
   // The site match happens on the server, so the cached pick can be the wrong
   // answer: only the response knows where the transfer landed.
   const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 2, name: 'Movies' }] },
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 2, name: 'Movies' }] },
     fetch: async () => ({
       ok: true,
       status: 200,
@@ -347,7 +347,7 @@ test('the response outranks the cached name even for an explicit pick', async ()
 
 test('a putiorr too old to name the profile still reports the grab as sent', async () => {
   const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 2, profiles: [{ id: 2, name: 'Movies' }] },
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 2, name: 'Movies' }] },
     fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, transfer: { name: 'Example' } }) }),
   });
 
@@ -364,21 +364,20 @@ test('a putiorr too old to name the profile still reports the grab as sent', asy
   assert.equal(harness.notifications[0].title, 'Sent to putiorr');
 });
 
-test('a grab with nothing to route it is refused by putiorr, not by the worker', async () => {
+test('a grab with nothing to route it is refused by putiorr, in putiorr\'s own words', async () => {
   // The worker cannot know whether the site matches a profile, so it asks
-  // instead of inventing a local "no profile" refusal. With nothing configured
-  // this is the likeliest first-run failure, so the answer has to name the fix
-  // and be able to reach it — a verbatim relay is a dead end on a fresh install.
+  // instead of inventing a local refusal — and it relays the answer verbatim.
+  // The fix is a checkbox on a putiorr profile, which putiorr's sentence names
+  // exactly; rewriting it here would put a second copy of that sentence on a
+  // surface that ships and updates on Chrome's schedule, free to drift.
   let called = false;
+  const refusal = 'No Putiorr Grab profile claims tracker.x.example and none is set to take'
+    + ' everything else; tick "Take grabs from any site no other profile claims" on a profile in putiorr';
   const harness = await loadWorker({
     sync: { baseUrl: 'http://putiorr.test', profiles: [] },
     fetch: async () => {
       called = true;
-      return {
-        ok: false,
-        status: 400,
-        json: async () => ({ error: 'No profile matches this site and no default profile is configured' }),
-      };
+      return { ok: false, status: 400, json: async () => ({ error: refusal }) };
     },
   });
 
@@ -391,62 +390,11 @@ test('a grab with nothing to route it is refused by putiorr, not by the worker',
   });
 
   assert.equal(called, true, 'the grab must reach putiorr');
-  assert.match(harness.notifications[0].message, /No profile matches this site and no default profile is set/);
-  assert.match(harness.notifications[0].message, /click here to open the options/);
-  assert.equal(harness.notifications[0].id, 'putiorr-configure');
-  assert.equal(response.ok, false);
-  assert.equal(response.error, harness.notifications[0].message);
-
-  harness.listeners.notificationClicked('putiorr-configure');
-  assert.ok(harness.log.includes('openOptionsPage'));
-});
-
-test('a putiorr from before the message was recased still guides the first run', async () => {
-  // The extension updates on Chrome's schedule and putiorr on the user's, so
-  // the two spellings of this sentence are both live in the wild.
-  const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
-    fetch: async () => ({
-      ok: false,
-      status: 400,
-      json: async () => ({ error: 'no profile matches this site and no default profile is configured' }),
-    }),
-  });
-
-  await new Promise((resolve) => {
-    harness.listeners.message(
-      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
-      { id: 'putiorr-extension-id' },
-      resolve,
-    );
-  });
-
-  assert.equal(harness.notifications[0].id, 'putiorr-configure');
-});
-
-test('a grab that names a default keeps putiorr\'s own 400', async () => {
-  // Here the user has configured something, so "no default profile is set" is
-  // not the fix; whatever putiorr refused is.
-  const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 4, name: 'Movies' }] },
-    fetch: async () => ({
-      ok: false,
-      status: 400,
-      json: async () => ({ error: 'defaultProfileId must be a positive integer' }),
-    }),
-  });
-
-  const response = await new Promise((resolve) => {
-    harness.listeners.message(
-      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
-      { id: 'putiorr-extension-id' },
-      resolve,
-    );
-  });
-
-  assert.deepEqual(response, { ok: false, error: 'defaultProfileId must be a positive integer' });
-  assert.equal(harness.notifications[0].message, 'defaultProfileId must be a positive integer');
+  assert.equal(harness.notifications[0].message, refusal);
+  // No click target: the options page cannot fix this, and a notification that
+  // opens the wrong page is worse than one that opens nothing.
   assert.equal(harness.notifications[0].id, undefined);
+  assert.deepEqual(response, { ok: false, error: refusal });
 });
 
 test('a 400 about the link itself is not rewritten as a missing profile', async () => {
@@ -474,27 +422,27 @@ test('a 400 about the link itself is not rewritten as a missing profile', async 
   assert.equal(harness.notifications[0].id, undefined);
 });
 
-test('a default profile deleted in putiorr is named as the default, not as a bare 404', async () => {
-  // The only id this grab carried is the stored default, so "Profile not found"
-  // on its own would send the user looking for a profile they never picked.
+test('a menu profile deleted in putiorr is named as a stale menu, not as a bare 404', async () => {
+  // The right-click menu is built from the last Save, so a profile deleted in
+  // putiorr sits there until the next load. "Profile not found" alone would
+  // leave the user hunting a profile on a page that has no idea it is gone —
+  // and an explicit pick is now the only id a grab can carry at all.
   const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 4, name: 'Movies' }] },
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 4, name: 'Movies' }] },
     fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Profile not found' }) }),
   });
 
-  const response = await new Promise((resolve) => {
-    harness.listeners.message(
-      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
-      { id: 'putiorr-extension-id' },
-      resolve,
-    );
-  });
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-4', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
 
-  assert.match(harness.notifications[0].message, /no longer has the default profile \(#4\)/);
+  assert.match(harness.notifications[0].message, /no longer has the profile you picked \(#4\)/);
   assert.match(harness.notifications[0].message, /load profiles again in the options/);
-  // The fix is on the options page, so the notification has to be able to reach it.
+  // Reloading the list is what fixes it, so the notification has to reach the
+  // page that does the reloading.
   assert.equal(harness.notifications[0].id, 'putiorr-configure');
-  assert.match(response.error, /no longer has the default profile/);
 
   harness.listeners.notificationClicked('putiorr-configure');
   assert.ok(harness.log.includes('openOptionsPage'));
@@ -502,11 +450,29 @@ test('a default profile deleted in putiorr is named as the default, not as a bar
 
 test('a 404 that is not a missing profile keeps its own wording', async () => {
   // Every unrouted path answers 404 too, so a putiorr too old to have
-  // /api/grab lands here. Blaming the default profile would send the user to
-  // fix a setting that is fine and hide the only clue they had.
+  // /api/grab lands here. Blaming the cached menu would send the user to reload
+  // a list that is fine and hide the only clue they had.
   const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 4, name: 'Movies' }] },
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 4, name: 'Movies' }] },
     fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Not Found' }) }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-4', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.equal(harness.notifications[0].message, 'Not Found');
+  assert.equal(harness.notifications[0].id, undefined);
+});
+
+test('a captured click that draws a 404 is relayed rather than blamed on the menu', async () => {
+  // No pick was made, so there is no cached id to be stale: whatever putiorr
+  // means by this 404, the worker has nothing to add.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 4, name: 'Movies' }] },
+    fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Profile not found' }) }),
   });
 
   const response = await new Promise((resolve) => {
@@ -517,27 +483,9 @@ test('a 404 that is not a missing profile keeps its own wording', async () => {
     );
   });
 
-  assert.equal(harness.notifications[0].message, 'Not Found');
-  assert.equal(harness.notifications[0].id, undefined);
-  assert.deepEqual(response, { ok: false, error: 'Not Found' });
-});
-
-test('a 404 on a profile the user picked by hand stays putiorr\'s own answer', async () => {
-  // Here the id came from the menu, not from storage: rewriting this as a stale
-  // default would name the wrong setting.
-  const harness = await loadWorker({
-    sync: { baseUrl: 'http://putiorr.test', defaultProfileId: 4, profiles: [{ id: 3, name: 'TV' }] },
-    fetch: async () => ({ ok: false, status: 404, json: async () => ({ error: 'Profile not found' }) }),
-  });
-
-  await harness.listeners.menu(
-    { menuItemId: 'putiorr-profile-3', linkUrl: 'magnet:?xt=urn:btih:abc' },
-    { id: 1, url: 'https://tracker.x.example/page' },
-  );
-  await settle();
-
   assert.equal(harness.notifications[0].message, 'Profile not found');
   assert.equal(harness.notifications[0].id, undefined);
+  assert.deepEqual(response, { ok: false, error: 'Profile not found' });
 });
 
 test('credentials outside Latin-1 are encodable rather than fatal', async () => {

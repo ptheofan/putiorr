@@ -4,9 +4,10 @@ import { SYNC_DEFAULTS, validateBaseUrl } from './lib/settings.js';
 
 // This page is the only place the extension's settings can be repaired, so it
 // refuses to store a value it cannot use and reports every rewrite it makes.
-// Which sites route to which profile is putiorr's setting now, so everything
-// about them here is read-only. Nothing builds markup from data: profile names
-// and domains come from the server.
+// Where a grab lands is putiorr's setting now — which sites a profile claims,
+// and which profile takes the sites nobody claimed — so everything about it
+// here is read-only. Nothing builds markup from data: profile names and domains
+// come from the server.
 
 const PROFILES_TIMEOUT_MS = 15000;
 
@@ -14,14 +15,14 @@ const el = (id) => document.getElementById(id);
 
 // The cached {id, name} list the worker's context menu is built from.
 let profiles = [];
-// One row per profile: `{ name, sites, known }`. Only a load knows the sites —
-// they are deliberately not cached, since they would be stale the moment
-// someone edits a profile in putiorr — so a restored page lists the names it
-// does have and says the sites are the part it cannot know.
+// One row per profile: `{ name, sites, catchAll, known }`. Only a load knows
+// where a profile takes its grabs from — that is not cached, since it would be
+// stale the moment someone edits a profile in putiorr — so a restored page
+// lists the names it does have and says the routing is the part it cannot know.
 let profileSites = [];
 
 function cachedProfileRows() {
-  return profiles.map((profile) => ({ name: profile.name, sites: [], known: false }));
+  return profiles.map((profile) => ({ name: profile.name, sites: [], catchAll: false, known: false }));
 }
 
 // Tones: 'note' for a request in flight, 'ok' for news that landed, 'error'
@@ -38,25 +39,6 @@ function setStatus(message, tone = 'note') {
   status.scrollIntoView?.({ block: 'nearest' });
 }
 
-function createOption(value, label) {
-  const option = document.createElement('option');
-  option.value = value;
-  option.textContent = label;
-  return option;
-}
-
-// The placeholder is deliberate: without it a fresh selection would silently
-// point at whichever profile happens to sort first.
-function renderDefaultProfileSelect(selectedId) {
-  const select = el('defaultProfile');
-  // With no profiles loaded, "No default profile" reads as a choice the user
-  // declined to make rather than one they cannot make yet.
-  const placeholder = profiles.length ? 'No default profile' : 'Load profiles first';
-  select.replaceChildren(createOption('', placeholder));
-  for (const profile of profiles) select.append(createOption(String(profile.id), profile.name));
-  select.value = profiles.some((profile) => profile.id === selectedId) ? String(selectedId) : '';
-}
-
 // Domains reach this page from putiorr and from storage written by an older
 // version of the extension; neither is guaranteed to be a list of strings.
 function cleanDomains(value) {
@@ -71,6 +53,26 @@ function browserSitesOf(row) {
   return cleanDomains(Array.isArray(row?.browser_domains) ? row.browser_domains : row?.browserDomains);
 }
 
+// The profile that takes a grab from a site nobody listed. It is why the
+// Default profile dropdown used to be on this page, so the card has to answer
+// it — read from putiorr on every load rather than stored, exactly like sites.
+function catchAllOf(row) {
+  return Boolean(row?.browser_catch_all ?? row?.browserCatchAll);
+}
+
+// What this profile actually takes, in one line. "no sites" is a fact putiorr
+// just stated; the cached list has no such fact to state, and claiming one
+// would contradict the next load.
+function profileRoutingText({ sites, catchAll, known }) {
+  if (!known) return 'routing unknown until you load';
+  if (catchAll) {
+    return sites.length
+      ? `${sites.join(', ')}, and any site no other profile claims`
+      : 'any site no other profile claims';
+  }
+  return sites.length ? sites.join(', ') : 'no sites';
+}
+
 function createCell(tagName, className, text) {
   const cell = document.createElement(tagName);
   cell.className = className;
@@ -83,22 +85,22 @@ function renderProfileSites() {
   if (!profileSites.length) {
     const empty = document.createElement('p');
     empty.className = 'empty-note';
-    empty.textContent = 'Test the connection to see which sites putiorr routes to which profile.';
+    empty.textContent = 'Test the connection to see which grabs putiorr routes to which profile.';
     list.replaceChildren(empty);
     return;
   }
 
-  list.replaceChildren(...profileSites.map(({ name, sites, known }) => {
+  list.replaceChildren(...profileSites.map((entry) => {
     const row = document.createElement('div');
     row.className = 'profile-row';
-    // "no sites" is a fact putiorr just stated; the cached list has no such
-    // fact to state, and claiming one would contradict the next load.
-    const text = known
-      ? (sites.length ? sites.join(', ') : 'no sites')
-      : 'sites unknown until you load';
+    const routes = entry.known && (entry.sites.length || entry.catchAll);
     row.append(
-      createCell('span', 'profile-row-name', name),
-      createCell('span', known && sites.length ? 'profile-row-sites' : 'profile-row-sites is-empty', text),
+      createCell('span', 'profile-row-name', entry.name),
+      createCell(
+        'span',
+        routes ? 'profile-row-sites' : 'profile-row-sites is-empty',
+        profileRoutingText(entry),
+      ),
     );
     return row;
   }));
@@ -142,8 +144,6 @@ async function save() {
   // misconfiguration to notice.
   el('baseUrl').value = url.baseUrl;
 
-  const defaultProfileId = Number(el('defaultProfile').value) || 0;
-
   // Credentials go first, and stay in storage.local: storage.sync is
   // synchronized to the user's Google account, and putiorr's password does not
   // belong there. Settings can be retyped from what is on screen; a password
@@ -161,7 +161,6 @@ async function save() {
   try {
     await chrome.storage.sync.set({
       baseUrl: url.baseUrl,
-      defaultProfileId,
       autoCapture: el('autoCapture').checked,
       // The service worker sanitizes what it reads, but storing a clean list keeps
       // a malformed profile out of the context menu in the first place.
@@ -177,8 +176,6 @@ async function save() {
     // With no profiles stored the right-click menu offers only "Configure…",
     // so nothing at all can grab yet.
     notes.push('No profiles loaded: nothing can grab until you load profiles and Save');
-  } else if (!defaultProfileId) {
-    notes.push('No default profile: only sites configured in putiorr and the right-click menu will grab');
   }
   setStatus(['Saved', ...notes], 'ok');
 }
@@ -265,24 +262,26 @@ async function loadProfilesFromPutiorr() {
     return;
   }
 
-  // The selection that the new list may no longer contain is about to be
-  // cleared by the re-render, so it is read while it is still on screen.
-  const previousDefault = Number(el('defaultProfile').value) || 0;
-
-  const sitesById = new Map(enabledRows.map((row) => [Number(row?.id), browserSitesOf(row)]));
+  const routingById = new Map(enabledRows.map((row) => [
+    Number(row?.id),
+    { sites: browserSitesOf(row), catchAll: catchAllOf(row) },
+  ]));
   profiles = loaded;
   profileSites = loaded.map((profile) => ({
     name: profile.name,
-    sites: sitesById.get(profile.id) ?? [],
+    sites: routingById.get(profile.id)?.sites ?? [],
+    catchAll: routingById.get(profile.id)?.catchAll ?? false,
     known: true,
   }));
-  renderDefaultProfileSelect(previousDefault);
   renderProfileSites();
 
-  const notes = [];
-  if (previousDefault && !loaded.some((profile) => profile.id === previousDefault)) {
-    notes.push(`Profile #${previousDefault} no longer exists: pick a new default`);
-  }
+  // A putiorr with no profile taking the rest refuses every grab from a site
+  // none of them lists, and that refusal is the first the user hears of it —
+  // on a link click, far from here. Saying so on the page that just read the
+  // answer costs nothing.
+  const notes = loaded.some((profile) => routingById.get(profile.id)?.catchAll)
+    ? []
+    : ['No profile takes grabs from unlisted sites: tick that box on one in putiorr, or those grabs are refused'];
   setStatus([`Loaded ${loaded.length} profile(s) — press Save to use them`, ...notes], 'ok');
 }
 
@@ -304,18 +303,12 @@ async function restore() {
   el('password').value = String(local.password ?? '');
   el('autoCapture').checked = sync.autoCapture !== false;
 
-  const defaultProfileId = Number(sync.defaultProfileId) || 0;
-  renderDefaultProfileSelect(defaultProfileId);
-  // The select below is built from the same cached names, so an empty card
-  // here would contradict a dropdown the user can see is populated.
+  // The right-click menu is built from these same cached names, so the card
+  // lists them rather than looking empty next to a menu that is populated.
   profileSites = cachedProfileRows();
   renderProfileSites();
 
   if (Array.isArray(sync.rules) && sync.rules.length) renderLegacyRules(sync.rules);
-
-  if (defaultProfileId && !profiles.some((profile) => profile.id === defaultProfileId)) {
-    setStatus(`Saved default profile #${defaultProfileId} is not in the stored list; load profiles again`, 'error');
-  }
 }
 
 // storage.sync.set rejects on its own quota, and a rejection escaping a click

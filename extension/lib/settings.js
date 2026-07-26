@@ -9,9 +9,14 @@
 // to the user's Google account. `rules` was retired when browser sites moved
 // onto putiorr's profiles: neither side reads it, and the options page removes
 // it once the user has seen what it held.
+//
+// `defaultProfileId` went the same way, and is not listed here for the same
+// reason: storage.get answers only the keys it is asked for, so a key that is
+// absent from these defaults is a key neither side can read back by accident.
+// Where an unclaimed grab lands is a checkbox on a putiorr profile now. What is
+// left is a connection and a capture toggle — nothing that routes anything.
 export const SYNC_DEFAULTS = {
   baseUrl: '',
-  defaultProfileId: 0,
   autoCapture: true,
   profiles: [],
 };

@@ -49,17 +49,12 @@
 
     <section class="card">
       <h2>Profiles</h2>
-      <p class="hint">Browser sites are set in putiorr, on the profile itself. A grab from a listed site uses that profile; subdomains match automatically.</p>
+      <p class="hint">Where a grab lands is set in putiorr, on the profile itself: the sites it claims, and — for at most one profile — every site no other profile claims. Subdomains match automatically.</p>
       <div id="profileList" class="profile-list"></div>
     </section>
 
     <section class="card">
       <h2>Behavior</h2>
-      <div class="field">
-        <label for="defaultProfile">Default profile</label>
-        <select id="defaultProfile"></select>
-        <p class="hint">Used when no putiorr profile claims the site. Prefer a dedicated profile with “auto-remove completed” enabled so finished browser grabs are cleaned up like prowlarr grabs.</p>
-      </div>
       <label class="check-row" for="autoCapture">
         <input id="autoCapture" type="checkbox" checked>
         <span>Auto-capture magnet and .torrent clicks</span>

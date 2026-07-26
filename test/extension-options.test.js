@@ -18,7 +18,6 @@ const FIELD_IDS = [
   'username',
   'password',
   'status',
-  'defaultProfile',
   'autoCapture',
   'profileList',
   'legacyNotice',
@@ -151,32 +150,14 @@ class FakeInput extends FakeNode {
   }
 }
 
-// A <select> only holds a value one of its options carries; assigning anything
-// else leaves nothing selected, which is what clears a vanished profile.
-class FakeSelect extends FakeNode {
-  constructor() {
-    super('select');
-    this.selected = '';
-  }
-
-  get value() {
-    return this.selected;
-  }
-
-  set value(next) {
-    this.selected = this.children.some((option) => option.value === String(next)) ? String(next) : '';
-  }
-}
-
 function createElement(tagName) {
-  if (tagName === 'select') return new FakeSelect();
-  if (tagName === 'input' || tagName === 'option') return new FakeInput(tagName);
+  if (tagName === 'input') return new FakeInput(tagName);
   return new FakeNode(tagName);
 }
 
 function createHarness({ sync = {}, local = {}, fetch: fetchStub } = {}) {
   const fields = {};
-  for (const id of FIELD_IDS) fields[id] = createElement(id === 'defaultProfile' ? 'select' : 'input');
+  for (const id of FIELD_IDS) fields[id] = createElement('input');
   const stored = { sync: { ...sync }, local: { ...local } };
   const writes = [];
 
@@ -267,7 +248,6 @@ test('stored settings are restored into the form', async () => {
   const harness = await loadOptions({
     sync: {
       baseUrl: 'http://nas:9091',
-      defaultProfileId: 4,
       autoCapture: false,
       profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }],
     },
@@ -278,18 +258,12 @@ test('stored settings are restored into the form', async () => {
   assert.equal(harness.fields.username.value, 'user');
   assert.equal(harness.fields.password.value, 'secret');
   assert.equal(harness.fields.autoCapture.checked, false);
-  assert.equal(harness.fields.defaultProfile.value, '4');
-  // The placeholder plus one option per profile, labelled by name only.
-  assert.deepEqual(
-    harness.fields.defaultProfile.children.map((option) => [option.value, option.textContent]),
-    [['', 'No default profile'], ['4', 'Movies'], ['7', 'TV']],
-  );
-  // The cached names are what the dropdown is built from, so the card lists
-  // them too — and says which part of the row the cache cannot know, rather
-  // than implying these profiles route nothing.
+  // The cached names are what the right-click menu is built from, so the card
+  // lists them too — and says which part of the row the cache cannot know,
+  // rather than implying these profiles route nothing.
   assert.deepEqual(harness.profileRows(), [
-    ['Movies', 'sites unknown until you load'],
-    ['TV', 'sites unknown until you load'],
+    ['Movies', 'routing unknown until you load'],
+    ['TV', 'routing unknown until you load'],
   ]);
   assert.equal(harness.legacyShown(), false);
 });
@@ -311,7 +285,7 @@ test('a load replaces the unknown-sites rows with what putiorr says', async () =
     }),
   });
 
-  assert.deepEqual(harness.profileRows(), [['Movies', 'sites unknown until you load']]);
+  assert.deepEqual(harness.profileRows(), [['Movies', 'routing unknown until you load']]);
 
   harness.fields.loadProfiles.click();
   await settle();
@@ -322,20 +296,12 @@ test('a load replaces the unknown-sites rows with what putiorr says', async () =
 
 test('corrupt stored settings still produce a usable form', async () => {
   const harness = await loadOptions({
-    sync: { baseUrl: null, rules: 'corrupt', profiles: 'corrupt', defaultProfileId: 'abc' },
+    sync: { baseUrl: null, rules: 'corrupt', profiles: 'corrupt' },
   });
 
   assert.equal(harness.fields.baseUrl.value, '');
   assert.equal(harness.fields.autoCapture.checked, true, 'a missing autoCapture must default to on');
-  assert.equal(harness.fields.defaultProfile.value, '');
   assert.equal(harness.legacyShown(), false, 'a rules key that is not a list has nothing to show');
-});
-
-test('a default profile that is no longer stored is reported instead of vanishing', async () => {
-  const harness = await loadOptions({ sync: { defaultProfileId: 4, profiles: [{ id: 7, name: 'TV' }] } });
-
-  assert.match(harness.status(), /default profile #4 is not in the stored list/);
-  assert.equal(harness.fields.defaultProfile.value, '');
 });
 
 test('saving stores the normalized settings and shows the normalization back', async () => {
@@ -352,11 +318,10 @@ test('saving stores the normalized settings and shows the normalization back', a
   harness.fields.save.click();
   await settle();
 
-  assert.equal(harness.status(), 'Saved\nNo default profile: only sites configured in putiorr and the right-click menu will grab');
+  assert.equal(harness.status(), 'Saved');
   assert.equal(harness.fields.baseUrl.value, 'http://nas:9091');
   assert.deepEqual(harness.lastSync(), {
     baseUrl: 'http://nas:9091',
-    defaultProfileId: 0,
     autoCapture: true,
     profiles: [{ id: 7, name: 'TV' }],
   });
@@ -417,10 +382,7 @@ test('test connection loads enabled profiles over UTF-8 basic auth', async () =>
   assert.equal(request.init.headers.Authorization, 'Basic dXNlcjpww6Rzc3fDtnJk');
   assert.ok(request.init.signal instanceof AbortSignal, 'the request must carry a deadline');
   assert.match(harness.status(), /^Loaded 2 profile\(s\)/);
-  assert.deepEqual(
-    harness.fields.defaultProfile.children.map((option) => option.textContent),
-    ['No default profile', 'Movies', 'TV'],
-  );
+  assert.deepEqual(harness.profileRows().map(([name]) => name), ['Movies', 'TV']);
 });
 
 test('only Putiorr Grab profiles are asked for, listed, offered and cached', async () => {
@@ -448,10 +410,6 @@ test('only Putiorr Grab profiles are asked for, listed, offered and cached', asy
 
   assert.equal(new URL(request).searchParams.get('type'), 'grab');
   assert.deepEqual(harness.profileRows(), [['Movies', 'x.example'], ['TV', 'no sites']]);
-  assert.deepEqual(
-    harness.fields.defaultProfile.children.map((option) => option.textContent),
-    ['No default profile', 'Movies', 'TV'],
-  );
 
   harness.fields.save.click();
   await settle();
@@ -486,6 +444,43 @@ test('loaded profiles are listed with the sites putiorr routes to them', async (
     ['TV', 'tv.example'],
     ['Books', 'no sites'],
   ]);
+});
+
+test('the card marks the profile that takes the sites nobody listed', async () => {
+  // "Where does a grab from an unlisted site go?" is the question the Default
+  // profile dropdown used to answer. The setting moved to putiorr, so the card
+  // has to keep answering it — read on every load, never cached, exactly like
+  // the sites, because it is stale the moment someone edits a profile there.
+  const harness = await loadOptions({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [
+        { id: 4, name: 'Movies', enabled: 1, browser_domains: ['x.example'], browser_catch_all: true },
+        // Both key styles, as /api/profiles answers with both.
+        { id: 7, name: 'TV', enabled: 1, browser_domains: [], browserCatchAll: true },
+        { id: 8, name: 'Books', enabled: 1, browser_domains: ['b.example'] },
+      ],
+    }),
+  });
+
+  harness.fields.loadProfiles.click();
+  await settle();
+
+  assert.deepEqual(harness.profileRows(), [
+    ['Movies', 'x.example, and any site no other profile claims'],
+    ['TV', 'any site no other profile claims'],
+    ['Books', 'b.example'],
+  ]);
+  // A putiorr that answered has nothing missing, so no warning rides along.
+  assert.doesNotMatch(harness.status(), /unlisted sites/);
+
+  // And it is not stored: a reload says it does not know rather than repeating
+  // an answer putiorr may have changed since.
+  harness.fields.save.click();
+  await settle();
+  assert.deepEqual(Object.keys(harness.lastSync().profiles[0]).sort(), ['id', 'name']);
 });
 
 test('a profile list with unusable site data is shown rather than dropped', async () => {
@@ -553,21 +548,23 @@ test('an unreachable, stalled or non-putiorr server each read as themselves', as
   }
 });
 
-test('a reload that drops the default profile reports the selection it clears', async () => {
+test('a load with nothing taking the unlisted sites says so before a click does', async () => {
+  // Without one, every grab from a site no profile lists is refused — and the
+  // user first hears about it on a link click, far from this page.
   const harness = await loadOptions({
-    sync: {
-      baseUrl: 'http://nas:9091',
-      defaultProfileId: 4,
-      profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }],
-    },
-    fetch: async () => ({ ok: true, status: 200, json: async () => [{ id: 9, name: 'Books', enabled: 1 }] }),
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => [{ id: 9, name: 'Books', enabled: 1, browser_domains: ['x.example'] }],
+    }),
   });
 
   harness.fields.loadProfiles.click();
   await settle();
 
-  assert.match(harness.status(), /Profile #4 no longer exists/);
-  assert.equal(harness.fields.defaultProfile.value, '');
+  assert.match(harness.status(), /^Loaded 1 profile\(s\)/);
+  assert.match(harness.status(), /No profile takes grabs from unlisted sites/);
 });
 
 test('a putiorr whose grab profiles are all disabled says which fix applies', async () => {
@@ -635,7 +632,6 @@ test('an empty profile list must not quietly wipe a working configuration', asyn
   const harness = await loadOptions({
     sync: {
       baseUrl: 'http://nas:9091',
-      defaultProfileId: 4,
       profiles: [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }],
     },
     fetch: async () => ({ ok: true, status: 200, json: async () => [] }),
@@ -645,13 +641,12 @@ test('an empty profile list must not quietly wipe a working configuration', asyn
   await settle();
 
   assert.match(harness.status(), /no Putiorr Grab profiles/);
-  assert.equal(harness.fields.defaultProfile.value, '4', 'the default selection must survive');
+  assert.deepEqual(harness.profileRows().map(([name]) => name), ['Movies', 'TV'], 'the cached list must survive');
 
   harness.fields.save.click();
   await settle();
 
   assert.deepEqual(harness.lastSync().profiles, [{ id: 4, name: 'Movies' }, { id: 7, name: 'TV' }]);
-  assert.equal(harness.lastSync().defaultProfileId, 4);
 });
 
 test('a storage write that fails is reported rather than lost', async () => {
@@ -692,7 +687,7 @@ test('a failed credentials write names the credentials and claims nothing', asyn
 test('the keys written to storage.sync are exactly the ones the worker reads', async () => {
   // Both sides now share one SYNC_DEFAULTS, so this guards the remaining gap:
   // that save() writes every key the worker defaults, and no other.
-  const expected = ['autoCapture', 'baseUrl', 'defaultProfileId', 'profiles'];
+  const expected = ['autoCapture', 'baseUrl', 'profiles'];
   assert.deepEqual(Object.keys(SYNC_DEFAULTS).sort(), expected);
 
   const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
@@ -716,21 +711,12 @@ test('the save note names what is actually able to grab', async () => {
   await settle();
   assert.equal(empty.status(), 'Saved\nNo profiles loaded: nothing can grab until you load profiles and Save');
 
+  // With profiles cached there is nothing left for this page to warn about:
+  // where each grab lands is putiorr's answer, and it is on the card above.
   const loaded = await loadOptions({ sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] } });
   loaded.fields.save.click();
   await settle();
-  assert.equal(loaded.status(), 'Saved\nNo default profile: only sites configured in putiorr and the right-click menu will grab');
-
-  loaded.fields.defaultProfile.value = '7';
-  loaded.fields.save.click();
-  await settle();
   assert.equal(loaded.status(), 'Saved');
-});
-
-test('with no profiles loaded the default select says so', async () => {
-  const harness = await loadOptions({ sync: { baseUrl: 'http://nas:9091' } });
-
-  assert.deepEqual(harness.fields.defaultProfile.children.map((option) => option.textContent), ['Load profiles first']);
 });
 
 test('old site rules are shown once, read-only, with what replaces them', async () => {
@@ -770,13 +756,13 @@ test('the retired key is read with the settings, not in front of them', async ()
   // read for it would let its failure leave every field empty — which looks
   // like a first run and would overwrite the stored settings on the next Save.
   const harness = await loadOptions({
-    sync: { baseUrl: 'http://nas:9091', defaultProfileId: 7, profiles: [{ id: 7, name: 'TV' }] },
+    sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] },
   });
 
-  assert.deepEqual(harness.reads.sync, [['autoCapture', 'baseUrl', 'defaultProfileId', 'profiles', 'rules']]);
+  assert.deepEqual(harness.reads.sync, [['autoCapture', 'baseUrl', 'profiles', 'rules']]);
   // Storage that never held the key still produces a populated form.
   assert.equal(harness.fields.baseUrl.value, 'http://nas:9091');
-  assert.equal(harness.fields.defaultProfile.value, '7');
+  assert.deepEqual(harness.profileRows().map(([name]) => name), ['TV']);
   assert.equal(harness.legacyShown(), false);
 });
 
@@ -798,7 +784,7 @@ test('a storage read that fails leaves the form empty but says so', async () => 
 
 test('progress, success and refusal do not all read the same', async () => {
   const harness = await loadOptions({
-    sync: { baseUrl: 'http://nas:9091', defaultProfileId: 7, profiles: [{ id: 7, name: 'TV' }] },
+    sync: { baseUrl: 'http://nas:9091', profiles: [{ id: 7, name: 'TV' }] },
     fetch: async () => ({ ok: true, status: 200, json: async () => [{ id: 7, name: 'TV', enabled: 1 }] }),
   });
 

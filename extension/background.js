@@ -15,12 +15,6 @@ const NOTIFY_CONFIGURE = 'putiorr-configure';
 // and a request timing out exactly on that line would race the teardown.
 const GRAB_TIMEOUT_MS = 25000;
 
-// putiorr's refusal when nothing routes the grab, lowercased for comparison.
-// Matching the sentence and not just the 400 matters: a fresh install sends no
-// ids at all, so every other 400 — a bad magnet, an unreadable .torrent —
-// would otherwise be rewritten as a profile problem it is not.
-const NO_PROFILE_MATCH = 'no profile matches this site and no default profile is configured';
-
 async function loadSettings() {
   const sync = await chrome.storage.sync.get(SYNC_DEFAULTS);
   const local = await chrome.storage.local.get({ username: '', password: '' });
@@ -122,20 +116,17 @@ async function handleGrab(payload) {
     }
   })();
   // Which profile a site belongs to is putiorr's answer to give: it holds the
-  // browser sites. The worker only says where the click came from, which
-  // profile the user picked by hand if any, and what its own default is.
+  // browser sites, and it holds the one profile set to take the sites nobody
+  // listed. The worker only says where the click came from and which profile
+  // the user picked by hand, if any.
   const explicitId = payload.profileId;
   const hasExplicitId = explicitId !== undefined && explicitId !== null && String(explicitId) !== '';
-  const defaultProfileId = Number(settings.defaultProfileId) || undefined;
   try {
     const result = await postGrab(settings, {
       // An explicit pick is passed through as it came: putiorr refuses a value
       // that is not an id rather than quietly grabbing into some other profile.
       profileId: hasExplicitId ? explicitId : undefined,
       pageHost: pageHost || undefined,
-      // A default only applies when the user did not pick: sending it alongside
-      // an explicit id would suggest a fallback that putiorr must never take.
-      defaultProfileId: hasExplicitId ? undefined : defaultProfileId,
       magnet: payload.magnet,
       torrentBase64: payload.torrentBase64,
       filename: payload.filename,
@@ -151,28 +142,25 @@ async function handleGrab(payload) {
     notify(profileName ? `Sent to putiorr → ${profileName}` : 'Sent to putiorr', result.transfer?.name ?? '');
     return { ok: true };
   } catch (error) {
-    // A missing profile on a grab the worker did not pin to one can only be the
-    // default it sent: a site match names a profile putiorr has just looked up.
-    // "Profile not found" alone would leave the user hunting a profile they
-    // never chose for this grab, on a page that has no idea it was deleted.
-    // The message is part of the test: any unrouted path answers 404 too, and a
-    // putiorr too old to have /api/grab must keep saying so.
-    if (error.status === 404 && error.message === 'Profile not found' && !hasExplicitId && defaultProfileId) {
-      const message = `putiorr no longer has the default profile (#${defaultProfileId}); load profiles again in the options — click here to open them`;
+    // The one id a grab can still carry comes from the right-click menu, which
+    // is built from the last Save — so a profile deleted in putiorr stays on it
+    // until the next load, and that is the fix worth naming. "Profile not
+    // found" alone would leave the user hunting a profile on a page that has no
+    // idea it was deleted. The message is part of the test: any unrouted path
+    // answers 404 too, and a putiorr too old to have /api/grab must keep
+    // saying so.
+    if (error.status === 404 && error.message === 'Profile not found' && hasExplicitId) {
+      const message = `putiorr no longer has the profile you picked (#${explicitId}); load profiles again in the options — click here to open them`;
       notify('putiorr grab failed', message, NOTIFY_CONFIGURE);
       return { ok: false, error: message };
     }
-    // Nothing configured and nothing claiming the site is the likeliest first
-    // run there is, and putiorr's sentence ends where the user has to act:
-    // in these options, which the notification can at least open. The message
-    // is matched in either casing — putiorr updates on its own schedule, and
-    // both spellings of this refusal are in the wild.
-    if (error.status === 400 && !hasExplicitId && !defaultProfileId
-      && error.message.toLowerCase() === NO_PROFILE_MATCH) {
-      const message = 'No profile matches this site and no default profile is set — click here to open the options';
-      notify('putiorr grab failed', message, NOTIFY_CONFIGURE);
-      return { ok: false, error: message };
-    }
+    // Everything else is relayed as putiorr said it. The refusal a grab from an
+    // unlisted site draws used to be rewritten here, back when the fix was the
+    // extension's own Default profile setting; it is a checkbox on a putiorr
+    // profile now, which putiorr's sentence names exactly. A second copy of it
+    // on this side would be a copy free to drift — the extension and the server
+    // ship and update on different schedules — and the options page it offered
+    // to open can no longer fix it.
     notify('putiorr grab failed', error.message);
     return { ok: false, error: error.message };
   }
