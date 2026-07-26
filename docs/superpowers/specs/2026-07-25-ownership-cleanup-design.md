@@ -200,6 +200,13 @@ files are missing is deleted and its put.io transfer cancelled. Freezing the
 staging folder made a put.io *rename* safe; it says nothing about a change of
 owner.
 
+The restriction closes that door on this endpoint only. **Issue #68** is the
+same loss through the other one: editing a profile's `download_at` moves every
+download it owns to a directory that has none of their files, and the next poll
+deletes them and cancels their put.io transfers. It predates this work and is
+not fixed here — the reasoning above is why the move restriction exists, not a
+claim that a profile's staging root is otherwise safe to change.
+
 The download rows themselves always go, whatever the flags: `profile_id` is
 `NOT NULL`, so there is no owner left to keep them under, and a tombstone
 would only block the profile's deletion. put.io transfers the user chose to
