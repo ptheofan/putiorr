@@ -275,3 +275,43 @@ test('the RPC endpoint wizard help no longer teaches category routing', () => {
   assert.match(profiles, /only while one RR profile could have meant it/);
   assert.match(profiles, /Category then only names the subfolder/);
 });
+
+// Deleting a profile used to fire the moment the button was clicked, with no
+// confirmation at all, while the server refused it outright for any profile
+// that owned a download. The dialog is the prompt design decision 5 asks for,
+// plus the project owner's third answer.
+test('the profile delete dialog offers move, remove, and the two delete options', () => {
+  const html = readFileSync(new URL('../src/web/index.html', import.meta.url), 'utf8');
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+  const appJs = readFileSync(new URL('../src/web/app.js', import.meta.url), 'utf8');
+
+  for (const testId of [
+    'profile-delete-dialog',
+    'profile-delete-summary',
+    'profile-delete-mode-move',
+    'profile-delete-mode-delete',
+    'profile-delete-target',
+    'profile-delete-remote',
+    'profile-delete-local',
+    'profile-delete-outcome',
+    'profile-delete-submit',
+  ]) {
+    assert.match(html, new RegExp(`data-testid="${testId}"`));
+  }
+
+  // Neither flag defaults to true, and the dialog opens with no answer chosen
+  // so nothing is committed by pressing Enter.
+  assert.match(profilesJs, /setCheckboxChecked\(el\.profileDeleteRemote, false\)/);
+  assert.match(profilesJs, /setCheckboxChecked\(el\.profileDeleteLocal, false\)/);
+  assert.match(profilesJs, /el\.profileDeleteMode\.value = '';/);
+  assert.doesNotMatch(html, /id="profileDeleteRemote"[^>]*\schecked/);
+  assert.doesNotMatch(html, /id="profileDeleteLocal"[^>]*\schecked/);
+
+  // The counts come from the server, not from the downloads list: tombstoned
+  // downloads are not in that list and still block the delete.
+  assert.match(profilesJs, /api\(`\/api\/profiles\/\$\{id\}\/deletion-preview`\)/);
+  // One intent per request: moving sends only reassignTo, removing sends only
+  // the delete flags.
+  assert.match(profilesJs, /if \(choice\.mode === 'move'\) return \{ reassignTo: Number\(choice\.reassignTo\) \};/);
+  assert.match(appJs, /el\.profileDeleteForm\.addEventListener\('submit'/);
+});

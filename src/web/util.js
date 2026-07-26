@@ -318,6 +318,77 @@ export function adoptionNoticeSummary(notices) {
   }).join(' ');
 }
 
+// Web Awesome checkboxes and buttons carry their state in both the property
+// and the attribute, and which one is authoritative depends on whether the
+// component has upgraded yet, so both are written and both are read.
+export function setCheckboxChecked(checkbox, checked) {
+  checkbox.checked = checked;
+  checkbox.toggleAttribute('checked', checked);
+}
+
+export function isCheckboxChecked(checkbox) {
+  return Boolean(checkbox.checked || checkbox.hasAttribute('checked'));
+}
+
+export function setButtonDisabled(button, disabled) {
+  button.disabled = disabled;
+  button.toggleAttribute('disabled', disabled);
+}
+
+// Deleting an RR profile is irreversible and reaches put.io and the disk, so
+// the dialog opens by saying how much is at stake, in counts.
+export function profileDeletionSummary(preview) {
+  const name = preview?.profile?.name ?? 'this RR profile';
+  const total = Number(preview?.downloads?.total ?? 0);
+  if (total === 0) {
+    return `RR profile ${name} owns no downloads. Deleting it touches nothing on put.io or on disk.`;
+  }
+  // A tombstoned download is invisible in the downloads list and still holds
+  // its put.io transfer and its files, so a count that left it out would not
+  // match the one the delete acts on.
+  const removed = Number(preview?.downloads?.removed ?? 0);
+  const removedPart = removed > 0
+    ? ` (${removed} of them already deleted from the list but still on put.io)`
+    : '';
+  return `RR profile ${name} owns ${pluralize(total, 'download')}${removedPart}.`
+    + ' A download cannot be left without an owner, so choose what happens to them.';
+}
+
+// The one sentence the user reads before committing. It describes exactly one
+// outcome: moving and deleting are different fates for the same rows, so an
+// answer that has not chosen between them describes neither.
+export function profileDeletionOutcome(preview, choice = {}) {
+  const name = preview?.profile?.name ?? 'this RR profile';
+  const total = Number(preview?.downloads?.total ?? 0);
+  const downloads = pluralize(total, 'download');
+  if (total === 0) return `Deletes RR profile ${name}.`;
+
+  if (choice.mode === 'move') {
+    const target = (preview?.reassignTargets ?? [])
+      .find((candidate) => String(candidate.id) === String(choice.reassignTo));
+    if (!target) return `Choose the RR profile that takes these ${downloads} over.`;
+    return `Moves ${downloads} to ${target.name}, then deletes RR profile ${name}.`
+      + ' Nothing is removed from put.io and no files are deleted.';
+  }
+
+  if (choice.mode !== 'delete') return `Choose what happens to these ${downloads}.`;
+
+  const remote = choice.deleteRemote
+    ? `cancels ${total === 1 ? 'its' : 'their'} ${total === 1 ? 'put.io transfer' : `${total} put.io transfers`}`
+    : 'leaves them on put.io';
+  const filesOnDisk = Number(preview?.downloads?.filesOnDisk ?? 0);
+  const local = choice.deleteLocal
+    ? `deletes ${pluralize(filesOnDisk, 'downloaded file')} (${formatBytes(preview?.downloads?.localBytes)}) from disk`
+    : 'leaves the downloaded files on disk';
+  // Kept on put.io, in a folder no RR profile owns any more, they stop being
+  // adoptable. The dashboard says so on the next poll; the dialog says so
+  // first, while the choice is still the user's.
+  const stranded = choice.deleteRemote
+    ? ''
+    : ' The transfers left on put.io are listed as unattributed until an RR profile downloads into that folder.';
+  return `Removes ${downloads} from putiorr, ${remote}, ${local}, then deletes RR profile ${name}.${stranded}`;
+}
+
 // Two downloads put.io named the same thing, under one profile and category.
 // Only the older one stages; the other waits, and would otherwise look like a
 // download that simply stopped.

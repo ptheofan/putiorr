@@ -24,6 +24,10 @@ import {
   browserDomainsPayload,
   grabProfileSummary,
   presetDisplayName,
+  setCheckboxChecked,
+  setButtonDisabled,
+  profileDeletionSummary,
+  profileDeletionOutcome,
 } from './util.js';
 import { setMessage } from './putio.js';
 import {
@@ -686,18 +690,143 @@ export async function saveAndTestClientSettings() {
   }
 }
 
+// Deleting a profile is irreversible and reaches put.io and the disk, so it
+// asks first — and asks with counts. The three answers (move, remove, remove
+// and take put.io and the files with it) are exclusive per download, so the
+// dialog offers one choice and describes exactly one outcome.
 export async function deleteProfileById(id = el.wizardProfileId.value) {
   if (!id) {
     closeProfileWizard();
     return;
   }
+  await openProfileDeleteDialog(id);
+}
 
-  await api(`/api/profiles/${id}`, { method: 'DELETE' });
-  state.profiles = state.profiles.filter((profile) => String(profile.id) !== String(id));
-  renderProfiles();
-  renderDownloadProfiles();
-  closeProfileWizard();
-  setMessage('Profile deleted.', 'ok');
+export async function openProfileDeleteDialog(id) {
+  const preview = await api(`/api/profiles/${id}/deletion-preview`);
+  state.pendingProfileDelete = { id: String(id), preview };
+  setText(el.profileDeleteTitle, `Delete RR profile ${preview.profile.name}`);
+  setText(el.profileDeleteSummary, profileDeletionSummary(preview));
+  setProfileDeleteMessage('');
+  el.profileDeleteMode.value = '';
+  setCheckboxChecked(el.profileDeleteRemote, false);
+  setCheckboxChecked(el.profileDeleteLocal, false);
+  // Nothing to decide when the profile owns nothing: the choice would be
+  // between three outcomes that are all "delete the profile".
+  setHidden(el.profileDeleteMode, preview.downloads.total === 0);
+  renderProfileDeleteTargets(preview);
+  updateProfileDeleteState();
+  if (!el.profileDeleteDialog.open) el.profileDeleteDialog.open = true;
+}
+
+export function closeProfileDeleteDialog() {
+  state.pendingProfileDelete = undefined;
+  setProfileDeleteMessage('');
+  if (el.profileDeleteDialog.open) el.profileDeleteDialog.open = false;
+}
+
+// Only profiles that stage into the same folder are offered: nothing moves on
+// disk, so any other target points putiorr at an empty directory. When there
+// are none, the reason is spelled out rather than left as an empty picker.
+export function renderProfileDeleteTargets(preview) {
+  const targets = preview.reassignTargets ?? [];
+  el.profileDeleteTarget.replaceChildren();
+  for (const target of targets) {
+    const option = document.createElement('wa-option');
+    option.value = String(target.id);
+    option.textContent = target.name;
+    el.profileDeleteTarget.appendChild(option);
+  }
+  el.profileDeleteTarget.value = targets.length > 0 ? String(targets[0].id) : '';
+  const empty = targets.length === 0 && preview.downloads.total > 0;
+  setText(el.profileDeleteTargetEmpty, empty
+    ? `No other RR profile downloads into ${preview.profile.downloadAt || '(nothing)'},`
+      + ' so these downloads have nowhere to move to without their files being left behind.'
+    : '');
+  setHidden(el.profileDeleteTargetEmpty, !empty);
+}
+
+export function profileDeleteChoice() {
+  return {
+    mode: fieldValue(el.profileDeleteMode),
+    reassignTo: fieldValue(el.profileDeleteTarget),
+    deleteRemote: fieldChecked(el.profileDeleteRemote),
+    deleteLocal: fieldChecked(el.profileDeleteLocal),
+  };
+}
+
+export function updateProfileDeleteState() {
+  const pending = state.pendingProfileDelete;
+  if (!pending) return;
+  const choice = profileDeleteChoice();
+  const hasDownloads = pending.preview.downloads.total > 0;
+  const targets = pending.preview.reassignTargets ?? [];
+  setHidden(el.profileDeleteTarget, !(hasDownloads && choice.mode === 'move' && targets.length > 0));
+  setHidden(el.profileDeleteOptions, !(hasDownloads && choice.mode === 'delete'));
+  setText(el.profileDeleteOutcome, profileDeletionOutcome(pending.preview, choice));
+  // The button commits to an outcome, so it stays disabled until the dialog
+  // can name one.
+  const answered = !hasDownloads
+    || choice.mode === 'delete'
+    || (choice.mode === 'move' && Boolean(choice.reassignTo));
+  setButtonDisabled(el.profileDeleteButton, !answered);
+}
+
+// Coloured the way the download delete confirmation colours its own message,
+// because this dialog's refusals are the reason it exists and a refusal that
+// renders as ordinary body text reads as a caption.
+export function setProfileDeleteMessage(message, tone = 'neutral') {
+  setText(el.profileDeleteMessage, message);
+  el.profileDeleteMessage.style.color = tone === 'error'
+    ? '#b42318'
+    : tone === 'ok' ? '#16803f' : '#647275';
+}
+
+export function profileDeleteBody(preview, choice) {
+  if (preview.downloads.total === 0) return {};
+  if (choice.mode === 'move') return { reassignTo: Number(choice.reassignTo) };
+  return {
+    deleteDownloads: true,
+    deleteRemote: choice.deleteRemote,
+    deleteLocal: choice.deleteLocal,
+  };
+}
+
+export async function confirmProfileDelete() {
+  const pending = state.pendingProfileDelete;
+  if (!pending) return;
+  setButtonDisabled(el.profileDeleteButton, true);
+  setProfileDeleteMessage('Deleting...');
+  try {
+    const result = await api(`/api/profiles/${pending.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify(profileDeleteBody(pending.preview, profileDeleteChoice())),
+    });
+    state.profiles = state.profiles.filter((profile) => String(profile.id) !== pending.id);
+    closeProfileDeleteDialog();
+    renderProfiles();
+    renderDownloadProfiles();
+    closeProfileWizard();
+    setMessage(profileDeleteReport(result), 'ok');
+  } catch (error) {
+    // The refusals are the point of this dialog — "still owns 4 downloads",
+    // "downloads into /other, not /downloads" — so they are shown on it rather
+    // than swallowed by a closing modal.
+    setProfileDeleteMessage(error.message, 'error');
+    updateProfileDeleteState();
+  }
+}
+
+// What was actually done, not what was asked for: the two differ whenever the
+// server refused part of it, and the counts are the only record left.
+export function profileDeleteReport(result) {
+  const counts = result?.downloads ?? {};
+  const parts = [`RR profile ${result?.profile?.name ?? ''} deleted`];
+  if (counts.reassigned) parts.push(`${counts.reassigned} download${counts.reassigned === 1 ? '' : 's'} moved`);
+  if (counts.deleted) parts.push(`${counts.deleted} download${counts.deleted === 1 ? '' : 's'} removed`);
+  if (counts.remoteDeleted) parts.push(`${counts.remoteDeleted} deleted from put.io`);
+  if (counts.localDeleted) parts.push(`${counts.localDeleted} deleted from disk`);
+  return `${parts.join(', ')}.`;
 }
 
 export function updateWizardPreview() {

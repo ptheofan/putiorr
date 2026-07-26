@@ -24,6 +24,9 @@ import {
   schemaMigrationSummary,
   stagingCollisionSummary,
   schemaMigrationWarning,
+  setCheckboxChecked,
+  isCheckboxChecked,
+  setButtonDisabled,
 } from './util.js';
 import { renderTopology } from './topology.js';
 
@@ -720,20 +723,6 @@ export function handleDeleteOptionChange(event) {
 export function setDeleteConfirmMessage(message, tone = 'neutral') {
   el.deleteConfirmMessage.textContent = message;
   el.deleteConfirmMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
-}
-
-export function setCheckboxChecked(checkbox, checked) {
-  checkbox.checked = checked;
-  checkbox.toggleAttribute('checked', checked);
-}
-
-export function isCheckboxChecked(checkbox) {
-  return Boolean(checkbox.checked || checkbox.hasAttribute('checked'));
-}
-
-export function setButtonDisabled(button, disabled) {
-  button.disabled = disabled;
-  button.toggleAttribute('disabled', disabled);
 }
 
 export async function confirmPendingDelete() {

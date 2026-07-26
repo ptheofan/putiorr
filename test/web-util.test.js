@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  profileDeletionSummary,
+  profileDeletionOutcome,
   fieldValue,
   fieldChecked,
   numericSelectValue,
@@ -558,4 +560,63 @@ test('the staging collision notice names the folder and who is using it', () => 
     ],
   }]);
   assert.match(removed, /deleted but still has its files in/);
+});
+
+// Deleting a profile is irreversible and reaches put.io and the disk, so the
+// dialog states the outcome in counts before the user commits — and the three
+// answers are exclusive per download, so exactly one outcome is ever described.
+test('the profile deletion prompt states what each answer would do, in counts', () => {
+  const preview = {
+    profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
+    downloads: { total: 4, active: 3, removed: 1, filesOnDisk: 9, localBytes: 2048 },
+    reassignTargets: [{ id: 1, name: 'Sonarr' }],
+  };
+
+  const summary = profileDeletionSummary(preview);
+  assert.match(summary, /RR profile Radarr owns 4 downloads/);
+  // A tombstoned download is invisible in the downloads list and still holds
+  // its put.io transfer, so the count would otherwise look wrong.
+  assert.match(summary, /1 of them already deleted from the list but still on put\.io/);
+
+  assert.match(
+    profileDeletionOutcome(preview, { mode: 'move', reassignTo: 1 }),
+    /Moves 4 downloads to Sonarr, then deletes RR profile Radarr\./,
+  );
+  assert.match(
+    profileDeletionOutcome(preview, { mode: 'move', reassignTo: 1 }),
+    /Nothing is removed from put\.io and no files are deleted/,
+  );
+  // An unanswered dialog describes nothing: the Delete button stays disabled
+  // until it can name the outcome.
+  assert.equal(profileDeletionOutcome(preview, {}), 'Choose what happens to these 4 downloads.');
+  assert.equal(
+    profileDeletionOutcome(preview, { mode: 'move' }),
+    'Choose the RR profile that takes these 4 downloads over.',
+  );
+
+  const kept = profileDeletionOutcome(preview, { mode: 'delete' });
+  assert.match(kept, /Removes 4 downloads from putiorr, leaves them on put\.io/);
+  assert.match(kept, /leaves the downloaded files on disk, then deletes RR profile Radarr\./);
+  // Left on put.io in a folder no profile owns any more, they stop being
+  // adoptable — the dashboard says so, so the dialog says so first.
+  assert.match(kept, /unattributed/);
+
+  const purged = profileDeletionOutcome(preview, { mode: 'delete', deleteRemote: true, deleteLocal: true });
+  assert.match(purged, /cancels their 4 put\.io transfers/);
+  assert.match(purged, /deletes 9 downloaded files \(2\.0 KB\) from disk/);
+  assert.doesNotMatch(purged, /unattributed/);
+});
+
+test('the profile deletion prompt says plainly when there is nothing to decide', () => {
+  const preview = {
+    profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
+    downloads: { total: 0, active: 0, removed: 0, filesOnDisk: 0, localBytes: 0 },
+    reassignTargets: [],
+  };
+
+  assert.equal(
+    profileDeletionSummary(preview),
+    'RR profile Radarr owns no downloads. Deleting it touches nothing on put.io or on disk.',
+  );
+  assert.equal(profileDeletionOutcome(preview, {}), 'Deletes RR profile Radarr.');
 });

@@ -667,6 +667,45 @@
       </form>
     </wa-dialog>
 
+    <wa-dialog id="profileDeleteDialog" class="modal compact-modal" data-testid="profile-delete-dialog" style="--width: 660px">
+      <form id="profileDeleteForm" class="confirm-form">
+        <div class="modal-head">
+          <div>
+            <h2 id="profileDeleteTitle" data-testid="profile-delete-title">Delete RR profile</h2>
+            <p id="profileDeleteSummary" data-testid="profile-delete-summary"></p>
+          </div>
+          <button id="profileDeleteClose" class="icon-button" type="button" aria-label="Close profile delete confirmation">×</button>
+        </div>
+
+        <div class="modal-body confirm-body">
+          <wa-radio-group id="profileDeleteMode" name="profileDeleteMode" label="What happens to its downloads" data-testid="profile-delete-mode">
+            <wa-radio value="move" data-testid="profile-delete-mode-move">Move them to another RR profile</wa-radio>
+            <wa-radio value="delete" data-testid="profile-delete-mode-delete">Remove them from putiorr</wa-radio>
+          </wa-radio-group>
+          <wa-select id="profileDeleteTarget" label="Takes these downloads over" data-testid="profile-delete-target" hidden></wa-select>
+          <p id="profileDeleteTargetEmpty" class="field-help" data-testid="profile-delete-target-empty" hidden></p>
+          <div id="profileDeleteOptions" class="confirm-body" data-testid="profile-delete-options" hidden>
+            <wa-checkbox id="profileDeleteRemote" data-testid="profile-delete-remote">Also delete them from put.io</wa-checkbox>
+            <wa-checkbox id="profileDeleteLocal" data-testid="profile-delete-local">Also delete the downloaded files from disk</wa-checkbox>
+          </div>
+          <wa-callout variant="warning" class="warning-copy">
+            <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
+            <span id="profileDeleteOutcome" data-testid="profile-delete-outcome"></span>
+          </wa-callout>
+        </div>
+
+        <p id="profileDeleteMessage" class="message modal-message" role="status"></p>
+
+        <div class="modal-actions">
+          <span></span>
+          <div class="button-row">
+            <wa-button variant="neutral" appearance="outlined" data-action="cancel-profile-delete">Cancel</wa-button>
+            <wa-button id="profileDeleteButton" variant="danger" appearance="accent" type="submit" data-testid="profile-delete-submit">Delete profile</wa-button>
+          </div>
+        </div>
+      </form>
+    </wa-dialog>
+
     <script type="module" src="/app.js"></script>
   </body>
 </html>
