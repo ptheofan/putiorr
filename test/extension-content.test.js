@@ -179,7 +179,7 @@ test('a magnet click is captured and forwarded without touching the network', as
 });
 
 test('a magnet whose payload ends in .torrent is still sent as a magnet', async () => {
-  // resolve.js documents that isMagnetLink has to be asked first, because
+  // resolve.js documents that magnetFromLink has to be asked first, because
   // isTorrentLink would otherwise claim a magnet URI whose payload ends in
   // ".torrent". Only an *opaque* payload discriminates: a magnet written the
   // usual `magnet:?xt=...` way has an empty URL pathname, so isTorrentLink
