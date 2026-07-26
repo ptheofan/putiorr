@@ -326,22 +326,28 @@ Lidarr URL: http://lidarr:8686</code></pre>
                     <td>Browser sites</td>
                     <td>Comma-separated sites whose grabs land here, such as <code>x.example, z.example</code>. Subdomains match automatically, so <code>x.example</code> also covers <code>dl.x.example</code>.</td>
                   </tr>
+                  <tr>
+                    <td>Take grabs from any site no other profile claims</td>
+                    <td>Ticked on one grab profile, every grab from a site nobody listed lands there. A fallback, not a wildcard: a profile that lists a site still wins for it. At most one profile may hold it, and a second save is refused, naming the one that does.</td>
+                  </tr>
                 </tbody>
               </table>
             </div>
             <p>
-              putiorr resolves every grab itself. A click on a listed site goes
-              to the profile that lists it even when the extension points at a
-              different default profile, and a grab aimed at a profile that is
-              not a Putiorr Grab profile is refused by name. A grab profile has
-              no Transmission RPC endpoint at all — nothing connects to one as a
-              download client — so <code>/api/grab</code> is the only way in.
+              putiorr resolves every grab itself, and nothing in the extension
+              takes part in that decision. A click on a listed site goes to the
+              profile that lists it; a click anywhere else goes to the profile
+              that takes the unlisted sites, or is refused when no profile does.
+              A grab aimed at a profile that is not a Putiorr Grab profile is
+              refused by name. A grab profile has no Transmission RPC endpoint at
+              all — nothing connects to one as a download client — so
+              <code>/api/grab</code> is the only way in.
             </p>
             <p>
-              Switching a grab profile off does not release its sites. It still
-              claims them, and a grab from one is refused by name rather than
-              falling through to the extension's default profile, which would put
-              the transfer in a folder nobody chose.
+              Switching a grab profile off does not release its sites, or the
+              catch-all if it holds it. It still claims them, and such a grab is
+              refused by name rather than falling through to the next profile,
+              which would put the transfer in a folder nobody chose.
             </p>
             <p>
               Install the extension from the Chrome Web Store once it is
@@ -351,7 +357,7 @@ Lidarr URL: http://lidarr:8686</code></pre>
               <li>Open <code>chrome://extensions</code> and enable Developer mode.</li>
               <li>Choose Load unpacked and select the repository's <code>extension/</code> folder.</li>
               <li>Open the extension options and enter the putiorr URL, such as <code>http://nas:9091</code>, plus the Basic auth credentials if putiorr uses them.</li>
-              <li>Click Test connection &amp; load profiles, pick a default profile for sites no profile claims, and press Save.</li>
+              <li>Click Test connection &amp; load profiles and press Save. The card lists what putiorr routes to each profile, including which one takes the sites no profile claims.</li>
             </ol>
             <p class="doc-note">
               The extension only ever lists Putiorr Grab profiles, so create at

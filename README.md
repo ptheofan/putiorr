@@ -101,9 +101,9 @@ extension.
 **A disabled RR profile now refuses instead of disappearing.** Its RPC path
 still resolves to it, and `torrent-add` there answers with a refusal naming it
 rather than the dashboard's HTML; it still
-claims its browser sites, so a grab from one is refused instead of falling
-through to the extension's default profile; and it is still counted when the
-shared endpoint decides whether it is ambiguous, so switching a profile off no
+claims its browser sites, and the catch-all role if it holds that, so such a
+grab is refused instead of falling through to another profile; and it is still
+counted when the shared endpoint decides whether it is ambiguous, so switching a profile off no
 longer hands that endpoint to another one. Its existing downloads are
 unaffected. *Fix,* for anyone who used "disabled" to free up the shared endpoint
 or a site: delete the profile instead.
@@ -148,8 +148,10 @@ Grab** app preset, which is the only preset the extension is offered. Such a
 profile has no Transmission RPC endpoint at all — nothing connects to it as a
 download client — and it auto-removes completed downloads by default, the way
 `prowlarr` profiles do, since nothing imports a browser grab. Each one lists
-the **Browser sites** whose grabs it takes, so putiorr resolves every grab
-itself, falling back to the extension's default profile.
+the **Browser sites** whose grabs it takes, and one of them can additionally be
+set to take every site no other profile lists, so putiorr resolves every grab
+itself. Nothing in the extension decides where a grab lands: it holds the
+connection to putiorr and whether clicks are captured, and nothing else.
 
 See [`extension/README.md`](extension/README.md) for setup and limitations.
 
@@ -423,7 +425,7 @@ download is created, and is never re-derived afterwards:
 | RPC on the shared `/transmission/rpc` | the one *arr profile, else a refusal |
 | `POST /api/grab` naming a profile | that profile |
 | `POST /api/grab` from a listed site | the grab profile listing it |
-| `POST /api/grab`, neither | the extension's default profile, else a refusal |
+| `POST /api/grab`, neither | the grab profile set to take any other site, else a refusal |
 
 Nothing else selects an owner. In particular:
 
