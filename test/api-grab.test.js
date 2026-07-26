@@ -1244,6 +1244,25 @@ test('a takeover is refused again when a different profile took the fallback mea
   assert.equal(harness.store.findProfileById(other.id).browser_catch_all, false);
 });
 
+test('a takeover that cannot say which profile it was shown is refused', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const holder = createSiteProfile(harness, 'movies', [], { catchAll: true });
+  const other = createSiteProfile(harness, 'music', []);
+
+  // An id that reads as nothing must not degrade into "clear whoever holds
+  // it": that is the blind takeover naming the holder exists to prevent.
+  const refused = await putProfile(harness, other.id, {
+    browserCatchAll: true,
+    takeOverCatchAll: true,
+    takeOverCatchAllFrom: 'the other one',
+  });
+
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /takeOverCatchAllFrom must be a profile id/);
+  assert.equal(harness.store.findCatchAllGrabProfile().id, holder.id);
+});
+
 test('the takeover intent is never stored as a profile field', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));

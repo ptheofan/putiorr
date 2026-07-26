@@ -282,8 +282,8 @@ export function withCatchAllTakeoverNote(message, profile) {
 // It answered on the reply that carried it; keeping the key would leave a
 // stale note attached to the profile in state.
 export function withoutCatchAllTakeover(profile) {
-  const { catch_all_taken_from: taken, catchAllTakenFrom, ...rest } = profile;
-  return taken === undefined && catchAllTakenFrom === undefined ? profile : rest;
+  const { catch_all_taken_from: taken, catchAllTakenFrom: takenCamel, ...rest } = profile;
+  return taken === undefined && takenCamel === undefined ? profile : rest;
 }
 
 // The offer itself, appended to the refusal the message area is already

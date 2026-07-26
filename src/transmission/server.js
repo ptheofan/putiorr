@@ -1765,7 +1765,13 @@ function normalizeProfileInput(input, { partial = false } = {}) {
     output.takeOverCatchAll = normalizeBooleanInput(takeOverCatchAll);
   }
   if (takeOverCatchAllFrom !== undefined) {
-    output.takeOverCatchAllFrom = normalizeOptionalId(takeOverCatchAllFrom);
+    // A caller that names the holder it was shown gets its takeover refused
+    // when a different profile holds the role by now. Letting an unreadable id
+    // fall back to null would turn exactly that guard off and clear whichever
+    // profile happens to hold it — the one outcome this field exists to stop.
+    const holderId = normalizeOptionalId(takeOverCatchAllFrom);
+    if (!holderId) throw new Error('takeOverCatchAllFrom must be a profile id');
+    output.takeOverCatchAllFrom = holderId;
   }
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;
