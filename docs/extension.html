@@ -151,7 +151,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
             <h2>Load it in Chrome</h2>
             <ol>
               <li>Open <code>chrome://extensions</code>.</li>
-              <li>Turn on <strong>Developer mode</strong> with the toggle at the top right, and leave it on. From Chrome 134 an unpacked extension is disabled whenever Developer mode is off, so this is a permanent setting rather than an install step.</li>
+              <li>Turn on <strong>Developer mode</strong> with the toggle at the top right, and leave it on. Chrome 134 and later disable an unpacked extension whenever Developer mode is off, so this is a permanent setting rather than an install step.</li>
               <li>Click <strong>Load unpacked</strong> and select the <code>extension/</code> folder itself — the one that contains <code>manifest.json</code> — not the repository root above it.</li>
               <li>Reload any tabs that were already open. Pages loaded before the extension have no content script, so clicks on them are not captured and the right-click menu answers "Reload the page, then try again" for <code>.torrent</code> links.</li>
             </ol>
