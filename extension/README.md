@@ -28,6 +28,9 @@ There are two ways to grab:
 `.torrent` files are fetched from inside the page, so private-tracker session
 cookies apply.
 
+Either way the grab reports itself on the page it came from, and again as a
+Chrome notification — see [What A Grab Looks Like](#what-a-grab-looks-like).
+
 The toolbar icon grabs nothing. It opens a popup about the page you are on:
 which profile a grab from this site would land in, and — when no profile claims
 it yet — a way to claim it for one without opening the dashboard.
@@ -265,9 +268,9 @@ Putiorr Grab profile:
    matched, so listing a site never loses to it.
 5. Otherwise nothing: putiorr answers `400` with "No Putiorr Grab profile claims
    `<host>` and none is set to take everything else; tick "Take grabs from any
-   site no other profile claims" on a profile in putiorr", which the
-   notification shows verbatim. The fix is in putiorr, so the extension does not
-   reword it.
+   site no other profile claims" on a profile in putiorr", which the page and
+   the notification both show verbatim. The fix is in putiorr, so the extension
+   does not reword it.
 
 Step 1 names a profile the extension holds, so putiorr checks the preset before
 grabbing into it: a profile that is not a Putiorr Grab profile is refused with
@@ -313,22 +316,23 @@ imports, and nothing imports a browser grab.
 Run this once after loading the extension, against a running putiorr (the
 [compose stack](../putiorr-compose) is enough):
 
-1. Click a `magnet:` link on any tracker page → a **Sent to putiorr →
-   `<profile>`** notification appears and the transfer shows up in the putiorr
-   dashboard.
+1. Click a `magnet:` link on any tracker page → **Sending to putiorr…** appears
+   at the top right of the page at once, becomes **Downloading with `<profile>`
+   profile** with the release name under it, a **Sent to putiorr → `<profile>`**
+   notification appears, and the transfer shows up in the putiorr dashboard.
 2. Click a `.torrent` link → the same, with the put.io transfer created from
    the uploaded file.
 3. Click a link that wraps a magnet — a site's "send to put.io" link, or paste
-   `https://put.io/default/magnet?url=magnet:?xt=…&dn=…&tr=…` into a page → the
-   notification appears, put.io's own add-magnet page does **not** open, and the
+   `https://put.io/default/magnet?url=magnet:?xt=…&dn=…&tr=…` into a page → both
+   reports appear, put.io's own add-magnet page does **not** open, and the
    transfer is named after the magnet's `dn` rather than after its hash, which
    is how you can tell the trackers came along too.
-4. Right-click a link → **Send to putiorr → `<other profile>`** → the
-   transfer lands under that other profile's folder.
+4. Right-click a link → **Send to putiorr → `<other profile>`** → the page shows
+   the same two states and the transfer lands under that other profile's folder.
 5. In putiorr, set **Browser sites** on a Putiorr Grab profile that is *not* the
    one taking the unlisted sites to the site you are testing on, save, and click
-   a `magnet:` link there → the notification names that profile, not the
-   catch-all, and the transfer lands under its folder. Nothing in the extension
+   a `magnet:` link there → the page and the notification name that profile, not
+   the catch-all, and the transfer lands under its folder. Nothing in the extension
    is touched for this: the options page shows the new site after the next
    **Test connection & load profiles**, but grabs route correctly before that.
 6. On a site no profile lists, click the toolbar icon → the popup says no
@@ -337,13 +341,50 @@ Run this once after loading the extension, against a running putiorr (the
    claims the site, and a `magnet:` click on the same page lands there. Open the
    popup again → it no longer offers the claim, and names the profile instead.
 
+## What A Grab Looks Like
+
+Every grab is reported twice, on two channels that fail in different ways.
+
+**On the page**, at the top right, in putiorr's own colours (light and dark
+both). The moment a click is captured — before putiorr has been asked anything —
+it says **Sending to putiorr…**, because the click was swallowed and otherwise
+nothing on screen would have moved. That same item then becomes one of:
+
+- **Downloading with `<profile>` profile**, with the release name under it. The
+  profile is the one putiorr resolved, read from its answer rather than guessed
+  here. Against a putiorr too old to name it, this reads **Downloading with
+  putiorr**.
+- **Failed — `<what putiorr said>`**, word for word: a profile that is switched
+  off, no profile claiming the site, rejected credentials, an unreachable or
+  sleeping putiorr. That sentence is the fix, so it is not summarised.
+
+A failure stays up more than three times as long as a success, and either can be
+dismissed with the **×**. Several grabs in a row stack rather than replace one
+another. Right-click grabs are drawn the same way, on the page they were made
+from.
+
+The item lives in a closed shadow root pinned out of the page's layout, so it
+cannot inherit the site's styling or disturb it, and it honours
+`prefers-reduced-motion`.
+
+**As a Chrome notification**, which is what the toast cannot be: visible when
+the tab is in the background or behind another window. Success names the same
+profile and transfer; failure carries the same message. It is also the only
+report you get if the page is one the content script never loaded on — a tab
+that was already open when the extension was installed.
+
+If notifications never appear, that is macOS rather than the extension: any
+Focus mode suppresses them, as does Chrome being switched off under System
+Settings › Notifications, and Chrome is not told. The toast is there for exactly
+that reason.
+
 ## What To Expect
 
-- Every grab that reaches the extension's service worker ends in a
-  notification. Success names the profile putiorr actually resolved — read from
-  the response, not guessed locally — along with the transfer name; failure
-  shows what went wrong (unreachable putiorr, rejected credentials, nothing
-  claiming the site, the error putiorr returned).
+- Every grab that reaches the extension's service worker ends in a notification
+  and, when the page can draw it, in a toast. Success names the profile putiorr
+  actually resolved — read from the response, not guessed locally — along with
+  the transfer name; failure shows what went wrong (unreachable putiorr,
+  rejected credentials, nothing claiming the site, the error putiorr returned).
 - A profile in the right-click menu that putiorr no longer has is called out for
   what it is: the grab fails with "putiorr no longer has the profile you picked
   (#N); load profiles again in the options", and clicking that notification
@@ -358,10 +399,14 @@ Run this once after loading the extension, against a running putiorr (the
   the `.torrent` fetch failed or timed out, or an extension reload orphaned the
   page's content script — the click is replayed as a normal browser action: a
   magnet goes to the OS handler, a `.torrent` downloads, and a link that
-  wrapped a magnet is followed to the page it points at. Once the worker has the
-  grab, every outcome is reported by notification and nothing is replayed: an
-  unreachable or sleeping putiorr, rejected credentials, and an error putiorr
-  returned all end there, with no fallback download.
+  wrapped a magnet is followed to the page it points at. The **Sending to
+  putiorr…** item is taken back down with it, since the browser is about to do
+  what it would have done unaided. Once the worker has the grab, every outcome
+  is reported and nothing is replayed: an unreachable or sleeping putiorr,
+  rejected credentials, and an error putiorr returned all end there, with no
+  fallback download. A toast that cannot be drawn — a page that has replaced
+  `document.createElement`, a DOM torn out mid-grab — is not a failed grab
+  either, and never replays the click.
 - Clicking the same link again while a capture is still in flight is dropped, so
   an impatient double-click does not create two transfers.
 - Fetches have deadlines: 15s for the in-page `.torrent` fetch and for **Test
@@ -486,21 +531,23 @@ does to every other putiorr route.
   installed.
 - The extension puts no size cap on the fetched `.torrent`, but putiorr rejects
   request bodies over 2 MiB and base64 inflates the file by 4/3, so anything
-  above roughly 1.5 MiB comes back as a failure notification — with no
-  fallback download, because the grab did reach putiorr — and has to be added
-  by hand.
+  above roughly 1.5 MiB comes back as a failure — with no fallback download,
+  because the grab did reach putiorr — and has to be added by hand.
 - A link whose query holds a valid magnet is captured whatever the page meant
   by it, so a search or report link built around a magnet string is grabbed
   rather than followed — see
   [What Counts As A Wrapped Magnet](#what-counts-as-a-wrapped-magnet).
 - A malicious page can overlay an invisible magnet link under a real button and
-  harvest a genuine click — the grab notification is the only tell. A wrapped
-  magnet widens the shapes such a link can take, but not what it can do: the
-  click still has to be a real one, and it still ends in a notification.
+  harvest a genuine click — the toast and the notification are the only tell,
+  which is one reason the toast exists: a notification macOS suppressed told the
+  user nothing. A wrapped magnet widens the shapes such a link can take, but not
+  what it can do: the click still has to be a real one, and it still ends in
+  both reports.
 - Any page can detect that the extension is installed by fetching its
-  web-accessible `lib/resolve.js`; `use_dynamic_url` was deliberately not used
-  because it broke dynamic import from content scripts before Chrome 132, and is
-  worth re-evaluating once the supported Chrome floor moves past that.
+  web-accessible `lib/resolve.js` or `lib/toast.js`; `use_dynamic_url` was
+  deliberately not used because it broke dynamic import from content scripts
+  before Chrome 132, and is worth re-evaluating once the supported Chrome floor
+  moves past that.
 - The extension expects a putiorr that knows about browser sites. An
   auto-captured click sends no `profileId` — that is the server's decision now —
   so against an older putiorr it comes back as "profileId is required" and only
