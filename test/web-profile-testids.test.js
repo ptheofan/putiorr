@@ -27,8 +27,15 @@ test('profile wizard sends Browser sites as typed and surfaces the server respon
   const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
   const utilJs = readFileSync(new URL('../src/web/util.js', import.meta.url), 'utf8');
 
-  assert.match(html, /id="wizardBrowserDomains"[^>]*placeholder="x\.example, z\.example"/);
-  assert.match(html, /Browser grabs from these sites use this profile; subdomains match automatically\. Leave empty for none\./);
+  assert.match(html, /id="wizardBrowserDomains"[^>]*placeholder="x\.example, \*\.z\.example"/);
+  // Both forms and an example of each: "subdomains match automatically" was
+  // true of the old rule and is now false of the plain form, which is exactly
+  // the kind of wrong a help line has to not be.
+  assert.match(
+    html,
+    /Browser grabs from these sites use this profile\. x\.example matches that host alone;/,
+  );
+  assert.match(html, /\*\.x\.example matches it and every subdomain\. Leave empty for none\./);
   assert.match(
     profilesJs,
     /\.\.\.browserDomainsPayload\(el\.wizardBrowserStep\.hidden, fieldValue\(el\.wizardBrowserDomains\)\.trim\(\)\)/,

@@ -48,16 +48,35 @@ profile, so its path, host, port, and SSL are not asked for, and no path is
 reserved for it either: a grab profile has no Transmission RPC endpoint at all,
 and `/api/grab` is the only way in — and shows step **3. Browser grabs**
 instead. **Browser sites** there is a comma-separated list of the sites whose
-grabs land in that profile. Subdomains match automatically, so list the domain
-itself —
-`x.example` also covers `dl.x.example`. Leave it empty to keep a profile out of
-browser grabs. Sites listed on any other preset are never consulted.
+grabs land in that profile. Each is written one of two ways:
+
+| Entry | Matches |
+| --- | --- |
+| `x.example` | `x.example`, and nothing under it |
+| `*.x.example` | `x.example` **and** every subdomain — `dl.x.example`, `a.b.x.example` |
+
+The star is only ever the first thing in an entry: `dl.*.example` and
+`example.*` are refused. A wildcard on a single label — `*.com`, `*.lan` —
+saves with a warning, because it claims everything under that suffix and
+putiorr carries no public-suffix list to tell one from your LAN.
+
+A grab resolves in a fixed order: the profile that lists the page's host
+exactly, then the most specific wildcard covering it — the longest base wins,
+so `*.dl.x.example` beats `*.x.example` — then the catch-all below, then a
+refusal. That order is what makes an overlap useful rather than ambiguous:
+`dl.x.example` on one profile and `*.x.example` on another sends that one host
+to the first and the rest of the domain to the second. What is refused is the
+*same entry* on two grab profiles, naming the profile that already has it.
+
+Leave it empty to keep a profile out of browser grabs. Sites listed on any
+other preset are never consulted.
 
 Under it is **Take grabs from any site no other profile claims**. Tick it on one
 grab profile and every grab from a site nobody listed lands there; leave it off
 everywhere and such a grab is refused rather than guessed at. It is a fallback,
-not a wildcard: a profile that lists a site still wins for that site. Only one
-profile may hold it, and a second save is refused, naming the one that does.
+not a wildcard: a profile that lists a site still wins for everything that site
+covers. Only one profile may hold it, and a second save is refused, naming the
+one that does.
 
 putiorr normalizes what you save and the profile card shows the stored result,
 so what is listed is what will be matched: a unicode domain is stored in
@@ -135,9 +154,9 @@ Click the extension's icon on any page and the popup names that page's site,
 then says who handles it:
 
 - **A profile claims it.** "Movies claims this site; grabs from here go there."
-  If it matched as a subdomain, the popup names the site that was actually
-  listed — "Movies claims x.example, and dl.x.example is a subdomain of it" —
-  because otherwise you would go looking for an entry no profile has.
+  If it matched through a wildcard, the popup names the entry that was actually
+  listed — "Movies claims *.x.example, which covers dl.x.example" — because
+  otherwise you would go looking for an entry no profile has.
 - **The catch-all takes it.** "No profile claims this site. Everything takes
   every site no profile claims, so grabs from here go there for now."
 - **Nobody.** "No profile claims this site, and no profile takes the sites
@@ -149,21 +168,23 @@ other, with the reason its grabs fail added: "That profile is switched off, so
 such a grab is refused rather than routed."
 
 When no profile claims the site, the popup lists the enabled Putiorr Grab
-profiles with a **Claim `<site>`** button. **The site it stores is the page's
-hostname exactly as shown on the button** — `www.x.example` stays
-`www.x.example`. Nothing here shortens it to the registrable domain behind it:
-an extension carries no public-suffix list, and the only rule available for
-turning `www.x.example` into `x.example` would turn `x.co.uk` into `co.uk` and
-claim a whole TLD with it. putiorr matches subdomains of whatever is stored, so
-claim from the bare domain if you want the whole site, or add it in the
-dashboard.
+profiles under a **Site to claim** field, pre-filled with the page's hostname
+exactly as it is — `www.x.example` stays `www.x.example` — and a **Claim this
+site** button.
+
+**The field is editable, and what it holds is what gets stored.** Nothing here
+shortens a host to the registrable domain behind it: an extension carries no
+public-suffix list, and the only rule available for turning `www.x.example` into
+`x.example` would turn `x.co.uk` into `co.uk` and claim a whole TLD with it. So
+type what you mean. Put `*.` in front — `*.x.example` — to claim the domain and
+every subdomain of it in one entry. What you type is normalized the way the
+wizard normalizes it, and an entry putiorr could never match is refused here
+rather than sent.
 
 A site another profile already claims is **not** offered again. The popup names
-that profile and stops. Listing the same site twice would change nothing —
-resolution stops at the first profile that matches, so the second entry routes
-nothing at all — and moving a site is two profiles changing at once, which is
-worth seeing whole on the profiles themselves. The two buttons at the bottom go
-where that edit is made: **Options** and **Open putiorr**.
+that profile and stops, because moving a site is two profiles changing at once,
+which is worth seeing whole on the profiles themselves. The two buttons at the
+bottom go where that edit is made: **Options** and **Open putiorr**.
 
 The popup reads putiorr on every open and caches nothing: a site claimed from
 another window a minute ago would otherwise make it a confident, wrong answer,
@@ -179,13 +200,16 @@ putiorr resolves this on every grab, in this order, and every path ends at a
 Putiorr Grab profile:
 
 1. The profile picked from the right-click menu, when the grab came from there.
-2. Otherwise the first Putiorr Grab profile, in creation order, whose **Browser
-   sites** match the page's hostname exactly or as a suffix. Listing one site on
-   two profiles is therefore not an error; the older profile simply wins.
-3. Otherwise the one Putiorr Grab profile with **Take grabs from any site no
+2. Otherwise the Putiorr Grab profile whose **Browser sites** list the page's
+   hostname exactly.
+3. Otherwise the most specific wildcard covering it: the longest base wins, so
+   `*.dl.x.example` beats `*.x.example`. Ties, in either step, go to the older
+   profile — though putiorr refuses to store the same entry on two profiles in
+   the first place.
+4. Otherwise the one Putiorr Grab profile with **Take grabs from any site no
    other profile claims** ticked. It is consulted only once no profile's sites
    matched, so listing a site never loses to it.
-4. Otherwise nothing: putiorr answers `400` with "No Putiorr Grab profile claims
+5. Otherwise nothing: putiorr answers `400` with "No Putiorr Grab profile claims
    `<host>` and none is set to take everything else; tick "Take grabs from any
    site no other profile claims" on a profile in putiorr", which the
    notification shows verbatim. The fix is in putiorr, so the extension does not
@@ -355,22 +379,22 @@ read-modify-write the list: two popups open in two windows would each save the
 list they had read, and the later save would drop the other's site silently,
 under a reply that said the claim had worked.
 
-- `host` is one site, normalized exactly as the wizard's **Browser sites** field
-  normalizes one: punycoded, scheme and path stripped, leading and trailing dots
-  dropped. A value that could never match a hostname is a `400` naming the
-  entry, as it is in the wizard, and a comma-separated list is a `400` too —
-  the popup names one site before you click, and editing several at once is the
-  profile form's job.
-- `added` is the site that was stored, or `null` when that profile already
-  handled the host — the same site twice, or a subdomain of one it already
-  lists. Both are `200`: claiming twice is not an error, and neither adds a
+- `host` is one entry, plain or with a leading `*.`, normalized exactly as the
+  wizard's **Browser sites** field normalizes one: punycoded, scheme and path
+  stripped, leading and trailing dots dropped. A value that could never match a
+  hostname is a `400` naming the entry, as it is in the wizard, and a
+  comma-separated list is a `400` too — the popup names one site before you
+  click, and editing several at once is the profile form's job.
+- `added` is the entry that was stored, or `null` when that profile already
+  handled it — the same entry twice, or a host a wildcard it already lists
+  covers. Both are `200`: claiming twice is not an error, and neither adds a
   second entry.
-- A site another Putiorr Grab profile already claims is a `409` naming it:
+- The **same entry** on another Putiorr Grab profile is a `409` naming it:
   "`Movies` already claims x.example; remove the site there first if it should
-  belong to another profile". When the claim was a suffix match, the message
-  names the entry that exists rather than the host you asked about: "already
-  claims dl.x.example through x.example". Disabled profiles hold their claims
-  here exactly as they do for a grab.
+  belong to another profile". Disabled profiles hold their claims here exactly
+  as they do for a grab. Coverage that merely overlaps is not refused: claiming
+  `dl.x.example` while another profile holds `*.x.example` is how you take one
+  host out of a domain, and the exact entry wins for it from then on.
 - A profile of any other preset is refused by name, like every other grab path:
   "`<name>` is not a Putiorr Grab profile; set its App preset to Putiorr Grab in
   putiorr". A profile putiorr does not have is a `404`.

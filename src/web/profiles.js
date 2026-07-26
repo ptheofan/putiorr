@@ -284,13 +284,15 @@ export const WIZARD_HELP = {
     title: 'Browser sites',
     paragraphs: [
       'The websites whose browser-extension grabs are sent to this profile. A magnet or torrent clicked on one of these sites lands here, and this claim beats every other way a grab could be routed except a profile picked by hand from the right-click menu.',
-      'Separate sites with commas. Subdomains are matched automatically, so x.example also covers tracker.x.example. Do not write *.x.example.',
+      'Separate sites with commas. A site is written one of two ways: x.example matches that host and nothing under it, and *.x.example matches x.example and every subdomain of it, such as dl.x.example. The star is only ever the first thing in an entry.',
     ],
     tips: [
       'Leave this empty and tick the box below to take every grab no other profile claims. Empty with the box clear keeps this profile out of browser grabs entirely.',
       'Only Putiorr Grab profiles claim sites. A site listed on an *arr profile is never consulted, which is why the field is shown for this preset alone.',
-      'The first matching profile wins, so avoid listing the same site on two profiles.',
+      'An exact site wins over a wildcard, and a longer wildcard wins over a shorter one, so dl.x.example here and *.x.example on another profile is a setting that works: that one host lands here and the rest of the domain lands there.',
+      'The same entry on two profiles is refused, naming the profile that already has it. Only an identical entry is a conflict; sites that merely overlap are settled by the order above.',
       'putiorr rewrites what you type: sites are lowercased, unicode becomes punycode, and any scheme, port, or path is dropped.',
+      'A wildcard on a single label, such as *.com or *.lan, is saved with a warning: it claims everything under that suffix, and putiorr cannot tell a public suffix from your LAN.',
     ],
     valueLabel: 'Sites as typed',
     value: (profile) => browserDomainsText(profile),
@@ -299,7 +301,7 @@ export const WIZARD_HELP = {
     title: 'Take grabs from any other site',
     paragraphs: [
       'Ticked, this profile takes every browser grab that no profile\'s Browser sites claimed. It is the answer to "where does a grab from a site I never listed go?", and it is the only answer there is: without it, such a grab is refused rather than guessed at.',
-      'This is a fallback, not a wildcard. A profile that lists a site still wins for that site and its subdomains, so ticking this box never takes a grab away from a profile that asked for it by name.',
+      'This is a fallback, not a wildcard. A profile that lists a site — plainly or with a leading *. — still wins for everything that site covers, so ticking this box never takes a grab away from a profile that asked for it by name.',
     ],
     tips: [
       'Only one profile may take the rest. Saving a second is refused, naming the profile that already holds it, because two would leave every unlisted site ambiguous.',

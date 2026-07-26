@@ -457,8 +457,8 @@
 
             <section class="wizard-step" id="wizardBrowserStep" hidden>
               <div class="step-label" data-step-title="Browser grabs">3. Browser grabs</div>
-              <wa-input id="wizardBrowserDomains" label="Browser sites" type="text" autocomplete="off" placeholder="x.example, z.example" data-testid="profile-browser-domains"></wa-input>
-              <p class="field-help">Browser grabs from these sites use this profile; subdomains match automatically. Leave empty for none.</p>
+              <wa-input id="wizardBrowserDomains" label="Browser sites" type="text" autocomplete="off" placeholder="x.example, *.z.example" data-testid="profile-browser-domains"></wa-input>
+              <p class="field-help">Browser grabs from these sites use this profile. x.example matches that host alone; *.x.example matches it and every subdomain. Leave empty for none.</p>
               <div class="check-grid">
                 <wa-checkbox id="wizardBrowserCatchAll" data-testid="profile-browser-catch-all">Take grabs from any site no other profile claims</wa-checkbox>
               </div>
