@@ -1,5 +1,11 @@
 const DEFAULT_BASE_URL = 'https://api.put.io/v2';
 
+// What put.io's own client asks for, and the ceiling it enforces.
+const FILES_PAGE_SIZE = 1000;
+// 1000 pages of 1000 files: far past any real folder, and a cursor that never
+// clears stops being an infinite loop inside a single poll.
+const MAX_FILE_PAGES = 1000;
+
 function required(value, name) {
   if (value == null || value === '') {
     throw new Error(`${name} is required`);
@@ -164,11 +170,32 @@ export class PutioClient {
     });
   }
 
+  // put.io paginates this: it answers with a cursor, and the rest of the
+  // folder only arrives from /files/list/continue. Taking the first page as
+  // the whole folder silently loses files — and a download's file rows are
+  // reconciled against exactly this list, so the rows for everything the page
+  // left out would be deleted and the download would finalise early. The page
+  // cap is there because a cursor that never clears would otherwise be an
+  // infinite loop inside one poll.
   async listFiles(parentId) {
-    const body = await this.request('/files/list', {
-      query: { parent_id: parentId },
+    const files = [];
+    let body = await this.request('/files/list', {
+      query: { parent_id: parentId, per_page: FILES_PAGE_SIZE },
     });
-    return (body.files ?? []).map(normalizeFile).filter(Boolean);
+
+    for (let page = 1; ; page += 1) {
+      files.push(...(body.files ?? []).map(normalizeFile).filter(Boolean));
+      const cursor = body.cursor;
+      if (!cursor) return files;
+      if (page >= MAX_FILE_PAGES) {
+        throw new Error(`put.io listed too many pages for folder ${parentId}; refusing to guess the rest`);
+      }
+      body = await this.request('/files/list/continue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cursor }),
+      });
+    }
   }
 
   async getFile(fileId) {

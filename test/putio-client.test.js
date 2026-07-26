@@ -208,3 +208,32 @@ test('normalizeTransfer defaults put.io peer and speed fields to zero when absen
   assert.equal(transfer.downloadSpeed, 0);
   assert.equal(transfer.uploadSpeed, 0);
 });
+
+// put.io's /files/list is paginated: it answers with a cursor, and the rest of
+// the folder only arrives from /files/list/continue. putiorr used to take the
+// first page as the whole folder — and since a download's file rows are now
+// reconciled against exactly this list, a truncated page would delete the rows
+// for every file it did not mention and finalise the download early.
+test('PutioClient follows the cursor until put.io stops handing one out', async () => {
+  const { calls, fetchImpl } = createFetch([
+    { body: { files: [{ id: '1', name: 'a.mkv', size: 1 }], cursor: 'page-2' } },
+    { body: { files: [{ id: '2', name: 'b.mkv', size: 2 }], cursor: 'page-3' } },
+    { body: { files: [{ id: '3', name: 'c.mkv', size: 3 }], cursor: '' } },
+  ]);
+  const client = new PutioClient({ token: 'token', fetchImpl });
+
+  assert.deepEqual((await client.listFiles(7)).map((file) => file.id), [1, 2, 3]);
+  assert.match(calls[0].url, /parent_id=7/);
+  assert.match(calls[0].url, /per_page=1000/);
+  assert.equal(calls[1].url, 'https://api.put.io/v2/files/list/continue');
+  assert.deepEqual(JSON.parse(calls[1].options.body), { cursor: 'page-2' });
+  assert.deepEqual(JSON.parse(calls[2].options.body), { cursor: 'page-3' });
+});
+
+test('PutioClient refuses a cursor that never ends rather than looping forever', async () => {
+  const pages = Array.from({ length: 2_000 }, () => ({ body: { files: [], cursor: 'again' } }));
+  const { fetchImpl } = createFetch(pages);
+  const client = new PutioClient({ token: 'token', fetchImpl });
+
+  await assert.rejects(() => client.listFiles(0), /too many pages/);
+});
