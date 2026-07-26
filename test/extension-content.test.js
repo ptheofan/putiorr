@@ -803,14 +803,14 @@ test('a captured click says so at once, then names the profile and the release',
   harness.dispatch(anchor);
   await settle();
 
-  assert.deepEqual(harness.toasts(), [{ tone: 'pending', title: 'Sending to putiorr…', detail: '' }]);
+  assert.deepEqual(harness.toasts(), [{ tone: 'pending', title: 'Downloading with putiorr…', detail: '' }]);
 
   answer({ ok: true, profileName: 'Movies', transferName: 'Example.Release.2024.1080p' });
   await settle();
 
   assert.deepEqual(harness.toasts(), [{
     tone: 'success',
-    title: 'Downloading with Movies profile',
+    title: 'Downloading with putiorr using Movies profile',
     detail: 'Example.Release.2024.1080p',
   }]);
   assert.equal(anchor.clicks, 0, 'reporting the grab is not a reason to also download it');
@@ -881,14 +881,14 @@ test('grabs in quick succession stack rather than overwrite one another', async 
   await settle();
 
   assert.deepEqual(harness.toasts(), [
-    { tone: 'success', title: 'Downloading with Movies profile', detail: 'One' },
+    { tone: 'success', title: 'Downloading with putiorr using Movies profile', detail: 'One' },
     { tone: 'failure', title: 'Failed — putiorr is unreachable at http://nas:9091', detail: '' },
   ]);
 });
 
 test('a grab that never reaches the worker takes its acknowledgement with it', async () => {
   // The click is replayed here, so the browser is about to do what it would
-  // have done unaided. Leaving "Sending to putiorr…" on screen would claim a
+  // have done unaided. Leaving the acknowledgement on screen would claim a
   // grab that never happened.
   const harness = await loadContent({
     sendMessage: async () => {
@@ -965,7 +965,36 @@ test('a right-click grab is reported on the page it came from', async () => {
 
   assert.deepEqual(harness.toasts(), [{
     tone: 'success',
-    title: 'Downloading with TV profile',
+    title: 'Downloading with putiorr using TV profile',
+    detail: 'Example.S01E01',
+  }]);
+});
+
+test('a right-click acknowledgement names the profile the user picked', async () => {
+  // The one grab whose profile is known before putiorr answers: the user named
+  // it on the menu, so the page says so at once instead of after the round
+  // trip. A click has no such name, and must not be given an invented one.
+  const harness = await loadContent();
+
+  harness.listeners.message({ kind: 'grab-feedback', id: 4, profileName: 'TV' }, {}, () => {});
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{
+    tone: 'pending',
+    title: 'Downloading with putiorr using TV profile…',
+    detail: '',
+  }]);
+
+  harness.listeners.message(
+    { kind: 'grab-feedback', id: 4, result: { ok: true, profileName: 'TV', transferName: 'Example.S01E01' } },
+    {},
+    () => {},
+  );
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{
+    tone: 'success',
+    title: 'Downloading with putiorr using TV profile',
     detail: 'Example.S01E01',
   }]);
 });

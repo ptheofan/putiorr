@@ -237,15 +237,34 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // answer, so the second resolves the first in place.
 let feedbackSeq = 0;
 
-async function drawOnTab(tabId, id, result) {
+async function drawOnTab(tabId, id, result, profileName = '') {
   if (!tabId) return;
   try {
-    await chrome.tabs.sendMessage(tabId, { kind: 'grab-feedback', id, result });
+    await chrome.tabs.sendMessage(tabId, { kind: 'grab-feedback', id, result, profileName });
   } catch {
     // Every tab open before the extension loaded has no content script, and a
     // page can navigate mid-grab. Neither is a problem with the grab, and
     // letting this escape would report a grab that worked as a failure. The
     // notification is the channel that is left, which is why it stays.
+  }
+}
+
+// The name to put on a pick's acknowledgement, before putiorr has been asked
+// anything. Only the stored list can answer that, and only for a pick: it is
+// the one grab whose profile the user named themselves.
+//
+// Unknown is answered with nothing rather than with "profile #8". Menus outlive
+// the worker that built them, so a pick can name a profile the list has since
+// lost — and handleGrab's own `profile #N` is a last-resort stand-in for an
+// answer that arrived without a name, which is not this. The lookup must never
+// cost the acknowledgement: a storage read that fails leaves the pick
+// acknowledged unnamed, exactly as a click is.
+async function pickedProfileName(profileId) {
+  try {
+    const settings = await loadSettings();
+    return settings.profiles.find((profile) => profile.id === profileId)?.name ?? '';
+  } catch {
+    return '';
   }
 }
 
@@ -268,8 +287,10 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const pageUrl = tab?.url ?? info.pageUrl ?? '';
   const feedbackId = ++feedbackSeq;
   // Before anything else: putiorr waits on put.io, and the menu has already
-  // closed over a page that shows no sign of what was asked of it.
-  await drawOnTab(tab?.id, feedbackId, undefined);
+  // closed over a page that shows no sign of what was asked of it. The one
+  // await ahead of it is a local storage read for the name the user just
+  // picked, which is what lets the acknowledgement say it.
+  await drawOnTab(tab?.id, feedbackId, undefined, await pickedProfileName(profileId));
   // Every grab path stays inside this try: an escaping rejection would be an
   // unhandled promise in an event listener, leaving the click with no feedback.
   try {

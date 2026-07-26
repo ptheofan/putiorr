@@ -55,8 +55,12 @@
     }
   }
 
-  function acknowledge() {
-    return toastLib ? showFeedback(toastLib.pendingFeedback()) : null;
+  // profileName is only ever passed on by a caller that was told one — the
+  // right-click path, where the user named the profile on the menu. The click
+  // handler calls this with nothing, because at click time nothing on this side
+  // knows which profile will take the grab.
+  function acknowledge(profileName) {
+    return toastLib ? showFeedback(toastLib.pendingFeedback(profileName)) : null;
   }
 
   function settleFeedback(handle, result) {
@@ -254,9 +258,13 @@
   // acknowledgement was never seen — a page that navigated in between, a
   // content script that had not built its surface yet — still shows up, because
   // the answer is the half that matters.
-  function applyMenuFeedback({ id, result }) {
+  function applyMenuFeedback({ id, result, profileName }) {
     if (result === undefined) {
-      const handle = acknowledge();
+      // The pick carries the profile the user chose, so the acknowledgement can
+      // name it rather than waiting a round trip to say the same thing. The
+      // worker sends nothing here when its stored list no longer holds the id,
+      // and an unnamed acknowledgement then reads exactly like a click's.
+      const handle = acknowledge(profileName);
       if (handle) menuFeedback.set(id, handle);
       return;
     }

@@ -316,10 +316,11 @@ imports, and nothing imports a browser grab.
 Run this once after loading the extension, against a running putiorr (the
 [compose stack](../putiorr-compose) is enough):
 
-1. Click a `magnet:` link on any tracker page → **Sending to putiorr…** appears
-   at the top right of the page at once, becomes **Downloading with `<profile>`
-   profile** with the release name under it, a **Sent to putiorr → `<profile>`**
-   notification appears, and the transfer shows up in the putiorr dashboard.
+1. Click a `magnet:` link on any tracker page → **Downloading with putiorr…**
+   appears at the top right of the page at once, becomes **Downloading with
+   putiorr using `<profile>` profile** with the release name under it, a **Sent
+   to putiorr → `<profile>`** notification appears, and the transfer shows up in
+   the putiorr dashboard.
 2. Click a `.torrent` link → the same, with the put.io transfer created from
    the uploaded file.
 3. Click a link that wraps a magnet — a site's "send to put.io" link, or paste
@@ -328,7 +329,9 @@ Run this once after loading the extension, against a running putiorr (the
    transfer is named after the magnet's `dn` rather than after its hash, which
    is how you can tell the trackers came along too.
 4. Right-click a link → **Send to putiorr → `<other profile>`** → the page shows
-   the same two states and the transfer lands under that other profile's folder.
+   the same two states — and because the pick named the profile, the first of
+   them already reads **Downloading with putiorr using `<other profile>`
+   profile…** — and the transfer lands under that other profile's folder.
 5. In putiorr, set **Browser sites** on a Putiorr Grab profile that is *not* the
    one taking the unlisted sites to the site you are testing on, save, and click
    a `magnet:` link there → the page and the notification name that profile, not
@@ -347,13 +350,19 @@ Every grab is reported twice, on two channels that fail in different ways.
 
 **On the page**, at the top right, in putiorr's own colours (light and dark
 both). The moment a click is captured — before putiorr has been asked anything —
-it says **Sending to putiorr…**, because the click was swallowed and otherwise
-nothing on screen would have moved. That same item then becomes one of:
+it says **Downloading with putiorr…**, because the click was swallowed and
+otherwise nothing on screen would have moved. It names no profile, and does not
+guess one: which profile takes a site is resolved on the server, from browser
+sites this extension deliberately does not cache, so at click time this side
+genuinely does not know. A right-click pick is the exception — the user named
+the profile on the menu, so that acknowledgement reads **Downloading with
+putiorr using `<profile>` profile…** from the start. That same item then becomes
+one of:
 
-- **Downloading with `<profile>` profile**, with the release name under it. The
-  profile is the one putiorr resolved, read from its answer rather than guessed
-  here. Against a putiorr too old to name it, this reads **Downloading with
-  putiorr**.
+- **Downloading with putiorr using `<profile>` profile**, with the release name
+  under it. The profile is the one putiorr resolved, read from its answer rather
+  than guessed here. Against a putiorr too old to name it, this reads
+  **Downloading with putiorr**.
 - **Failed — `<what putiorr said>`**, word for word: a profile that is switched
   off, no profile claiming the site, rejected credentials, an unreachable or
   sleeping putiorr. That sentence is the fix, so it is not summarised.

@@ -128,23 +128,54 @@ function readToasts(doc) {
   }));
 }
 
-test('the pending state acknowledges the click without claiming an outcome', () => {
+test('the pending state names putiorr and the action, without claiming an outcome', () => {
+  // A captured click cannot know which profile will take it: that is resolved
+  // on the server, from browser sites this extension deliberately does not
+  // cache. So the acknowledgement says what is happening and with what, and
+  // names no profile rather than a guessed one.
   const state = pendingFeedback();
 
   assert.equal(state.tone, 'pending');
-  assert.equal(state.title, 'Sending to putiorr…');
+  assert.equal(state.title, 'Downloading with putiorr…');
   assert.equal(state.detail, '');
   // It is replaced in place by the answer, so nothing may take it away first.
   assert.equal(state.lifetimeMs, 0);
+});
+
+test('a pending state that was told the profile names it straight away', () => {
+  // The one grab that knows its profile before putiorr answers: a right-click
+  // pick names it, and the service worker passes that name through.
+  const state = pendingFeedback('Movies');
+
+  assert.equal(state.tone, 'pending');
+  assert.equal(state.title, 'Downloading with putiorr using Movies profile…');
+  assert.equal(state.detail, '');
+  assert.equal(state.lifetimeMs, 0);
+  // A name is a fact from the worker, not a licence to invent one: a blank one
+  // reads exactly like a click.
+  for (const blank of [undefined, '', '   ', null, 7]) {
+    assert.equal(pendingFeedback(blank).title, 'Downloading with putiorr…');
+  }
 });
 
 test('a success names the profile that took the grab and the release beneath it', () => {
   const state = feedbackFor({ ok: true, profileName: 'Movies', transferName: 'Example.Release.2024.1080p' });
 
   assert.equal(state.tone, 'success');
-  assert.equal(state.title, 'Downloading with Movies profile');
+  assert.equal(state.title, 'Downloading with putiorr using Movies profile');
   assert.equal(state.detail, 'Example.Release.2024.1080p');
   assert.equal(state.lifetimeMs, SUCCESS_LIFETIME_MS);
+});
+
+test('the answer drops the ellipsis the acknowledgement carried', () => {
+  // The stack is an aria-live region, so the title is the whole announcement:
+  // an answer worded identically to the acknowledgement would be, to a screen
+  // reader, indistinguishable from it.
+  const pending = pendingFeedback('Movies');
+  const settled = feedbackFor({ ok: true, profileName: 'Movies', transferName: 'One' });
+
+  assert.notEqual(pending.title, settled.title);
+  assert.equal(pending.title, `${settled.title}…`);
 });
 
 test('a putiorr too old to name the profile still reads as a success', () => {
@@ -232,9 +263,9 @@ test('the pending toast resolves in place rather than stacking a second one', (t
   assert.equal(after[0], before, 'the answer replaces the acknowledgement, it does not follow it');
   assert.deepEqual(readToasts(doc), [{
     tone: 'success',
-    title: 'Downloading with TV profile',
+    title: 'Downloading with putiorr using TV profile',
     detail: 'Example.S01E01',
-    text: 'Downloading with TV profileExample.S01E01×',
+    text: 'Downloading with putiorr using TV profileExample.S01E01×',
   }]);
 });
 
@@ -249,7 +280,7 @@ test('grabs in quick succession stack instead of overwriting each other', (t) =>
   second.update(feedbackFor({ ok: false, error: 'putiorr is unreachable at http://nas:9091' }));
 
   assert.deepEqual(readToasts(doc).map(({ tone, title }) => ({ tone, title })), [
-    { tone: 'success', title: 'Downloading with Movies profile' },
+    { tone: 'success', title: 'Downloading with putiorr using Movies profile' },
     { tone: 'failure', title: 'Failed — putiorr is unreachable at http://nas:9091' },
   ]);
   assert.equal(surfaceOf(doc).hosts.length, 1, 'one surface holds them all');

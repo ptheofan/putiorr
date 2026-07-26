@@ -379,10 +379,38 @@ test('a right-click grab is drawn on the page it was made from', async () => {
   assert.equal(feedback[0].id, feedback[1].id);
   assert.notEqual(feedback[0].id, undefined);
   assert.equal(feedback[0].result, undefined, 'nothing is claimed before putiorr answers');
+  // Except the profile: a pick names it, so the page can say which profile is
+  // taking the grab without waiting for putiorr to confirm it.
+  assert.equal(feedback[0].profileName, 'TV');
   assert.deepEqual(feedback[1].result, { ok: true, profileName: 'TV', transferName: 'Example.S01E01' });
   // The notification stays: it is the only channel when the tab is behind
   // another window.
   assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
+});
+
+test('a pick the stored list no longer knows is acknowledged without a name', async () => {
+  // Context menus outlive the worker that created them, so a pick can name a
+  // profile the list has since lost. The acknowledgement then says nothing
+  // about the profile: putiorr is still the one that decides, and a made-up
+  // name that the answer went on to contradict would read as a bug.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 8, name: 'Books' }, transfer: { name: 'Example' } }),
+    }),
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-8', linkUrl: 'magnet:?xt=urn:btih:abc' },
+    { id: 5, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  const feedback = harness.tabMessages.filter((message) => message.kind === 'grab-feedback');
+  assert.equal(feedback[0].profileName, '');
+  assert.deepEqual(feedback[1].result, { ok: true, profileName: 'Books', transferName: 'Example' });
 });
 
 test('a menu grab into a tab with no content script is not reported as failed', async () => {

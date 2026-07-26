@@ -186,15 +186,31 @@ const STYLE = `
 }
 `;
 
+function text(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
 // The click has already visibly done nothing — it was swallowed by
 // preventDefault — so the acknowledgement has to be immediate and must not
 // claim an outcome it does not have yet. Nothing but the answer replaces it.
-export function pendingFeedback() {
-  return { tone: 'pending', title: 'Sending to putiorr…', detail: '', lifetimeMs: 0 };
-}
-
-function text(value) {
-  return typeof value === 'string' ? value.trim() : '';
+//
+// It names putiorr and the action, because "sending" said neither what would
+// come of it nor what was doing it. The profile is named only when the caller
+// was told one — a right-click pick, which is the single grab whose profile is
+// known before putiorr answers. A captured click has no such name: routing is
+// resolved server-side, from browser sites this extension deliberately does not
+// cache, and a guess that the answer went on to contradict would read as a bug
+// rather than as feedback. The trailing ellipsis is what separates this from
+// the settled title of the same grab, which matters on a surface announced by a
+// screen reader.
+export function pendingFeedback(profileName) {
+  const name = text(profileName);
+  return {
+    tone: 'pending',
+    title: name ? `Downloading with putiorr using ${name} profile…` : 'Downloading with putiorr…',
+    detail: '',
+    lifetimeMs: 0,
+  };
 }
 
 // Turns what the service worker answered into what the page shows.
@@ -205,7 +221,7 @@ export function feedbackFor(result) {
       tone: 'success',
       // No local guess when the response named no profile: which profile takes
       // a site is resolved on the server, from a list this side does not hold.
-      title: profileName ? `Downloading with ${profileName} profile` : 'Downloading with putiorr',
+      title: profileName ? `Downloading with putiorr using ${profileName} profile` : 'Downloading with putiorr',
       detail: text(result.transferName),
       lifetimeMs: SUCCESS_LIFETIME_MS,
     };
