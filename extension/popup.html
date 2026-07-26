@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>putiorr grab</title>
+  <link rel="stylesheet" href="options.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="popup-shell">
+    <header class="popup-head">
+      <img class="popup-icon" src="icons/icon48.png" alt="">
+      <div class="popup-head-text">
+        <p class="popup-label">This site</p>
+        <p id="host" class="popup-host"></p>
+      </div>
+    </header>
+
+    <p id="routing" class="popup-routing"></p>
+
+    <section id="picker" class="card popup-card" hidden>
+      <h2>Claim it for a profile</h2>
+      <div id="profileChoices" class="choice-list"></div>
+      <p id="storeNote" class="hint"></p>
+      <div class="actions">
+        <button id="claim" class="button primary" type="button">Claim this site</button>
+      </div>
+    </section>
+
+    <span id="status" aria-live="polite"></span>
+
+    <div class="actions popup-actions">
+      <button id="openOptions" class="button" type="button">Options</button>
+      <button id="openDashboard" class="button" type="button">Open putiorr</button>
+    </div>
+  </main>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import { encodeCredentials } from './lib/auth.js';
+import { emptyProfilesComplaint, fetchGrabProfiles } from './lib/profiles.js';
 import { sanitizeProfiles } from './lib/resolve.js';
 import { SYNC_DEFAULTS, validateBaseUrl } from './lib/settings.js';
 
@@ -8,8 +9,6 @@ import { SYNC_DEFAULTS, validateBaseUrl } from './lib/settings.js';
 // and which profile takes the sites nobody claimed — so everything about it
 // here is read-only. Nothing builds markup from data: profile names and domains
 // come from the server.
-
-const PROFILES_TIMEOUT_MS = 15000;
 
 const el = (id) => document.getElementById(id);
 
@@ -180,50 +179,6 @@ async function save() {
   setStatus(['Saved', ...notes], 'ok');
 }
 
-async function fetchProfiles(baseUrl, headers) {
-  let response;
-  try {
-    // ?type=grab is putiorr's filter, not one this page could apply itself: the
-    // preset vocabulary lives there. Only a Putiorr Grab profile can accept a
-    // grab, so listing any other kind here would offer a pick putiorr refuses.
-    response = await fetch(new URL('/api/profiles?type=grab', baseUrl), {
-      headers,
-      // A sleeping NAS accepts the connection and then says nothing; without a
-      // deadline the button would stay on "Contacting putiorr…" forever.
-      signal: AbortSignal.timeout(PROFILES_TIMEOUT_MS),
-    });
-  } catch (error) {
-    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-      throw new Error(`putiorr did not respond within ${PROFILES_TIMEOUT_MS / 1000}s at ${baseUrl}`);
-    }
-    throw new Error(`putiorr is unreachable at ${baseUrl}`);
-  }
-
-  if (response.status === 401) {
-    throw new Error('putiorr rejected the credentials; check username and password');
-  }
-  if (!response.ok) throw new Error(`putiorr responded with ${response.status}`);
-
-  const body = await response.json().catch(() => undefined);
-  if (!Array.isArray(body)) throw new Error(`${baseUrl} did not answer with a profile list; check the URL`);
-  // The rows come back whole and unfiltered by `enabled`: the browser sites are
-  // shown from them, only the cached {id, name} pairs are stored, and the
-  // caller needs the disabled ones to tell its two empty states apart.
-  return body;
-}
-
-// Three different answers end up with nothing to show, and only one of them is
-// "create a profile". A row this page had to drop is a putiorr that answered
-// with grab profiles, and a disabled row is a profile that exists: telling
-// either user that none exist sends them to make a second one.
-function emptyProfilesComplaint(rows, enabledRows) {
-  if (enabledRows.length) {
-    return 'answered with Putiorr Grab profiles this page could not read; check that the URL points at putiorr';
-  }
-  if (rows.length) return 'has no enabled Putiorr Grab profiles; enable one there';
-  return 'has no Putiorr Grab profiles; create one there with the Putiorr Grab preset';
-}
-
 async function loadProfilesFromPutiorr() {
   const url = validateBaseUrl(el('baseUrl').value);
   if (!url.ok) {
@@ -240,7 +195,7 @@ async function loadProfilesFromPutiorr() {
   setStatus('Contacting putiorr…');
   let rows;
   try {
-    rows = await fetchProfiles(url.baseUrl, headers);
+    rows = await fetchGrabProfiles(url.baseUrl, headers);
   } catch (error) {
     setStatus(error.message, 'error');
     return;
