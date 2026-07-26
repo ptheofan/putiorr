@@ -345,15 +345,24 @@ test('the field guide explains the browser extension and how to install it', () 
 // which walked users into the one configuration that now hard-fails: two *arr
 // apps on the shared endpoint, told no change was needed because their
 // Categories matched their profile names.
+//
+// The replacement text has to teach the shared endpoint as it now works, not as
+// the middle of this branch left it. The User-Agent came back — it is what lets
+// all five *arr apps share one endpoint — so help that still said the shared
+// path serves one profile and refuses once there are two would send every
+// multi-app user to change a URL Base none of them needs.
 test('the RPC endpoint wizard help no longer teaches category routing', () => {
   const profiles = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
 
   assert.doesNotMatch(profiles, /links new downloads by their category folder/);
   assert.doesNotMatch(profiles, /No \*arr change is required when its Category matches/);
-  // What replaces them: the path is the only signal, and the shared endpoint
-  // is a single-profile convenience.
-  assert.match(profiles, /request path is the only thing that tells putiorr which profile/);
-  assert.match(profiles, /only while one RR profile could have meant it/);
+  assert.doesNotMatch(profiles, /request path is the only thing that tells putiorr which profile/);
+  assert.doesNotMatch(profiles, /only while one RR profile could have meant it/);
+  // What replaces them: the path is the override and always wins, the app's own
+  // name is what makes the shared endpoint work, and the category is a folder.
+  assert.match(profiles, /that answer wins over every other way a request can be attributed/);
+  assert.match(profiles, /identified by the name it puts in its own User-Agent/);
+  assert.match(profiles, /never overruled by the User-Agent/);
   assert.match(profiles, /Category then only names the subfolder/);
 });
 

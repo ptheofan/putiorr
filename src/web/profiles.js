@@ -85,7 +85,7 @@ export const WIZARD_HELP = {
       ]
       : [
         'Changing the preset rewrites the RPC endpoint path, and the Display name with it while that name is still the one a preset chose. A name you typed yourself is kept.',
-        'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets each get their own path because the request path is what names the profile. The shared /transmission/rpc endpoint serves one RR profile and refuses once there are two.',
+        'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets each get their own path, but none of them has to be used: those five apps name themselves in their User-Agent, so they can all stay on the shared /transmission/rpc endpoint. Use the path when the name cannot settle it — two profiles for the same app, or a client that does not name itself.',
       ],
     valueLabel: 'Selected setup',
     value: (profile, settings) => isGrabProfile(profile)
@@ -182,11 +182,11 @@ export const WIZARD_HELP = {
   wizardRpcPath: {
     title: 'RPC endpoint path',
     paragraphs: [
-      'This is the unique path putiorr reserves for this profile. The request path is the only thing that tells putiorr which profile a download belongs to.',
-      'The shared /transmission/rpc endpoint works only while one RR profile could have meant it. Add a second and putiorr refuses requests there until each app uses its own path.',
+      'This is the unique path putiorr reserves for this profile. A request that arrives here belongs to this profile, and that answer wins over every other way a request can be attributed.',
+      'It is not the only thing that can. On the shared /transmission/rpc endpoint the calling app is identified by the name it puts in its own User-Agent, which is what lets Sonarr, Radarr, Lidarr, Readarr, and Prowlarr all share that one endpoint with no URL Base change. This path is the override for what the name cannot settle: two Sonarr instances, or a client that does not name itself.',
     ],
     tips: [
-      'No *arr change is required while this is your only RR profile. Beyond that, set the app URL Base so it reaches this path.',
+      'No *arr change is required while the app names itself and only one profile answers to that name. Beyond that, set the app URL Base so it reaches this path; a request that arrives here is never overruled by the User-Agent.',
       'Choose a path ending in /rpc and set the app URL Base to the preceding path. The app Category then only names the subfolder downloads are staged into.',
       'Do not point this at an app API path. This must be a Transmission RPC path served by putiorr.',
     ],

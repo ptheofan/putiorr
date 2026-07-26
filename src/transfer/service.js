@@ -276,8 +276,11 @@ export class TransferService {
     if (profiles.length === 1) return profiles[0];
     if (profiles.length === 0) throw new Error('No RR profile is configured');
     throw new Error(
-      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} RR profiles could have meant it.`
-      + ` Point this download client at the RPC path of the profile it means — ${this.rpcPathAdvice(profiles)}`,
+      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} RR profiles could have meant it,`
+      + ' and this client did not name any of them in its User-Agent.'
+      + ' Sonarr, Radarr, Lidarr, Readarr and Prowlarr name themselves and need no change;'
+      + ' a client that does not, or one of two profiles answering to the same name,'
+      + ` needs the RPC path of the profile it means — ${this.rpcPathAdvice(profiles)}`,
     );
   }
 
