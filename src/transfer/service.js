@@ -1345,6 +1345,22 @@ export class TransferService {
       report.deleted += 1;
     }
 
+    // Asked again, because the list above was taken before a loop that awaits
+    // put.io once per download and the poll adopts transfers in that window. A
+    // row that arrived in the gap would otherwise reach the user as
+    // ON DELETE RESTRICT's own sentence — which says nothing about the put.io
+    // transfers this call has already cancelled.
+    const arrived = this.store.listDownloadsForProfile(profile.id);
+    if (arrived.length > 0) {
+      throw profileDeletionError(
+        `RR profile ${profile.name} took on ${arrived.length} more`
+        + ` download${arrived.length === 1 ? '' : 's'} from put.io while this delete was running,`
+        + ` after ${describeProfileDeletionProgress(report, downloads.length)}.`
+        + ' Run the delete again to include them',
+        report,
+      );
+    }
+
     this.store.deleteProfile(profile.id);
     logger.info('RR profile deleted with its downloads', {
       profile: profile.slug,

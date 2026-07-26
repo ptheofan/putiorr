@@ -312,6 +312,6 @@ test('the profile delete dialog offers move, remove, and the two delete options'
   assert.match(profilesJs, /api\(`\/api\/profiles\/\$\{id\}\/deletion-preview`\)/);
   // One intent per request: moving sends only reassignTo, removing sends only
   // the delete flags.
-  assert.match(profilesJs, /if \(choice\.mode === 'move'\) return \{ reassignTo: Number\(choice\.reassignTo\) \};/);
+  assert.match(profilesJs, /profileDeletionRequest\(pending\.preview, profileDeleteChoice\(\)\)/);
   assert.match(appJs, /el\.profileDeleteForm\.addEventListener\('submit'/);
 });

@@ -28,6 +28,7 @@ import {
   setDisabled,
   profileDeletionSummary,
   profileDeletionOutcome,
+  profileDeletionRequest,
 } from './util.js';
 import { setMessage } from './putio.js';
 import {
@@ -787,16 +788,6 @@ export function setProfileDeleteMessage(message, tone = 'neutral') {
     : tone === 'ok' ? '#16803f' : '#647275';
 }
 
-export function profileDeleteBody(preview, choice) {
-  if (preview.downloads.total === 0) return {};
-  if (choice.mode === 'move') return { reassignTo: Number(choice.reassignTo) };
-  return {
-    deleteDownloads: true,
-    deleteRemote: choice.deleteRemote,
-    deleteLocal: choice.deleteLocal,
-  };
-}
-
 export async function confirmProfileDelete() {
   const pending = state.pendingProfileDelete;
   if (!pending) return;
@@ -805,7 +796,7 @@ export async function confirmProfileDelete() {
   try {
     const result = await api(`/api/profiles/${pending.id}`, {
       method: 'DELETE',
-      body: JSON.stringify(profileDeleteBody(pending.preview, profileDeleteChoice())),
+      body: JSON.stringify(profileDeletionRequest(pending.preview, profileDeleteChoice())),
     });
     state.profiles = state.profiles.filter((profile) => String(profile.id) !== pending.id);
     closeProfileDeleteDialog();

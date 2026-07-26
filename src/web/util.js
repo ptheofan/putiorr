@@ -391,6 +391,27 @@ export function profileDeletionOutcome(preview, choice = {}) {
   return `Removes ${downloads} from putiorr, ${remote}, ${local}, then deletes RR profile ${name}.${stranded}`;
 }
 
+// The dialog's answer, turned into the body the endpoint takes — and the last
+// place an unanswered dialog can be stopped. It refuses rather than defaulting:
+// falling through to the delete branch made "no answer" mean "delete them, and
+// whatever the checkboxes happen to say", with a disabled button as the only
+// thing in the way. A disabled button is not a check.
+export function profileDeletionRequest(preview, choice = {}) {
+  if (Number(preview?.downloads?.total ?? 0) === 0) return {};
+  if (choice.mode === 'move') {
+    if (!choice.reassignTo) throw new Error('Choose what happens to these downloads: pick the RR profile that takes them over');
+    return { reassignTo: Number(choice.reassignTo) };
+  }
+  if (choice.mode !== 'delete') {
+    throw new Error('Choose what happens to these downloads before deleting the profile');
+  }
+  return {
+    deleteDownloads: true,
+    deleteRemote: Boolean(choice.deleteRemote),
+    deleteLocal: Boolean(choice.deleteLocal),
+  };
+}
+
 // Two downloads put.io named the same thing, under one profile and category.
 // Only the older one stages; the other waits, and would otherwise look like a
 // download that simply stopped.

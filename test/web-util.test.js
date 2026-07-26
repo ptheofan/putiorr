@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   profileDeletionSummary,
   profileDeletionOutcome,
+  profileDeletionRequest,
   fieldValue,
   fieldChecked,
   numericSelectValue,
@@ -619,4 +620,29 @@ test('the profile deletion prompt says plainly when there is nothing to decide',
     'RR profile Radarr owns no downloads. Deleting it touches nothing on put.io or on disk.',
   );
   assert.equal(profileDeletionOutcome(preview, {}), 'Deletes RR profile Radarr.');
+});
+
+// The request body is the last thing between an unanswered dialog and a delete
+// that reaches put.io and the disk, and a disabled button is not a check.
+test('an unanswered profile delete dialog cannot serialise into a delete', () => {
+  const preview = {
+    profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
+    downloads: { total: 2, active: 2, removed: 0, filesOnDisk: 4, localBytes: 2048 },
+    reassignTargets: [{ id: 1, name: 'Sonarr' }],
+  };
+
+  for (const choice of [{}, { mode: '' }, { mode: 'nonsense' }, { mode: 'move' }]) {
+    assert.throws(() => profileDeletionRequest(preview, choice), /Choose what happens/);
+  }
+
+  assert.deepEqual(profileDeletionRequest(preview, { mode: 'move', reassignTo: '1' }), { reassignTo: 1 });
+  assert.deepEqual(
+    profileDeletionRequest(preview, { mode: 'delete', deleteRemote: true, deleteLocal: false }),
+    { deleteDownloads: true, deleteRemote: true, deleteLocal: false },
+  );
+
+  // A profile that owns nothing has nothing to answer, so the empty body is
+  // the whole request.
+  const empty = { ...preview, downloads: { total: 0, active: 0, removed: 0, filesOnDisk: 0, localBytes: 0 } };
+  assert.deepEqual(profileDeletionRequest(empty, {}), {});
 });

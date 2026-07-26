@@ -3551,3 +3551,47 @@ test('a retried delete finishes when put.io has already forgotten the transfer',
   assert.equal(harness.store.findDownloadById(download.id), undefined);
   assert.equal(harness.store.findProfileById(profile.id), undefined);
 });
+
+test('a download adopted while the delete runs is reported, not answered with the bare constraint', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile } = stageProfileWithDownload(harness);
+  // The list is snapshotted before a loop that awaits put.io once per
+  // download, and the poll adopts transfers in that window. Standing in for
+  // the poll: a row appears while the first delete is in flight.
+  harness.putio.deleteTransfer = async (id) => {
+    harness.putio.deletedTransfers.push(id);
+    harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 912,
+      hash: 'adoptedmidwayhash',
+      name: 'Adopted.Midway',
+      category: 'movies',
+    });
+  };
+
+  const stopped = await deleteProfile(harness, profile.id, {
+    deleteDownloads: true,
+    deleteRemote: true,
+  });
+
+  assert.equal(stopped.status, 400);
+  // "cannot be deleted while downloads still reference it" says nothing about
+  // the put.io transfer this call has already cancelled.
+  assert.doesNotMatch(stopped.body.error, /still reference it/);
+  assert.match(stopped.body.error, /1 more download/);
+  assert.match(stopped.body.error, /1 already cancelled on put\.io/);
+  assert.equal(stopped.body.downloads.deleted, 1);
+  assert.equal(stopped.body.downloads.remoteDeleted, 1);
+  assert.ok(harness.store.findProfileById(profile.id));
+  // Running it again picks the new one up rather than leaving it stuck.
+  const retried = await deleteProfile(harness, profile.id, {
+    deleteDownloads: true,
+    deleteRemote: true,
+  });
+  assert.equal(retried.status, 200);
+  assert.equal(harness.store.findProfileById(profile.id), undefined);
+});
