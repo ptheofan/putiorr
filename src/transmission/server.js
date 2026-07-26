@@ -1230,7 +1230,13 @@ export class TransmissionRpcServer {
         // a profile from the client. It is deliberately not a hard refusal:
         // *arr apps call session-get to test the connection, and a refusal here
         // reads as "putiorr is down" instead of "address your own RPC path".
-        profile = profile ? this.service.requireProfile(profile) : undefined;
+        //
+        // Which is also why it does not ask whether the profile is disabled.
+        // That check belongs on the doors that create work; here it contradicts
+        // the same sentence one line up — Sonarr and Radarr call session-get for
+        // GetStatus() and Test() and to resolve OutputRootFolders, so refusing
+        // it strands exactly the in-flight work torrent-get and torrent-remove
+        // are kept open for.
         return {
           'download-dir': profile?.download_at ?? this.config.targetDir,
           'rpc-version': 15,

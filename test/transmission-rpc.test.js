@@ -3107,6 +3107,15 @@ test('a disabled profile still lists and removes the downloads it already has', 
   // Disabling stops new work; it does not strand the work already in the
   // queue. An *arr that could not list or remove its own downloads would
   // re-grab every one of them on its next RSS cycle.
+  //
+  // session-get is the first of those doors, not the least of them: Sonarr and
+  // Radarr call it for GetStatus() and Test() and to resolve
+  // OutputRootFolders, so a refusal here reads as "putiorr is down" and takes
+  // the two calls below with it.
+  const probed = await profileRpc(harness, '/sonarr/transmission/rpc', 'session-get', {});
+  assert.equal(probed.result, 'success');
+  assert.equal(probed.arguments['download-dir'], harness.config.targetDir);
+
   const listed = await profileRpc(harness, '/sonarr/transmission/rpc', 'torrent-get', {
     fields: ['id', 'hashString'],
   });
