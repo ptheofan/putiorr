@@ -9,7 +9,9 @@ index, so a Putiorr Grab profile no longer carries a derived `/grab/<slug>/rpc`
 — it has no Transmission RPC endpoint at all, and the path answers every
 request with a refusal. Phase 5 moved the preset's auto-remove default from the
 browser to the store, so `POST /api/profiles` and `PUTIORR_PROFILES_JSON` get it
-too. Everything else below still holds.
+too. Issue #68 then added the preset's `browser_catch_all` checkbox and
+retired the extension's default profile, so "set the putiorr URL and a default
+profile" reads as "set the putiorr URL". Everything else below still holds.
 
 ## Goal
 

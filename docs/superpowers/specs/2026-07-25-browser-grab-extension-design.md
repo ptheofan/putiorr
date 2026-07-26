@@ -2,6 +2,12 @@
 
 Tracking issue: https://github.com/ptheofan/putiorr/issues/59
 
+**Superseded in part by issue #68.** The options page has no default-profile
+dropdown. Where a grab from an unlisted site lands is a checkbox on the putiorr
+profile (`browser_catch_all`, at most one profile), so the extension holds a
+connection and a capture toggle and routes nothing. Read every "default
+profile" below as that profile.
+
 ## Goal
 
 Let the user click a `magnet:` link or a `.torrent` download link on any tracker

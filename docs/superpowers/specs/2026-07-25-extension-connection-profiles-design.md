@@ -10,6 +10,14 @@ disabled profile still claims its sites and the grab is refused by name, rather
 than falling through to the caller's default profile. Read "first enabled
 profile whose `browser_domains` suffix-match" below as "first such profile".
 
+**Superseded in part by issue #68.** The extension has no default profile at
+all. A grab that no profile's sites claimed resolves to the one Putiorr Grab
+profile with `browser_catch_all` set, and is refused naming that setting when
+none has it. `defaultProfileId` is gone from `chrome.storage.sync` and from the
+`/api/grab` body, and the options page's Behavior card keeps only the
+auto-capture toggle: read every "default profile" below as the catch-all
+profile, configured in putiorr.
+
 ## Goal
 
 The sites-to-profile mapping is configured **in putiorr**, on the putiorr
