@@ -77,8 +77,10 @@ test('an upgrade freezes the staging folder of every download already staged', a
       }).id;
     }
     // The shape every upgrading install has: rows an older build already
-    // staged, with no record of where it put them.
+    // staged, with no record of where it put them — and no record of the
+    // backfill having run, because the build that wrote them had no backfill.
     first.db.exec("UPDATE downloads SET staging_folder = ''");
+    first.db.exec("DELETE FROM settings WHERE key = 'downloads_staging_folder_backfill'");
   } finally {
     first.close();
   }
@@ -94,6 +96,40 @@ test('an upgrade freezes the staging folder of every download already staged', a
     // Nothing has been written for a remote transfer, so there is nothing to
     // freeze and it takes whatever name it has when it is first staged.
     assert.equal(reopened.findDownloadById(ids.remote).staging_folder, '');
+  } finally {
+    reopened.close();
+  }
+});
+
+// "Idempotent, and a no-op on every boot after the first" was only true of the
+// rows the upgrade found. It is an unguarded UPDATE, so every later boot froze
+// whatever was sitting at 'downloading' with no staging folder — which is the
+// state prepareTransfer leaves behind when it refuses to stage a download,
+// naming a remedy this then removes.
+test('the staging-folder backfill runs once, not on every boot', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-freeze-once-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new StateStore(dbPath);
+  let staleId;
+  try {
+    const profile = seedProfile(first);
+    staleId = first.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 98,
+      hash: 'freezeoncehash',
+      name: 'Not.Staged.Yet',
+      lifecycle: 'downloading',
+    }).id;
+  } finally {
+    first.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    // The upgrade already ran on the boot that created this database, so this
+    // row was never one of the rows it was written for: nothing has staged it,
+    // and its folder is still whatever it is called when something does.
+    assert.equal(reopened.findDownloadById(staleId).staging_folder, '');
   } finally {
     reopened.close();
   }

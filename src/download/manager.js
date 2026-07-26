@@ -218,12 +218,19 @@ export class DownloadManager {
       throw new Error('ready transfer has no downloadable files on put.io');
     }
 
+    // Claimed before the row is moved on, because claiming is the step that can
+    // refuse — a staging collision, or a put.io name too long to be a folder.
+    // Flipping lifecycle first left a refused download sitting at 'downloading'
+    // with no staging folder, which is exactly the shape the upgrade backfill
+    // was written to freeze: the next boot recorded the folder as the very name
+    // the refusal had just told the user to change, and both remedies stopped
+    // working for good.
+    const downloadRoot = this.service.claimStagingRoot(profile, transfer);
     const updated = this.store.updateDownload(transfer.id, {
       lifecycle: 'downloading',
       error: false,
       error_string: '',
     });
-    const downloadRoot = this.service.claimStagingRoot(profile, updated);
     const remoteFileIds = [];
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {

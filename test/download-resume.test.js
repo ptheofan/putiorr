@@ -241,6 +241,83 @@ test('a put.io name too long for the filesystem fails on the download, loudly', 
   }
 });
 
+// Both refusals above name a remedy — "rename one of them on put.io", "rename it
+// on put.io and it will start" — and a restart used to remove it. prepareTransfer
+// flipped lifecycle to 'downloading' before claiming the staging root, so a
+// refused claim left the row at 'downloading' with no staging folder; the
+// upgrade backfill then read that as "staged before the upgrade" and froze the
+// folder to the very name the user was told to change. From then on the refusal
+// is permanent and the download can only be deleted.
+test('a refused staging claim survives a restart with its remedy intact', async () => {
+  for (const variant of ['collision', 'oversized name']) {
+    const root = await mkdtemp(path.join(tmpdir(), 'putiorr-refused-claim-'));
+    const statePath = path.join(root, 'state.sqlite');
+    const putio = new FakePutio({
+      remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 5 }],
+    });
+    const badName = variant === 'collision'
+      ? 'Same.Name'
+      : `${'W'.repeat(400)}.1080p.WEB.x264`;
+
+    const before = await createHarness({}, putio, { statePath, root });
+    let refusedId;
+    try {
+      if (variant === 'collision') {
+        const winner = createTransfer(before.store, { name: badName, lifecycle: 'remote', total_size: 5 });
+        await new DownloadManager({
+          config: before.config,
+          store: before.store,
+          service: before.service,
+        }).prepareTransfer(before.store.findDownloadById(winner.id));
+      }
+      const refused = createTransfer(before.store, {
+        putio_transfer_id: 11,
+        putio_file_id: 21,
+        hash: 'refusedclaimhash',
+        name: badName,
+        lifecycle: 'remote',
+        total_size: 5,
+      });
+      refusedId = refused.id;
+      await new DownloadManager({
+        config: before.config,
+        store: before.store,
+        service: before.service,
+      }).prepareTransferSafely(before.store.findDownloadById(refused.id));
+
+      // Nothing was written for it, so it is not a staged download and must not
+      // be recorded as one.
+      const row = before.store.findDownloadById(refusedId);
+      assert.equal(row.error, true, variant);
+      assert.equal(row.staging_folder, '', variant);
+      assert.equal(row.lifecycle, 'remote', variant);
+    } finally {
+      before.store.close();
+    }
+
+    // The restart, and the remedy the refusal named: the release is renamed on
+    // put.io to something that stages cleanly.
+    const harness = await createHarness({}, putio, { statePath, root });
+    try {
+      assert.equal(harness.store.findDownloadById(refusedId).staging_folder, '', variant);
+      harness.store.updateDownload(refusedId, { name: 'Renamed.On.Putio' });
+
+      await new DownloadManager({
+        config: harness.config,
+        store: harness.store,
+        service: harness.service,
+      }).prepareTransfer(harness.store.findDownloadById(refusedId));
+
+      const row = harness.store.findDownloadById(refusedId);
+      assert.equal(row.staging_folder, 'Renamed.On.Putio', variant);
+      assert.equal(row.lifecycle, 'downloading', variant);
+      assert.equal(harness.store.listFilesForDownload(refusedId).length, 1, variant);
+    } finally {
+      harness.store.close();
+    }
+  }
+});
+
 // Audit finding 8's rename half, and re-review RC2: put.io renames a transfer
 // under putiorr's feet. The poll writes the new name into the row, and the
 // next sweep looks for the files under the new name, finds nothing, reads that
@@ -346,8 +423,10 @@ test('a download completed before the upgrade survives a put.io rename', async (
       downloaded_bytes: 5,
       status: 'complete',
     });
-    // An older build staged it and recorded nothing about where.
+    // An older build staged it and recorded nothing about where — and had no
+    // backfill of its own to have recorded as done.
     before.store.db.exec("UPDATE downloads SET staging_folder = ''");
+    before.store.db.exec("DELETE FROM settings WHERE key = 'downloads_staging_folder_backfill'");
   } finally {
     before.store.close();
   }

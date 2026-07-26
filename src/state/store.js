@@ -482,13 +482,22 @@ export class StateStore {
   //
   // Only rows that have been written to disk are frozen. A 'remote' transfer
   // has nothing on disk yet, so it takes whatever name it has when it is first
-  // staged. Idempotent, and a no-op on every boot after the first.
+  // staged.
+  //
+  // Guarded by a settings key, because "a no-op on every boot after the first"
+  // was a claim about the data, not about the code, and the data stops
+  // co-operating the moment anything else can produce the same shape: a
+  // download whose staging claim was refused sits at 'downloading' with no
+  // folder, and an unguarded rerun froze it to the name the refusal had just
+  // asked the user to change. This is a one-way upgrade step; it runs once.
   freezeStagedDownloadFolders() {
+    if (this.getSetting('downloads_staging_folder_backfill') === '1') return;
     const result = this.db.prepare(`
       UPDATE downloads
       SET staging_folder = name
       WHERE staging_folder = '' AND lifecycle IN ('downloading', 'processed')
     `).run();
+    this.setSetting('downloads_staging_folder_backfill', '1');
     if (result.changes > 0) {
       logger.info('froze the staging folder of downloads staged before the upgrade', {
         downloads: Number(result.changes),
