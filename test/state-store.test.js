@@ -60,6 +60,39 @@ test('upsertDownload matches later remote updates by put.io id', () => {
   }
 });
 
+test('an upgrade gives an existing downloads table its staging folder column', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-staging-folder-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new StateStore(dbPath);
+  let downloadId;
+  try {
+    const profile = seedProfile(first);
+    downloadId = first.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 90,
+      hash: 'stagingcolumnhash',
+      name: 'Staged.Release',
+    }).id;
+    // The shape a database collapsed by an earlier build of this phase has.
+    first.db.exec('ALTER TABLE downloads DROP COLUMN staging_folder');
+  } finally {
+    first.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    // Empty means "not staged yet", which is the right answer for a download
+    // nothing has prepared since the upgrade — and the put.io name is what it
+    // resolves to until it is.
+    const download = reopened.findDownloadById(downloadId);
+    assert.equal(download.staging_folder, '');
+    assert.equal(download.name, 'Staged.Release');
+    assert.equal(reopened.updateDownload(downloadId, { staging_folder: 'Staged.Release' }).staging_folder, 'Staged.Release');
+  } finally {
+    reopened.close();
+  }
+});
+
 test('a profile download folder is stored absolute', () => {
   const store = new StateStore(':memory:');
   try {
