@@ -29,10 +29,13 @@ const page = {
 };
 
 // Tones, as on the options page: 'note' for a request in flight, 'ok' for news
-// that landed, 'error' for a refusal. 'note' is the absence of a class.
+// that landed, 'error' for a refusal. 'note' is the absence of a class. Several
+// lines are one message: putiorr's advice about a site rides along with the
+// confirmation that stored it, and the stylesheet renders the break.
 function setStatus(message, tone = 'note') {
   const status = el('status');
-  status.textContent = String(message ?? '');
+  const lines = Array.isArray(message) ? message.filter(Boolean) : [message];
+  status.textContent = lines.join('\n');
   status.className = tone === 'note' ? '' : tone;
 }
 
@@ -183,12 +186,14 @@ async function claim() {
   const name = String(result.profile?.name ?? '').trim() || picked.profile.name;
   el('picker').hidden = true;
   el('routing').textContent = `${name} claims this site; grabs from here go there.`;
-  setStatus(
-    result.added
-      ? `${name} now claims ${page.site}`
-      : `${name} already claims ${page.site}`,
-    'ok',
-  );
+  // putiorr's advice about what was just stored — a single-label site is a rule
+  // over everything ending in it — is shown with the confirmation. Dropping it
+  // would leave the confirmation looking complete when it is not.
+  const warnings = Array.isArray(result.browser_domain_warnings) ? result.browser_domain_warnings : [];
+  setStatus([
+    result.added ? `${name} now claims ${page.site}` : `${name} already claims ${page.site}`,
+    ...warnings.map((warning) => String(warning ?? '')),
+  ], 'ok');
 }
 
 async function start() {
@@ -271,5 +276,8 @@ el('claim').addEventListener('click', () => {
 });
 
 // An unhandled rejection here would leave the popup blank with no explanation,
-// which is the one outcome worse than any answer it could give.
-start().catch((error) => setStatus(`Could not read the stored settings: ${error.message}`, 'error'));
+// which is the one outcome worse than any answer it could give. Two different
+// reads can fail — the stored settings and the current tab — so the message
+// carries what actually failed rather than naming one of them and being wrong
+// half the time.
+start().catch((error) => setStatus(`The popup could not read what it needs: ${error.message}`, 'error'));

@@ -693,3 +693,52 @@ test('the popup stylesheet borrows the tokens rather than keeping a second copy'
   assert.ok(used.length > 0, 'the popup must be themed by the token set');
   assert.deepEqual(used.filter((name) => !defined.has(name)), [], 'used but never defined');
 });
+
+test('a warning putiorr sent about the claimed site is shown with the confirmation', async () => {
+  // A single-label host is a real thing to be on ("http://nas/"), and claiming
+  // it makes a rule over every site ending in ".nas". putiorr says so; a popup
+  // that dropped that sentence would leave the confirmation looking complete.
+  const harness = await loadPopup({
+    sync: { baseUrl: 'http://nas:9091' },
+    tabs: [{ url: 'http://nas/torrents' }],
+    fetch: async (url) => (url.includes('browser-sites')
+      ? {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          profile: { id: 7, name: 'Books' },
+          browser_domains: ['nas'],
+          added: 'nas',
+          browser_domain_warnings: ['"nas" also matches every site ending in ".nas"'],
+        }),
+      }
+      : { ok: true, status: 200, json: async () => [grabProfile(7, 'Books')] }),
+  });
+
+  harness.fields.claim.click();
+  await settle();
+
+  assert.equal(harness.tone(), 'ok');
+  assert.deepEqual(harness.status().split('\n'), [
+    'Books now claims nas',
+    '"nas" also matches every site ending in ".nas"',
+  ]);
+});
+
+test('a popup that cannot read the tab says so as itself', async () => {
+  // The one catch-all left. "Could not read the stored settings" for a failing
+  // chrome.tabs.query would send the user to the options page for a setting
+  // that is not the problem.
+  const harness = createPopupHarness({ sync: { baseUrl: 'http://nas:9091' } });
+  harness.fields.picker.hidden = true;
+  globalThis.chrome.tabs.query = async () => { throw new Error('no tab access'); };
+  const url = new URL(POPUP_URL);
+  url.search = `?load=${++popupLoad}`;
+  await import(url.href);
+  await settle();
+
+  assert.match(harness.status(), /no tab access/);
+  assert.doesNotMatch(harness.status(), /stored settings/);
+  assert.equal(harness.tone(), 'error');
+});
