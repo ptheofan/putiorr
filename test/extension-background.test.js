@@ -279,6 +279,71 @@ test('an explicit menu pick is sent as profileId, and it is the only id there is
   assert.equal('defaultProfileId' in body, false);
 });
 
+test('a right-clicked handler link is grabbed as its magnet, without a page fetch', async () => {
+  // The right-click path is what a user reaches for when a click was not
+  // captured, so it has to know the same links the click handler does — and
+  // asking the tab to fetch this URL would upload the handler's HTML.
+  const link = 'https://put.io/default/magnet?url=magnet:?xt=urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F9012345'
+    + '&dn=Little.Chicks.5.1994.1080p.BluRay.x264-GROUP'
+    + '&tr=udp%3A%2F%2Fz.mercax.com%3A53%2Fannounce'
+    + '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce';
+  let body;
+  let fetchLinks = 0;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async () => {
+      fetchLinks += 1;
+      return { ok: false, error: 'the menu must not have asked for this' };
+    },
+    fetch: async (url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: {} }) };
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: link },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.equal(fetchLinks, 0, 'a wrapped magnet needs no page fetch');
+  assert.equal(body.magnet, link.slice(link.indexOf('magnet:?')));
+  const params = new URLSearchParams(body.magnet.slice(body.magnet.indexOf('?') + 1));
+  assert.equal(params.get('dn'), 'Little.Chicks.5.1994.1080p.BluRay.x264-GROUP');
+  assert.equal(params.getAll('tr').length, 2);
+  assert.equal(body.profileId, 3);
+  assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
+});
+
+test('a right-clicked link with no magnet in it is still fetched from the page', async () => {
+  // The .torrent branch is untouched: a download.php that answers with a
+  // torrent file is exactly why the right-click menu exists.
+  const requested = [];
+  let body;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async (tabId, message) => {
+      requested.push(message.url);
+      return { ok: true, torrentBase64: 'ZGU=', filename: 'download.php.torrent' };
+    },
+    fetch: async (url, init) => {
+      body = JSON.parse(init.body);
+      return { ok: true, status: 200, json: async () => ({ ok: true, transfer: {} }) };
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'https://tracker.x.example/download.php?id=5' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.deepEqual(requested, ['https://tracker.x.example/download.php?id=5']);
+  assert.equal(body.torrentBase64, 'ZGU=');
+  assert.equal(body.magnet, undefined);
+});
+
 test('an unparseable page URL is omitted rather than sent as junk', async () => {
   let body;
   const harness = await loadWorker({

@@ -1,5 +1,5 @@
 import { encodeCredentials } from './lib/auth.js';
-import { isMagnetLink, sanitizeProfiles } from './lib/resolve.js';
+import { magnetFromLink, sanitizeProfiles } from './lib/resolve.js';
 import { SYNC_DEFAULTS } from './lib/settings.js';
 
 const MENU_ROOT = 'putiorr-root';
@@ -248,8 +248,11 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   // Every grab path stays inside this try: an escaping rejection would be an
   // unhandled promise in an event listener, leaving the click with no feedback.
   try {
-    if (isMagnetLink(linkUrl)) {
-      await handleGrab({ magnet: linkUrl, pageUrl, profileId });
+    // Both a magnet: link and an http(s) handler link carrying one: asking the
+    // tab to fetch the latter would upload the handler page's HTML to put.io.
+    const magnet = magnetFromLink(linkUrl);
+    if (magnet) {
+      await handleGrab({ magnet, pageUrl, profileId });
       return;
     }
     if (!tab?.id) {
