@@ -22,6 +22,7 @@ import {
   setHidden,
   setProfileFact,
   browserDomainsPayload,
+  browserCatchAllPayload,
   grabProfileSummary,
   presetDisplayName,
   setCheckboxChecked,
@@ -67,9 +68,9 @@ export const WIZARD_HELP = {
     paragraphs: (profile) => isGrabProfile(profile)
       ? [
         'Putiorr Grab is the preset for the putiorr browser extension. The extension captures the magnet links and .torrent downloads you click in the browser and sends them to putiorr, which queues them on put.io and downloads them into this profile.',
-        'The sites listed on this profile route to it: a grab from one of them lands here even when the extension points at a different default profile. Only Putiorr Grab profiles are offered to the extension, and a grab aimed at any other preset is refused.',
+        'The sites listed on this profile route to it: a grab from one of them lands here, and one profile can additionally be set to take the grabs no site claims. Only Putiorr Grab profiles are offered to the extension, and a grab aimed at any other preset is refused.',
         'Install the extension from the Chrome Web Store once it is published. Until then, open chrome://extensions, turn on Developer mode, choose Load unpacked, and pick the extension/ folder from the putiorr repository.',
-        'Then open the extension options and set the putiorr URL and a default profile, so grabs from sites no profile claims still have somewhere to go.',
+        'Then open the extension options and set the putiorr URL. Where a grab lands is decided here, on these profiles; the extension only holds the connection and whether clicks are captured.',
       ]
       : [
         'The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.',
@@ -240,7 +241,7 @@ export const WIZARD_HELP = {
     paragraphs: (profile) => isGrabProfile(profile)
       ? [
         'Enabled profiles accept browser grabs. Disable one when you want to keep its sites and folders but stop new grabs landing in it.',
-        'A disabled profile still claims its sites: a grab from one is refused by name rather than sent to your default profile, so nothing lands in a folder you did not choose.',
+        'A disabled profile still claims its sites, and still holds the catch-all if it has it: a grab is refused by name rather than passed to the next profile, so nothing lands in a folder you did not choose.',
       ]
       : [
         'Enabled profiles accept new downloads from the matching endpoint path. Disable a profile when you want to keep its settings but stop new grabs using it.',
@@ -282,17 +283,34 @@ export const WIZARD_HELP = {
   wizardBrowserDomains: {
     title: 'Browser sites',
     paragraphs: [
-      'The websites whose browser-extension grabs are sent to this profile. A magnet or torrent clicked on one of these sites lands here even when the extension is set to a different default profile.',
+      'The websites whose browser-extension grabs are sent to this profile. A magnet or torrent clicked on one of these sites lands here, and this claim beats every other way a grab could be routed except a profile picked by hand from the right-click menu.',
       'Separate sites with commas. Subdomains are matched automatically, so x.example also covers tracker.x.example. Do not write *.x.example.',
     ],
     tips: [
-      'Leave this empty to keep the profile out of browser grabs. Those grabs then use the default profile configured in the extension.',
+      'Leave this empty and tick the box below to take every grab no other profile claims. Empty with the box clear keeps this profile out of browser grabs entirely.',
       'Only Putiorr Grab profiles claim sites. A site listed on an *arr profile is never consulted, which is why the field is shown for this preset alone.',
       'The first matching profile wins, so avoid listing the same site on two profiles.',
       'putiorr rewrites what you type: sites are lowercased, unicode becomes punycode, and any scheme, port, or path is dropped.',
     ],
     valueLabel: 'Sites as typed',
     value: (profile) => browserDomainsText(profile),
+  },
+  wizardBrowserCatchAll: {
+    title: 'Take grabs from any other site',
+    paragraphs: [
+      'Ticked, this profile takes every browser grab that no profile\'s Browser sites claimed. It is the answer to "where does a grab from a site I never listed go?", and it is the only answer there is: without it, such a grab is refused rather than guessed at.',
+      'This is a fallback, not a wildcard. A profile that lists a site still wins for that site and its subdomains, so ticking this box never takes a grab away from a profile that asked for it by name.',
+    ],
+    tips: [
+      'Only one profile may take the rest. Saving a second is refused, naming the profile that already holds it, because two would leave every unlisted site ambiguous.',
+      'A profile can do both: list the sites it cares about and take everything else. The two settings answer different grabs.',
+      'Switching this profile off does not release the role. A grab from an unlisted site is then refused by name rather than landing in some other profile\'s folder.',
+      'With no profile ticked, putiorr refuses such a grab with a message naming this very checkbox. Nothing is dropped in silence.',
+    ],
+    valueLabel: 'Grabs from unlisted sites',
+    value: (profile) => (browserCatchAll(profile)
+      ? 'Land in this profile'
+      : 'Are refused unless another profile takes them'),
   },
 };
 
@@ -308,6 +326,22 @@ export function browserDomainsList(profile) {
 export function browserDomainsText(profile) {
   const domains = browserDomainsList(profile);
   return domains.length ? domains.join(', ') : 'None';
+}
+
+// Read off a stored profile, off the wizard's own payload, or off a row an
+// older putiorr wrote without the column — all three reach the help panel and
+// the card.
+export function browserCatchAll(profile) {
+  return Boolean(profile?.browser_catch_all ?? profile?.browserCatchAll);
+}
+
+// The card answers "where does a grab from an unlisted site go?" for this
+// profile, so the negative answer has to be a fact rather than a bare "No":
+// off means this profile takes only what it names, not that nothing is set.
+export function browserCatchAllText(profile) {
+  return browserCatchAll(profile)
+    ? 'Takes grabs from any site no other profile claims'
+    : 'Only the sites listed';
 }
 
 // Warnings ride along on the save response and are never stored, so they are
@@ -381,6 +415,10 @@ export function createProfileCard(profile) {
         <dt>Browser sites</dt>
         <dd data-role="browser-domains" data-testid="profile-card-browser-domains"></dd>
       </div>
+      <div class="profile-fact-wide">
+        <dt>Unlisted sites</dt>
+        <dd data-role="browser-catch-all" data-testid="profile-card-browser-catch-all"></dd>
+      </div>
       <div>
         <dt>RPC</dt>
         <dd data-role="rpc"></dd>
@@ -403,10 +441,13 @@ export function createProfileCard(profile) {
   setProfileFact(card, 'download', profile.downloadAt ?? profile.download_at ?? 'Not set');
   setProfileFact(card, 'download-profile', downloadProfileDisplayName(profile.download_profile_id ?? profile.downloadProfileId));
   setProfileFact(card, 'browser-domains', browserDomainsText(profile));
+  setProfileFact(card, 'browser-catch-all', browserCatchAllText(profile));
   // A grab profile has no download client to point at its RPC endpoint, and no
-  // other preset claims sites, so each card drops the fact that cannot apply.
+  // other preset claims sites or serves a grab from an unlisted one, so each
+  // card drops the facts that cannot apply.
   toggleProfileFact(card, 'rpc', isGrab);
   toggleProfileFact(card, 'browser-domains', !isGrab);
+  toggleProfileFact(card, 'browser-catch-all', !isGrab);
   const status = card.querySelector('[data-role="status"]');
   status.className = `profile-status status ${profile.enabled === false ? 'warn' : 'ok'}`;
   setText(status, profile.enabled === false ? 'Disabled' : 'Enabled');
@@ -426,7 +467,10 @@ export function toggleProfileFact(card, role, hidden) {
 }
 
 export function profileSummary(profile) {
-  if (isGrabProfile(profile)) return grabProfileSummary(browserDomainsList(profile));
+  if (isGrabProfile(profile)) return grabProfileSummary(
+    browserDomainsList(profile),
+    browserCatchAll(profile),
+  );
   const payload = getClientSettingsFromProfile({
     ...profile,
     name: profileDisplayName(profile),
@@ -481,6 +525,7 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
       ?? detail.autoRemoveCompleted,
   ));
   setWizardField(el.wizardBrowserDomains, browserDomainsList(profile).join(', '));
+  setWizardChecked(el.wizardBrowserCatchAll, browserCatchAll(profile));
   el.deleteProfileButton.hidden = !isExisting;
   setText(el.saveProfileButton, saveButtonLabel(type));
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
@@ -613,6 +658,7 @@ export function getWizardPayload() {
     // hostname can match, so the wizard shows that error instead of guessing.
     // Only the presets that show the step send it at all.
     ...browserDomainsPayload(el.wizardBrowserStep.hidden, fieldValue(el.wizardBrowserDomains).trim()),
+    ...browserCatchAllPayload(el.wizardBrowserStep.hidden, fieldChecked(el.wizardBrowserCatchAll)),
   };
 }
 

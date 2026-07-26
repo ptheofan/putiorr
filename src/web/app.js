@@ -264,6 +264,7 @@ for (const input of [
   el.wizardEnabled,
   el.wizardAutoRemoveCompleted,
   el.wizardBrowserDomains,
+  el.wizardBrowserCatchAll,
 ]) {
   input.addEventListener('input', updateWizardPreview);
   input.addEventListener('change', updateWizardPreview);

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 // profiles.js reaches the DOM through state.js, so the wizard itself is pinned
 // by reading its source; the parts that are only strings and values live in
 // util.js, which imports nothing but constants and runs here.
-import { browserDomainsPayload, grabProfileSummary } from '../src/web/util.js';
+import { browserCatchAllPayload, browserDomainsPayload, grabProfileSummary } from '../src/web/util.js';
 
 test('profile wizard exposes stable data-testid hooks for frontend tests', () => {
   const html = readFileSync(new URL('../src/web/index.html', import.meta.url), 'utf8');
@@ -14,7 +14,9 @@ test('profile wizard exposes stable data-testid hooks for frontend tests', () =>
   for (const testId of [
     'profile-auto-remove-completed',
     'profile-browser-domains',
+    'profile-browser-catch-all',
     'profile-card-browser-domains',
+    'profile-card-browser-catch-all',
   ]) {
     assert.match(source, new RegExp(`data-testid=["']${testId}["']|['"]data-testid['"], ['"]${testId}['"]`));
   }
@@ -213,12 +215,84 @@ test('a grab profile card is summarized by its sites, not by a category', () => 
   assert.equal(grabProfileSummary([]), 'Browser grabs sent here by the extension.');
   assert.equal(grabProfileSummary(), 'Browser grabs sent here by the extension.');
 
+  // Taking the rest is the other half of the same sentence: a profile can list
+  // sites and take everything unlisted, and the card has to say both.
+  assert.equal(
+    grabProfileSummary(['x.example'], true),
+    'Browser grabs from x.example, and from any site no other profile claims.',
+  );
+  assert.equal(grabProfileSummary([], true), 'Browser grabs from any site no other profile claims.');
+
   // A grab profile never reaches the category sentence below it: it has no
   // download client, so "Uses category movies-grab." would describe nothing.
   assert.match(
     profilesJs,
-    /export function profileSummary[\s\S]*?if \(isGrabProfile\(profile\)\) return grabProfileSummary\(browserDomainsList\(profile\)\);/,
+    /export function profileSummary[\s\S]*?if \(isGrabProfile\(profile\)\) return grabProfileSummary\(\s*browserDomainsList\(profile\),\s*browserCatchAll\(profile\),\s*\);/,
   );
+});
+
+test('the catch-all checkbox sits with the sites it complements and is sent with them', () => {
+  const html = readFileSync(new URL('../src/web/index.html', import.meta.url), 'utf8');
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+  const stateJs = readFileSync(new URL('../src/web/state.js', import.meta.url), 'utf8');
+
+  // Same step as Browser sites: listing sites and taking the rest are two
+  // answers to one question, and the preset that hides one hides both.
+  assert.match(
+    html,
+    /id="wizardBrowserStep"[\s\S]*?id="wizardBrowserDomains"[\s\S]*?id="wizardBrowserCatchAll"[\s\S]*?<\/section>/,
+  );
+  assert.match(html, /id="wizardBrowserCatchAll"[^>]*>Take grabs from any site no other profile claims</);
+  assert.match(stateJs, /wizardBrowserCatchAll: document\.querySelector\('#wizardBrowserCatchAll'\)/);
+  assert.match(
+    profilesJs,
+    /\.\.\.browserCatchAllPayload\(el\.wizardBrowserStep\.hidden, fieldChecked\(el\.wizardBrowserCatchAll\)\)/,
+  );
+  assert.match(profilesJs, /setWizardChecked\(el\.wizardBrowserCatchAll, browserCatchAll\(profile\)\)/);
+
+  // Present but false is still an answer — the user cleared the box, and the
+  // server has to store that. Absent is the preset never having asked.
+  assert.deepEqual(browserCatchAllPayload(false, true), { browserCatchAll: true });
+  assert.deepEqual(browserCatchAllPayload(false, false), { browserCatchAll: false });
+  assert.deepEqual(browserCatchAllPayload(true, true), {});
+  assert.ok(!('browserCatchAll' in browserCatchAllPayload(true, true)));
+});
+
+test('a grab profile card states where an unlisted site would land', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+
+  assert.match(profilesJs, /setProfileFact\(card, 'browser-catch-all', browserCatchAllText\(profile\)\)/);
+  // Neither fact means anything on a preset that never serves a grab.
+  assert.match(profilesJs, /toggleProfileFact\(card, 'browser-catch-all', !isGrab\)/);
+  assert.match(profilesJs, /export function browserCatchAllText[\s\S]*?'Only the sites listed'/);
+});
+
+test('the field guide calls the catch-all a fallback rather than a wildcard', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+
+  const entry = profilesJs.slice(
+    profilesJs.indexOf('wizardBrowserCatchAll: {'),
+    profilesJs.indexOf('};', profilesJs.indexOf('wizardBrowserCatchAll: {')),
+  );
+  assert.ok(entry.length > 0, 'the catch-all help entry must exist');
+  // The one misreading worth pre-empting: it does not out-rank a profile that
+  // asked for a site by name.
+  assert.match(entry, /fallback, not a wildcard/);
+  assert.match(entry, /still wins/);
+  // And the two rules a user meets next: one holder, and switching it off does
+  // not release the role.
+  assert.match(entry, /Only one profile/);
+  assert.match(entry, /refused by name/);
+});
+
+// The extension no longer holds a Default profile, so every line of the guide
+// that sent the user there is now directions to a control that is not on the
+// page. The catch-all checkbox is what those lines have to name.
+test('the wizard help no longer sends users to an extension default profile', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(profilesJs, /default profile/i);
+  assert.match(profilesJs, /any site no other profile claims/);
 });
 
 test('the field guide explains the browser extension and how to install it', () => {
@@ -238,7 +312,7 @@ test('the field guide explains the browser extension and how to install it', () 
   assert.match(appPreset, /Developer mode/);
   assert.match(appPreset, /Load unpacked/);
   assert.match(appPreset, /extension\/ folder/);
-  assert.match(appPreset, /putiorr URL and a default profile/);
+  assert.match(appPreset, /putiorr URL/);
 
   // Every field the grab wizard shows reads as a grab field. The put.io folder
   // entry used to answer with the category folder story that the storage help

@@ -84,6 +84,7 @@ export const el = {
   wizardEnabled: document.querySelector('#wizardEnabled'),
   wizardAutoRemoveCompleted: document.querySelector('#wizardAutoRemoveCompleted'),
   wizardBrowserDomains: document.querySelector('#wizardBrowserDomains'),
+  wizardBrowserCatchAll: document.querySelector('#wizardBrowserCatchAll'),
   wizardHelpKicker: document.querySelector('#wizardHelpKicker'),
   wizardHelpTitle: document.querySelector('#wizardHelpTitle'),
   wizardHelpBody: document.querySelector('#wizardHelpBody'),

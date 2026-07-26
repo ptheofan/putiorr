@@ -459,6 +459,9 @@
               <div class="step-label" data-step-title="Browser grabs">3. Browser grabs</div>
               <wa-input id="wizardBrowserDomains" label="Browser sites" type="text" autocomplete="off" placeholder="x.example, z.example" data-testid="profile-browser-domains"></wa-input>
               <p class="field-help">Browser grabs from these sites use this profile; subdomains match automatically. Leave empty for none.</p>
+              <div class="check-grid">
+                <wa-checkbox id="wizardBrowserCatchAll" data-testid="profile-browser-catch-all">Take grabs from any site no other profile claims</wa-checkbox>
+              </div>
             </section>
 
             <section class="wizard-step" id="wizardOptionsStep">

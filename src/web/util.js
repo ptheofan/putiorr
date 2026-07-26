@@ -231,9 +231,23 @@ export function browserDomainsPayload(hidden, value) {
   return hidden ? {} : { browserDomains: value };
 }
 
+// Sent under the same rule as the sites, and for the same reason: the checkbox
+// exists only while the Browser grabs step is showing, so an *arr save would
+// otherwise set a grab-only flag from a control nobody saw — and the save that
+// did it could be refused over a second catch-all the user never asked for.
+export function browserCatchAllPayload(hidden, checked) {
+  return hidden ? {} : { browserCatchAll: Boolean(checked) };
+}
+
 // A grab profile has no category and no client to describe, so its card is
-// summarized by the sites whose browser grabs it claims.
-export function grabProfileSummary(domains = []) {
+// summarized by the browser grabs it claims: the sites it lists, and — for the
+// one profile that takes them — every site nobody listed.
+export function grabProfileSummary(domains = [], catchAll = false) {
+  if (catchAll) {
+    return domains.length
+      ? `Browser grabs from ${domains.join(', ')}, and from any site no other profile claims.`
+      : 'Browser grabs from any site no other profile claims.';
+  }
   return domains.length
     ? `Browser grabs from ${domains.join(', ')}.`
     : 'Browser grabs sent here by the extension.';
