@@ -423,18 +423,66 @@ test('an empty or null profileId is a caller with no pick, not a bad one', async
   }
 });
 
-test('a page host on a subdomain still matches the site the profile claims', async (t) => {
+test('a wildcard site takes the whole domain, apex included', async (t) => {
+  // A plain entry is exact now, so this is the one entry that claims a tracker
+  // whole — and it has to cover x.example itself, or the user would need two.
   const harness = await createHarness();
   t.after(closeHarness(harness));
-  const site = createSiteProfile(harness, 'browser', ['x.example']);
+  const site = createSiteProfile(harness, 'browser', ['*.x.example']);
+
+  for (const pageHost of ['tracker.x.example', 'x.example', 'a.b.x.example']) {
+    const { status, body } = await postGrab(harness, {
+      pageHost,
+      magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+    });
+    assert.equal(status, 200, pageHost);
+    assert.equal(body.profile.id, site.id, pageHost);
+  }
+});
+
+test('a plain site claims that host alone, and a subdomain of it goes unclaimed', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'browser', ['x.example']);
 
   const { status, body } = await postGrab(harness, {
     pageHost: 'tracker.x.example',
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
 
-  assert.equal(status, 200);
-  assert.equal(body.profile.id, site.id);
+  assert.equal(status, 400);
+  assert.match(body.error, /^No Putiorr Grab profile claims tracker\.x\.example/);
+});
+
+test('an exact site beats a wildcard on another profile, which keeps the rest', async (t) => {
+  // The overlap the wildcard rule is for: one profile takes one host by name,
+  // another takes everything else under the domain. Both are legitimate, and
+  // precedence rather than a refusal is what makes them so.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const wide = createSiteProfile(harness, 'browser', ['*.x.example']);
+  const exact = createSiteProfile(harness, 'downloads', ['dl.x.example']);
+
+  const named = await postGrab(harness, {
+    pageHost: 'dl.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+  assert.equal(named.status, 200);
+  assert.equal(named.body.profile.id, exact.id);
+
+  // Resolution only, on a second harness: the stub put.io accepts one transfer
+  // per harness, and what is being asserted here is which profile answers.
+  const second = await createHarness();
+  t.after(closeHarness(second));
+  createSiteProfile(second, 'browser', ['*.x.example']);
+  createSiteProfile(second, 'downloads', ['dl.x.example']);
+
+  const rest = await postGrab(second, {
+    pageHost: 'other.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+  assert.equal(rest.status, 200);
+  assert.equal(rest.body.profile.name, wide.name);
 });
 
 test('a page host no profile claims goes to the catch-all grab profile', async (t) => {
@@ -476,7 +524,7 @@ test('the catch-all is a fallback, not a wildcard: a listed site still wins', as
   // Created first, so it also wins on id order if anything ever resolved by
   // that: the site match runs before the catch-all is even consulted.
   const catchAll = createSiteProfile(harness, 'everything', [], { catchAll: true });
-  const site = createSiteProfile(harness, 'browser', ['x.example']);
+  const site = createSiteProfile(harness, 'browser', ['*.x.example']);
   assert.ok(catchAll.id < site.id);
 
   const { status, body } = await postGrab(harness, {
@@ -828,11 +876,25 @@ test('a browser site that could never match is refused, naming the entry', async
   const harness = await createHarness();
   t.after(closeHarness(harness));
 
-  const created = await postProfile(harness, { browserDomains: '*.x.example' });
+  // A star anywhere but the front. The refusal names the one position that
+  // works rather than leaving the user to guess at it.
+  const created = await postProfile(harness, { browserDomains: 'dl.*.x.example' });
 
   assert.equal(created.status, 400);
-  assert.match(created.body.error, /\*\.x\.example/);
+  assert.match(created.body.error, /dl\.\*\.x\.example/);
+  assert.match(created.body.error, /a wildcard is only a leading "\*\."/);
   assert.equal(harness.store.findProfileBySlug('browser'), undefined);
+});
+
+test('a wildcard browser site is saved with the star kept, base normalized under it', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, { browserDomains: '*.HTTPS://X.Example:8080/dl, x.example' });
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.browser_domains, ['*.x.example', 'x.example']);
+  assert.deepEqual(harness.store.findProfileById(created.body.id).browser_domains, ['*.x.example', 'x.example']);
 });
 
 test('a profile without browser sites keeps none, and an update replaces them', async (t) => {
@@ -860,10 +922,10 @@ test('several bad browser sites are listed one per line and capped', async (t) =
 
   // The profile wizard renders the error with white-space: pre-line, so a
   // joined-by-space run-on is unreadable exactly when there is most to read.
-  const two = await postProfile(harness, { browserDomains: '*.x.example, x..example' });
+  const two = await postProfile(harness, { browserDomains: 'x.*.example, x..example' });
   assert.equal(two.status, 400);
   assert.equal(two.body.error.split('\n').length, 2);
-  assert.match(two.body.error, /\*\.x\.example/);
+  assert.match(two.body.error, /x\.\*\.example/);
   assert.match(two.body.error, /x\.\.example/);
 
   // A grab request body can hold megabytes of entries; the message must not
@@ -876,16 +938,19 @@ test('several bad browser sites are listed one per line and capped', async (t) =
   assert.match(many.body.error, /\n…and 4 more$/);
 });
 
-test('a browser site that matches more than the user meant is saved with a warning', async (t) => {
+test('a wildcard broad enough to be a whole suffix is saved with a warning', async (t) => {
+  // putiorr carries no public-suffix list, so it cannot tell "*.com" from
+  // "*.example". A single-label base is what it can see, and a LAN name looks
+  // the same, so this is advice that accompanies the save rather than a refusal.
   const harness = await createHarness();
   t.after(closeHarness(harness));
 
-  const created = await postProfile(harness, { browserDomains: 'com, x.example' });
+  const created = await postProfile(harness, { browserDomains: '*.com, x.example' });
 
   assert.equal(created.status, 201);
-  assert.deepEqual(created.body.browser_domains, ['com', 'x.example']);
+  assert.deepEqual(created.body.browser_domains, ['*.com', 'x.example']);
   assert.deepEqual(created.body.browser_domain_warnings, [
-    '"com" also matches every site ending in ".com"',
+    '"*.com" matches com and every site ending in ".com"',
   ]);
   // The warning is advice about the input, not part of the profile.
   assert.equal('browser_domain_warnings' in harness.store.findProfileById(created.body.id), false);
@@ -893,12 +958,12 @@ test('a browser site that matches more than the user meant is saved with a warni
   const response = await fetch(`${harness.base}/api/profiles/${created.body.id}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ browserDomains: 'example' }),
+    body: JSON.stringify({ browserDomains: '*.example' }),
   });
   const updated = await response.json();
   assert.equal(response.status, 200);
   assert.deepEqual(updated.browser_domain_warnings, [
-    '"example" also matches every site ending in ".example"',
+    '"*.example" matches example and every site ending in ".example"',
   ]);
 });
 
@@ -906,9 +971,12 @@ test('a profile whose browser sites are all unambiguous carries no warning key',
   const harness = await createHarness();
   t.after(closeHarness(harness));
 
-  const created = await postProfile(harness, { browserDomains: 'x.example' });
+  // A plain single label is one of them now: "com" claims the host "com" and
+  // nothing else, so the warning the old suffix rule earned would be false.
+  const created = await postProfile(harness, { browserDomains: 'x.example, com' });
 
   assert.equal(created.status, 201);
+  assert.deepEqual(created.body.browser_domains, ['x.example', 'com']);
   assert.equal('browser_domain_warnings' in created.body, false);
 });
 
@@ -1137,7 +1205,7 @@ test('a claimed site routes the very next grab from it', async (t) => {
 
   assert.equal((await claimSite(harness, profile.id, { host: 'x.example' })).status, 200);
   const grab = await postGrab(harness, {
-    pageHost: 'dl.x.example',
+    pageHost: 'x.example',
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
 
@@ -1172,18 +1240,18 @@ test('claiming the same site twice adds it once', async (t) => {
   assert.deepEqual(body.browser_domains, ['x.example']);
 });
 
-test('a site this profile already covers by suffix is not listed a second time', async (t) => {
-  // "dl.x.example" under a profile that already lists "x.example" would be a
-  // row that changes nothing: the suffix match already routes it there.
+test('a site this profile already covers by wildcard is not listed a second time', async (t) => {
+  // "dl.x.example" under a profile that already lists "*.x.example" would be a
+  // row that changes nothing: the wildcard already routes it there.
   const harness = await createHarness();
   t.after(closeHarness(harness));
-  const profile = createSiteProfile(harness, 'browser', ['x.example']);
+  const profile = createSiteProfile(harness, 'browser', ['*.x.example']);
 
   const { status, body } = await claimSite(harness, profile.id, { host: 'dl.x.example' });
 
   assert.equal(status, 200);
   assert.equal(body.added, null);
-  assert.deepEqual(body.browser_domains, ['x.example']);
+  assert.deepEqual(body.browser_domains, ['*.x.example']);
 });
 
 test('a site another profile claims is refused, naming that profile', async (t) => {
@@ -1206,13 +1274,12 @@ test('a site another profile claims is refused, naming that profile', async (t) 
   assert.deepEqual(harness.store.findProfileById(owner.id).browser_domains, ['x.example']);
 });
 
-test('a refusal by suffix match names the site that was actually listed', async (t) => {
-  // Adding "dl.x.example" to a second profile would not even win: resolution
-  // stops at the first profile that matches, and that is the one listing
-  // "x.example". Storing it would look like a claim and route nothing.
+test('a refusal by wildcard match names the entry that was actually listed', async (t) => {
+  // "already claims dl.x.example" alone would send the user looking for an
+  // entry that is on no profile: what exists is "*.x.example".
   const harness = await createHarness();
   t.after(closeHarness(harness));
-  createSiteProfile(harness, 'movies', ['x.example']);
+  createSiteProfile(harness, 'movies', ['*.x.example']);
   const other = createSiteProfile(harness, 'books', []);
 
   const { status, body } = await claimSite(harness, other.id, { host: 'dl.x.example' });
@@ -1220,7 +1287,7 @@ test('a refusal by suffix match names the site that was actually listed', async 
   assert.equal(status, 409);
   assert.equal(
     body.error,
-    'MOVIES already claims dl.x.example through x.example; remove or narrow that site there'
+    'MOVIES already claims dl.x.example through *.x.example; remove or narrow that site there'
       + ' first if it should belong to another profile',
   );
   assert.deepEqual(harness.store.findProfileById(other.id).browser_domains, []);
@@ -1297,9 +1364,9 @@ test('a host putiorr could never match is refused, naming the entry', async (t) 
   t.after(closeHarness(harness));
   const profile = createSiteProfile(harness, 'browser', []);
 
-  const wildcard = await claimSite(harness, profile.id, { host: '*.x.example' });
-  assert.equal(wildcard.status, 400);
-  assert.match(wildcard.body.error, /\*\.x\.example/);
+  const badStar = await claimSite(harness, profile.id, { host: 'dl.*.x.example' });
+  assert.equal(badStar.status, 400);
+  assert.match(badStar.body.error, /dl\.\*\.x\.example/);
 
   const missing = await claimSite(harness, profile.id, {});
   assert.equal(missing.status, 400);
@@ -1332,11 +1399,11 @@ test('a claimed site that matches more than the user meant carries the warning a
   t.after(closeHarness(harness));
   const profile = createSiteProfile(harness, 'browser', []);
 
-  const { status, body } = await claimSite(harness, profile.id, { host: 'lan' });
+  const { status, body } = await claimSite(harness, profile.id, { host: '*.lan' });
 
   assert.equal(status, 200);
-  assert.deepEqual(body.browser_domains, ['lan']);
-  assert.deepEqual(body.browser_domain_warnings, ['"lan" also matches every site ending in ".lan"']);
+  assert.deepEqual(body.browser_domains, ['*.lan']);
+  assert.deepEqual(body.browser_domain_warnings, ['"*.lan" matches lan and every site ending in ".lan"']);
   // The warning is advice about what was just sent, not profile data.
   assert.equal('browser_domain_warnings' in harness.store.findProfileById(profile.id), false);
 });

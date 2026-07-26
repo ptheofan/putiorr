@@ -1451,15 +1451,15 @@ export class TransmissionRpcServer {
     // Disabled profiles are deliberately included, exactly as they are when a
     // grab resolves: one still claims its sites, and a second profile listing
     // the same site would change nothing about where that grab goes.
-    const owner = matchProfileByHost(grabProfiles, site);
-    if (owner && owner.id !== profile.id) {
-      jsonResponse(res, 409, { error: claimedElsewhereRefusal(owner, site) }, this.sessionId);
+    const match = matchProfileByHost(grabProfiles, site);
+    if (match && match.profile.id !== profile.id) {
+      jsonResponse(res, 409, { error: claimedElsewhereRefusal(match, site) }, this.sessionId);
       return;
     }
-    // Already handled by this profile — the same site twice, or a subdomain of
-    // one it lists. Storing it again would add a row that routes nothing, so
-    // the answer is the list as it stands and `added: null`.
-    if (owner) {
+    // Already handled by this profile — the same site twice, or a host a
+    // wildcard it lists already covers. Storing it again would add a row that
+    // routes nothing, so the answer is the list as it stands and `added: null`.
+    if (match) {
       jsonResponse(res, 200, claimResponse(profile, null, warnings), this.sessionId);
       return;
     }
@@ -1517,7 +1517,7 @@ export class TransmissionRpcServer {
         pageHost,
       )
       : undefined;
-    if (matched) return { ok: true, profile: matched };
+    if (matched) return { ok: true, profile: matched.profile };
 
     // Only once no profile's browser sites matched. The catch-all is a
     // fallback, not a wildcard: a profile that claims specific sites still wins
@@ -1667,22 +1667,16 @@ function claimResponse(profile, added, warnings = []) {
 
 // Names the profile that already has the site and the entry it actually lists,
 // which is not always the host asked about: a claim on "dl.x.example" loses to
-// a profile listing "x.example", and "already claims dl.x.example" alone would
-// send the user looking for an entry that is not on any profile.
-function claimedElsewhereRefusal(owner, site) {
+// a profile listing "*.x.example", and "already claims dl.x.example" alone
+// would send the user looking for an entry that is not on any profile. The
+// entry comes from the match rather than being recomputed here, so there is one
+// implementation of what covers what.
+function claimedElsewhereRefusal(match, site) {
   const tail = 'first if it should belong to another profile';
-  const domains = Array.isArray(owner.browser_domains) ? owner.browser_domains : [];
-  // Recomputed rather than returned by matchProfileByHost: that function
-  // answers the one question every grab asks, and widening it for one message
-  // would put a second shape on the path every grab takes. A row written
-  // before normalization existed can match without any entry reading as a
-  // suffix of the site, and then there is no entry to name.
-  const listed = domains.includes(site)
-    ? ''
-    : domains.find((domain) => site.endsWith(`.${domain}`)) ?? '';
-  return listed
-    ? `${owner.name} already claims ${site} through ${listed}; remove or narrow that site there ${tail}`
-    : `${owner.name} already claims ${site}; remove the site there ${tail}`;
+  return match.wildcard
+    ? `${match.profile.name} already claims ${site} through ${match.domain};`
+      + ` remove or narrow that site there ${tail}`
+    : `${match.profile.name} already claims ${site}; remove the site there ${tail}`;
 }
 
 // Warnings are advice about what was just typed, not profile data: they ride

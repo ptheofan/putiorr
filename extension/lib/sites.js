@@ -17,6 +17,20 @@
 const LABEL = '[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?';
 const MATCHABLE_DOMAIN = new RegExp(`^(?:${LABEL})(?:\\.(?:${LABEL}))*$|^\\[[0-9a-f:.]+\\]$`, 'i');
 
+// A stored site is a host, which matches that host alone, or "*." in front of
+// one, which matches that host and every subdomain of it. Undefined for an
+// entry that can never match: an empty one, or a star anywhere but the front —
+// a row written by an older putiorr can hold one.
+function storedEntry(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  const wildcard = text.startsWith('*.');
+  const rest = wildcard ? text.slice(2) : text;
+  if (rest.includes('*')) return undefined;
+  const base = normalizeSite(rest);
+  if (!base) return undefined;
+  return { wildcard, base, domain: wildcard ? `*.${base}` : base };
+}
+
 // Reduces a site or host to what matching actually compares: scheme and path
 // stripped, unicode punycoded, leading and trailing dots dropped, '' for
 // anything unparseable.
@@ -77,37 +91,60 @@ function isDisabled(profile) {
   return profile?.enabled === false || profile?.enabled === 0;
 }
 
-// Who handles `host`, in the order putiorr resolves it: the first profile whose
-// browser sites match exactly or as a suffix, then the profile set to take
-// everything else, then nobody.
+// Who handles `host`, in the order putiorr resolves it: the profile that lists
+// the host exactly, then the most specific wildcard that covers it, then the
+// profile set to take everything else, then nobody.
 //
 //   { kind: 'none' }                                    — the tab has no host
-//   { kind: 'claimed', profile, domain, viaSubdomain, disabled }
+//   { kind: 'claimed', profile, domain, viaWildcard, disabled }
 //   { kind: 'catch-all', profile, disabled }
 //   { kind: 'unclaimed' }
 //
-// `domain` is the site the profile actually lists, which is not always the host
-// asked about; `viaSubdomain` says so, because "dl.x.example is handled by X"
-// otherwise reads like a site nobody typed.
+// `domain` is the entry the profile actually lists, which is not always the
+// host asked about; `viaWildcard` says so, because "dl.x.example is handled by
+// X" otherwise reads like a site nobody typed.
+//
+// An exact entry beats every wildcard and a longer wildcard base beats a
+// shorter one, so "dl.x.example" on one profile and "*.x.example" on another is
+// a configuration that says something rather than a race between two rows.
+// Ties go to the first profile in the order given, as they do on the server.
 export function routingForHost(profiles, host) {
   const hostname = normalizeSite(host);
   if (!hostname) return { kind: 'none' };
 
   const rows = Array.isArray(profiles) ? profiles : [];
+  let widest;
   for (const profile of rows) {
-    for (const domain of domainsOf(profile)) {
-      const site = normalizeSite(domain);
-      if (!site) continue;
-      if (hostname === site || hostname.endsWith(`.${site}`)) {
+    for (const value of domainsOf(profile)) {
+      const entry = storedEntry(value);
+      if (!entry) continue;
+
+      if (!entry.wildcard) {
+        // Nothing later can outrank an exact match, so it is the answer here.
+        if (hostname !== entry.base) continue;
         return {
           kind: 'claimed',
           profile,
-          domain: site,
-          viaSubdomain: hostname !== site,
+          domain: entry.domain,
+          viaWildcard: false,
           disabled: isDisabled(profile),
         };
       }
+
+      // The apex counts as covered by its own wildcard.
+      if (hostname !== entry.base && !hostname.endsWith(`.${entry.base}`)) continue;
+      if (!widest || entry.base.length > widest.entry.base.length) widest = { profile, entry };
     }
+  }
+
+  if (widest) {
+    return {
+      kind: 'claimed',
+      profile: widest.profile,
+      domain: widest.entry.domain,
+      viaWildcard: true,
+      disabled: isDisabled(widest.profile),
+    };
   }
 
   // Only once nothing matched: a profile that lists a site still wins for that

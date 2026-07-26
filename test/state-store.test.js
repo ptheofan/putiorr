@@ -867,7 +867,8 @@ test('the store normalizes browser sites it is handed directly', () => {
     assert.deepEqual(seeded.browser_domains, ['x.example', 'xn--bcher-kva.example']);
 
     // An entry no hostname can match is dropped rather than stored as a site
-    // that would never fire.
+    // that would never fire. A leading "*." is not one of those: it is the
+    // wildcard form, and it survives the seed with the star kept.
     const wildcard = store.createProfile({
       name: 'Wildcard',
       type: 'custom',
@@ -875,17 +876,17 @@ test('the store normalizes browser sites it is handed directly', () => {
       putio_folder_name: 'wildcard',
       downloadAt: '/downloads',
       rpc_path: '/wildcard/transmission/rpc',
-      browser_domains: ['*.x.example'],
+      browser_domains: ['*.x.example', 'dl.*.x.example'],
     });
-    assert.deepEqual(wildcard.browser_domains, []);
-    assert.deepEqual(store.updateProfile(seeded.id, { browser_domains: ['*.x.example'] }).browser_domains, []);
+    assert.deepEqual(wildcard.browser_domains, ['*.x.example']);
+    assert.deepEqual(store.updateProfile(seeded.id, { browser_domains: ['dl.*.x.example'] }).browser_domains, []);
 
     // Normalizing an already normalized list must not change it.
-    const normalized = store.updateProfile(seeded.id, { browser_domains: ['x.example', 'z.example'] });
-    assert.deepEqual(normalized.browser_domains, ['x.example', 'z.example']);
+    const normalized = store.updateProfile(seeded.id, { browser_domains: ['x.example', '*.z.example'] });
+    assert.deepEqual(normalized.browser_domains, ['x.example', '*.z.example']);
     assert.deepEqual(
       store.updateProfile(seeded.id, { browser_domains: normalized.browser_domains }).browser_domains,
-      ['x.example', 'z.example'],
+      ['x.example', '*.z.example'],
     );
   } finally {
     store.close();

@@ -74,23 +74,50 @@ test('a profile that lists the host is named, along with the site it listed', ()
     kind: 'claimed',
     profile: profiles[1],
     domain: 'x.example',
-    viaSubdomain: false,
+    viaWildcard: false,
     disabled: false,
   });
+  // A plain entry is exact: a subdomain of it is not its business.
+  assert.deepEqual(routingForHost(profiles, 'dl.x.example'), { kind: 'unclaimed' });
 });
 
-test('a subdomain match says which listed site it matched and that it is one', () => {
+test('a wildcard match says which entry it matched and that it was a wildcard', () => {
   // "dl.x.example is handled by X" with no further explanation reads like a
-  // site nobody typed: the popup has to be able to say why.
-  const profiles = [claiming(1, ['x.example'])];
+  // site nobody typed: the popup has to be able to say why. The apex is covered
+  // by its own wildcard, so the same entry answers for both hosts.
+  const profiles = [claiming(1, ['*.x.example'])];
 
   assert.deepEqual(routingForHost(profiles, 'dl.x.example'), {
     kind: 'claimed',
     profile: profiles[0],
-    domain: 'x.example',
-    viaSubdomain: true,
+    domain: '*.x.example',
+    viaWildcard: true,
     disabled: false,
   });
+  assert.deepEqual(routingForHost(profiles, 'x.example'), {
+    kind: 'claimed',
+    profile: profiles[0],
+    domain: '*.x.example',
+    viaWildcard: true,
+    disabled: false,
+  });
+  assert.deepEqual(routingForHost(profiles, 'notx.example'), { kind: 'unclaimed' });
+});
+
+test('an exact entry beats a wildcard, and a longer wildcard base beats a shorter one', () => {
+  // The overlap is the point: one profile takes dl.x.example by name, another
+  // takes the rest of the domain. The popup has to name the same winner the
+  // server would, whichever order the rows arrive in.
+  const exact = claiming(1, ['dl.x.example']);
+  const wide = claiming(2, ['*.x.example']);
+  const narrow = claiming(3, ['*.dl.x.example']);
+
+  assert.equal(routingForHost([wide, exact], 'dl.x.example').profile.id, 1);
+  assert.equal(routingForHost([exact, wide], 'dl.x.example').profile.id, 1);
+  assert.equal(routingForHost([wide, exact], 'other.x.example').profile.id, 2);
+  assert.equal(routingForHost([wide, narrow], 'a.dl.x.example').profile.id, 3);
+  assert.equal(routingForHost([narrow, wide], 'a.dl.x.example').profile.id, 3);
+  assert.equal(routingForHost([narrow, wide], 'other.x.example').profile.id, 2);
 });
 
 test('the profile that claims the host is the first one, in the order given', () => {
@@ -160,9 +187,12 @@ test('the popup matches a host exactly as putiorr does', () => {
   // pairing is asserted instead of assumed. A case answered differently here
   // is a popup naming a profile that would not have received the grab.
   const profiles = [
-    claiming(1, ['x.example', 'bücher.example']),
-    claiming(2, ['z.example', 'lan']),
-    claiming(3, ['[::1]', 'media_server.lan']),
+    claiming(1, ['x.example', '*.bücher.example']),
+    claiming(2, ['*.z.example', '*.lan', 'dl.z.example']),
+    claiming(3, ['[::1]', 'media_server.lan', '*.dl.z.example']),
+    // Shapes an older putiorr could have written, and shapes the wizard now
+    // refuses: both matchers have to reach the same nothing for them.
+    claiming(4, ['x.*.example', '*', '', null, '*.']),
   ];
   const hosts = [
     'x.example',
@@ -170,15 +200,21 @@ test('the popup matches a host exactly as putiorr does', () => {
     'deep.dl.x.example',
     'notx.example',
     'xx.example',
+    'z.example',
+    'dl.z.example',
+    'a.dl.z.example',
+    'other.z.example',
     'z.example.com',
     'xn--bcher-kva.example',
     'dl.xn--bcher-kva.example',
     'nas.lan',
     'lan',
     'media_server.lan',
+    'sub.media_server.lan',
     '[::1]',
     'X.EXAMPLE',
     'x.example.',
+    'x.y.example',
     '',
     'not a host',
   ];
@@ -188,7 +224,18 @@ test('the popup matches a host exactly as putiorr does', () => {
     const server = matchProfileByHost(profiles, host);
     assert.equal(
       routing.kind === 'claimed' ? routing.profile : undefined,
-      server,
+      server?.profile,
+      host,
+    );
+    // Not just the same profile: the same entry, since the popup shows it.
+    assert.equal(
+      routing.kind === 'claimed' ? routing.domain : undefined,
+      server?.domain,
+      host,
+    );
+    assert.equal(
+      routing.kind === 'claimed' ? routing.viaWildcard : undefined,
+      server?.wildcard,
       host,
     );
   }
@@ -469,15 +516,17 @@ test('a site a profile claims is not offered for claiming again', async () => {
   assert.deepEqual(harness.opened, ['http://nas:9091']);
 });
 
-test('a subdomain match says which site was listed and that subdomains match', async () => {
+test('a wildcard match says which entry was listed and that it covers this host', async () => {
+  // "Movies claims this site" would send the user looking for dl.x.example on a
+  // profile that lists "*.x.example". It says "covers" rather than "is a
+  // subdomain of" because the same entry answers for x.example itself.
   const harness = await loadPopup({
     sync: { baseUrl: 'http://nas:9091' },
     tabs: [{ url: 'https://dl.x.example/page' }],
-    fetch: answering([grabProfile(4, 'Movies', { browser_domains: ['x.example'] })]),
+    fetch: answering([grabProfile(4, 'Movies', { browser_domains: ['*.x.example'] })]),
   });
 
-  assert.match(harness.routing(), /Movies claims x\.example/);
-  assert.match(harness.routing(), /subdomain/);
+  assert.match(harness.routing(), /Movies claims \*\.x\.example, which covers dl\.x\.example/);
   assert.equal(harness.pickerShown(), false);
 });
 

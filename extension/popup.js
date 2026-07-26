@@ -43,15 +43,17 @@ function profileName(profile) {
   return String(profile?.name ?? '').trim() || 'A profile';
 }
 
-// The one sentence that says where a grab from this page goes today. A subdomain
-// match names the site that was actually listed: "dl.x.example is handled by
-// Movies" otherwise reads like a site nobody typed. A profile that is switched
-// off still claims what it claims — putiorr refuses such a grab by name rather
-// than passing it to the next profile — so both halves are said.
+// The one sentence that says where a grab from this page goes today. A wildcard
+// match names the entry that was actually listed: "dl.x.example is handled by
+// Movies" otherwise reads like a site nobody typed. It says "covers" rather
+// than "is a subdomain of", because "*.x.example" covers x.example itself as
+// well. A profile that is switched off still claims what it claims — putiorr
+// refuses such a grab by name rather than passing it to the next profile — so
+// both halves are said.
 function routingText(routing, site) {
   if (routing.kind === 'claimed') {
-    const opening = routing.viaSubdomain
-      ? `${profileName(routing.profile)} claims ${routing.domain}, and ${site} is a subdomain of it,`
+    const opening = routing.viaWildcard
+      ? `${profileName(routing.profile)} claims ${routing.domain}, which covers ${site},`
         + ' so grabs from here go there.'
       : `${profileName(routing.profile)} claims this site; grabs from here go there.`;
     return routing.disabled

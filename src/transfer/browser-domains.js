@@ -15,11 +15,20 @@
 // form and grab resolution both call in here so a site is matched by exactly
 // the rules it was validated against.
 
-// A browser site is compared against a URL hostname, so anything that is not a
-// hostname shape can never match: labels of [a-z0-9_-] that neither start nor
-// end with "-", or a bracketed IPv6 literal. The underscore is invalid in
-// public DNS but the URL parser keeps it, so "media_server.lan" on a home LAN
-// is a site that genuinely matches — refusing it would be a false rejection.
+// A browser site is one of two things, and both are compared against a URL
+// hostname:
+//
+//   x.example     that host, and nothing under it
+//   *.x.example   that host and every subdomain of it
+//
+// The wildcard covering the apex too is deliberate: claiming a whole tracker is
+// the common case, and needing two entries for it would be a trap.
+//
+// Under the star, anything that is not a hostname shape can never match: labels
+// of [a-z0-9_-] that neither start nor end with "-", or a bracketed IPv6
+// literal. The underscore is invalid in public DNS but the URL parser keeps it,
+// so "media_server.lan" on a home LAN is a site that genuinely matches —
+// refusing it would be a false rejection.
 const LABEL = '[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?';
 const MATCHABLE_DOMAIN = new RegExp(`^(?:${LABEL})(?:\\.(?:${LABEL}))*$|^\\[[0-9a-f:.]+\\]$`, 'i');
 
@@ -39,14 +48,36 @@ function normalizeDomain(value) {
   }
 }
 
-// "*.x.example" is the one wrong entry worth naming: it is a reasonable thing
-// to try, and the entry the user wants is the same string without the wildcard.
-function wildcardHint(entry) {
-  if (!entry.startsWith('*')) return undefined;
-  const suggestion = normalizeDomain(entry.replace(/^\*+\.?/, ''));
-  return suggestion && MATCHABLE_DOMAIN.test(suggestion)
-    ? `Write "${suggestion}" instead of "${entry}": a browser site already matches its subdomains`
-    : `"${entry}" is not a domain: list each site, subdomains are matched automatically`;
+// An entry is a host, or "*." in front of one. Splits the two apart without
+// judging either: `base` still has to survive normalizeDomain and
+// MATCHABLE_DOMAIN, and `hasStar` reports a star the leading "*." did not
+// account for — "dl.*.example", "example.*", a bare "*", "**.x.example".
+function parseEntry(value) {
+  const text = String(value ?? '').trim().toLowerCase();
+  const wildcard = text.startsWith('*.');
+  const base = wildcard ? text.slice(2) : text;
+  return { wildcard, base, hasStar: base.includes('*') };
+}
+
+// A star anywhere else is not a narrower wildcard putiorr declined to
+// implement, it is a shape the matcher has no meaning for. The refusal names
+// the one position that works rather than leaving the user to guess at it.
+function starRefusal(entry) {
+  return `"${entry}" is not a domain putiorr can match:`
+    + ' a wildcard is only a leading "*.", as in "*.x.example"';
+}
+
+// One stored entry, reduced to what matching compares. Rows come from the
+// database and may have been written by an older putiorr — including a star in
+// a position that is now refused — so an entry that makes no sense yields
+// undefined and matches nothing, rather than throwing on the path every grab
+// takes.
+function storedEntry(value) {
+  const { wildcard, base, hasStar } = parseEntry(value);
+  if (hasStar) return undefined;
+  const normalized = normalizeDomain(base);
+  if (!normalized) return undefined;
+  return { wildcard, base: normalized, domain: wildcard ? `*.${normalized}` : normalized };
 }
 
 // A stored value is always an array; the profile form sends the raw
@@ -81,46 +112,89 @@ export function normalizeBrowserDomains(input) {
       continue;
     }
 
-    // The URL host parser has no opinion on "*", empty labels or a leading "-",
-    // so normalizeDomain hands back plenty of strings that no hostname can ever
-    // equal or end with. Refusing them here is the only place the user finds out.
-    const normalized = normalizeDomain(entry);
-    if (!normalized || !MATCHABLE_DOMAIN.test(normalized)) {
-      errors.push(wildcardHint(entry) ?? `"${entry}" is not a domain putiorr can match`);
+    const { wildcard, base, hasStar } = parseEntry(entry);
+    if (hasStar) {
+      errors.push(starRefusal(entry));
       continue;
     }
 
-    // Matching is by suffix, so a single label covers a whole TLD. An IP
-    // literal has no labels to be a suffix of, so it is exempt.
-    if (!normalized.includes('.') && !normalized.startsWith('[')) {
-      warnings.push(`"${normalized}" also matches every site ending in ".${normalized}"`);
+    // The URL host parser has no opinion on empty labels or a leading "-", so
+    // normalizeDomain hands back plenty of strings that no hostname can ever
+    // equal or end with. Refusing them here is the only place the user finds
+    // out. "*." in front does not make an unmatchable base matchable.
+    const normalized = normalizeDomain(base);
+    if (!normalized || !MATCHABLE_DOMAIN.test(normalized)) {
+      errors.push(`"${entry}" is not a domain putiorr can match`);
+      continue;
     }
 
-    if (!domains.includes(normalized)) domains.push(normalized);
+    const stored = wildcard ? `*.${normalized}` : normalized;
+
+    // Only a wildcard reaches past the host it names, so only a wildcard can be
+    // broad by accident, and a single-label base is what every public suffix a
+    // user would type looks like. putiorr carries no public-suffix list and
+    // must not bundle one, so it cannot tell "*.com" from "*.example" — and a
+    // single label is also what a LAN name looks like, which is why this is
+    // advice rather than a refusal. An IP literal has no labels to be a suffix
+    // of, so it is exempt.
+    if (wildcard && !normalized.includes('.') && !normalized.startsWith('[')) {
+      warnings.push(`"${stored}" matches ${normalized} and every site ending in ".${normalized}"`);
+    }
+
+    if (!domains.includes(stored)) domains.push(stored);
   }
 
   return { domains, errors, warnings };
 }
 
-// The first profile, in the order given, whose browser sites match `host`
-// exactly or as a suffix. Rows come from the database and may have been written
-// by an older putiorr, so every shape is treated as untrusted: a throw here
-// would turn a magnet click into a failure with no explanation.
+// Who takes a grab from `host`, as `{ profile, domain, wildcard }` or undefined.
+// `domain` is the entry that matched, spelled as it is stored — callers name it
+// in a refusal and in the popup's sentence, and neither can recompute it
+// without a second copy of this rule.
+//
+// The order is exact match first, then the most specific wildcard, and it is
+// what makes an overlap safe rather than a conflict: "dl.x.example" on one
+// profile and "*.x.example" on another is a configuration that says something,
+// and the same host claimed twice is what the store refuses instead.
+//
+// Ties go to the first profile in the order given, and to the first entry
+// within it. The store will not hold the same entry on two grab profiles, but a
+// row written before that rule existed must still answer every grab the same
+// way rather than by whichever the loop saw last.
+//
+// Rows come from the database and may have been written by an older putiorr, so
+// every shape is treated as untrusted: a throw here would turn a magnet click
+// into a failure with no explanation.
 export function matchProfileByHost(profiles, host) {
   const hostname = normalizeDomain(host);
   if (!hostname) return undefined;
 
+  let widest;
   for (const profile of Array.isArray(profiles) ? profiles : []) {
     // Store rows carry both key styles; a caller assembling a profile by hand
     // may have only one of them.
     const stored = profile?.browser_domains ?? profile?.browserDomains;
     const domains = Array.isArray(stored) ? stored : [];
-    for (const domain of domains) {
-      const normalized = normalizeDomain(domain);
-      if (!normalized) continue;
-      if (hostname === normalized || hostname.endsWith(`.${normalized}`)) return profile;
+    for (const value of domains) {
+      const entry = storedEntry(value);
+      if (!entry) continue;
+
+      // An exact entry beats every wildcard, so the first one found is the
+      // answer and nothing later can outrank it.
+      if (!entry.wildcard) {
+        if (hostname === entry.base) return { profile, domain: entry.domain, wildcard: false };
+        continue;
+      }
+
+      // The apex counts as covered. Claiming a whole tracker is the common
+      // case, and making the user list the apex separately would be a trap they
+      // only find out about from a grab landing somewhere else.
+      if (hostname !== entry.base && !hostname.endsWith(`.${entry.base}`)) continue;
+      // Longest base wins: "*.dl.x.example" is a statement about dl.x.example
+      // that "*.x.example" is not.
+      if (!widest || entry.base.length > widest.entry.base.length) widest = { profile, entry };
     }
   }
 
-  return undefined;
+  return widest ? { profile: widest.profile, domain: widest.entry.domain, wildcard: true } : undefined;
 }
