@@ -51,6 +51,12 @@ export const DEFAULT_PROFILE_TYPE = 'sonarr';
 // Mirrors the server's GRAB_PROFILE_TYPE: the only preset the browser
 // extension may send grabs to.
 export const GRAB_PROFILE_TYPE = 'grab';
+// What a refused profile save says when another grab profile already takes the
+// grabs no site claims. It rides on `code` in the error body, next to the
+// sentence and the holder, so the wizard can offer the takeover without
+// matching prose — a boundary this codebase has been bitten across before.
+// Imported by the server as well as the wizard: one string, one definition.
+export const CATCH_ALL_CONFLICT_CODE = 'catch_all_conflict';
 // The endpoint every Transmission client reaches by default. It belongs to one
 // *arr profile or to none; it is never a Putiorr Grab profile's path, and the
 // server refuses it outright once more than one *arr profile could have meant it.

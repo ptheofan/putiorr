@@ -13,7 +13,7 @@ import { VersionChecker } from '../version.js';
 // on, so the two must spell it identically; constants.js is plain data with no
 // imports of its own, which is why the server can read the same file the
 // browser is served. WEB_DIR below already points at that directory.
-import { GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
+import { CATCH_ALL_CONFLICT_CODE, GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -955,6 +955,13 @@ export class TransmissionRpcServer {
       // a sentence to find out that the put.io copies are gone.
       jsonResponse(res, 400, {
         error: error.message,
+        // A second catch-all is the one refusal with an action behind it, and
+        // the wizard offers that action. The sentence stays exactly what it
+        // was; the code and the holder are what the offer is built from,
+        // because deciding it from the prose would break on the next reword.
+        ...(error.catchAllHolder
+          ? { code: CATCH_ALL_CONFLICT_CODE, catchAllHolder: error.catchAllHolder }
+          : {}),
         ...(error.downloadsReport ? { downloads: error.downloadsReport } : {}),
       }, this.sessionId);
     }
@@ -1713,6 +1720,8 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
   const browserDomains = input.browser_domains ?? input.browserDomains;
   const browserCatchAll = input.browser_catch_all ?? input.browserCatchAll;
+  const takeOverCatchAll = input.take_over_catch_all ?? input.takeOverCatchAll;
+  const takeOverCatchAllFrom = input.take_over_catch_all_from ?? input.takeOverCatchAllFrom;
 
   if (name !== undefined) output.name = name;
   if (type !== undefined) output.type = type || 'custom';
@@ -1746,6 +1755,17 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   // never come through here have to be checked too.
   if (browserCatchAll !== undefined) {
     output.browser_catch_all = normalizeBooleanInput(browserCatchAll);
+  }
+  // Not a column, and the store is where it is answered — same reason the flag
+  // itself is: only that layer sees the other rows, and the clear and the
+  // write have to be one transaction. Carried here so the wizard can re-submit
+  // the save it already had refused, edits and all, instead of a bare command
+  // that would drop everything typed since.
+  if (takeOverCatchAll !== undefined) {
+    output.takeOverCatchAll = normalizeBooleanInput(takeOverCatchAll);
+  }
+  if (takeOverCatchAllFrom !== undefined) {
+    output.takeOverCatchAllFrom = normalizeOptionalId(takeOverCatchAllFrom);
   }
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;

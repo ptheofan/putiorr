@@ -1145,6 +1145,128 @@ test('the catch-all is a field the profile API actually accepts', async (t) => {
   assert.equal(harness.store.findCatchAllGrabProfile(), undefined);
 });
 
+async function putProfile(harness, id, payload) {
+  const response = await fetch(`${harness.base}/api/profiles/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+test('a refused catch-all names its holder in the body, not only in the sentence', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const holder = createSiteProfile(harness, 'movies', [], { catchAll: true });
+  const other = createSiteProfile(harness, 'music', []);
+
+  const refused = await putProfile(harness, other.id, { browserCatchAll: true });
+
+  assert.equal(refused.status, 400);
+  // Unchanged for every consumer that only ever showed the sentence.
+  assert.equal(
+    refused.body.error,
+    'MOVIES already takes grabs from any site no other profile claims; untick it on that profile first',
+  );
+  // And a discriminator the wizard can branch on without reading prose, plus
+  // the profile it would have to take the role from.
+  assert.equal(refused.body.code, 'catch_all_conflict');
+  assert.deepEqual(refused.body.catchAllHolder, { id: holder.id, name: 'MOVIES' });
+  assert.equal(harness.store.findCatchAllGrabProfile().id, holder.id);
+});
+
+test('re-sending the same save with the takeover flag moves the fallback', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const holder = createSiteProfile(harness, 'movies', [], { catchAll: true });
+  const other = createSiteProfile(harness, 'music', []);
+
+  // The same payload the refusal came back from, with the intent added: the
+  // wizard's save carries the user's other edits, so nothing typed is lost.
+  const saved = await putProfile(harness, other.id, {
+    name: 'MUSIC & PODCASTS',
+    browserCatchAll: true,
+    takeOverCatchAll: true,
+    takeOverCatchAllFrom: holder.id,
+  });
+
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.browser_catch_all, true);
+  assert.equal(saved.body.name, 'MUSIC & PODCASTS');
+  // A profile the user may not even have on screen just lost the role, so the
+  // reply says which one.
+  assert.deepEqual(saved.body.catch_all_taken_from, { id: holder.id, name: 'MOVIES' });
+  assert.equal(harness.store.findProfileById(holder.id).browser_catch_all, false);
+  assert.equal(harness.store.findCatchAllGrabProfile().id, other.id);
+});
+
+test('a new profile can take the fallback over as it is created', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const holder = createSiteProfile(harness, 'movies', [], { catchAll: true });
+
+  const created = await postProfile(harness, {
+    name: 'Everything',
+    slug: 'everything',
+    type: 'grab',
+    rpc_path: null,
+    browserCatchAll: true,
+    takeOverCatchAll: true,
+    takeOverCatchAllFrom: holder.id,
+  });
+
+  assert.equal(created.status, 201);
+  assert.deepEqual(created.body.catch_all_taken_from, { id: holder.id, name: 'MOVIES' });
+  assert.equal(harness.store.findCatchAllGrabProfile().id, created.body.id);
+});
+
+test('a takeover is refused again when a different profile took the fallback meanwhile', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const shown = createSiteProfile(harness, 'movies', [], { catchAll: true });
+  const other = createSiteProfile(harness, 'music', []);
+  const books = createSiteProfile(harness, 'books', []);
+  // Between the refusal and the click, somebody else moved the role.
+  harness.store.updateProfile(shown.id, { browser_catch_all: false });
+  harness.store.updateProfile(books.id, { browser_catch_all: true });
+
+  const refused = await putProfile(harness, other.id, {
+    browserCatchAll: true,
+    takeOverCatchAll: true,
+    takeOverCatchAllFrom: shown.id,
+  });
+
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /^BOOKS already takes grabs/);
+  assert.equal(refused.body.code, 'catch_all_conflict');
+  assert.deepEqual(refused.body.catchAllHolder, { id: books.id, name: 'BOOKS' });
+  assert.equal(harness.store.findCatchAllGrabProfile().id, books.id);
+  assert.equal(harness.store.findProfileById(other.id).browser_catch_all, false);
+});
+
+test('the takeover intent is never stored as a profile field', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, {
+    name: 'Everything',
+    slug: 'everything',
+    type: 'grab',
+    rpc_path: null,
+    browserCatchAll: true,
+    takeOverCatchAll: true,
+  });
+
+  assert.equal(created.status, 201);
+  // Nothing held it, so nothing was taken from anybody, and the intent leaves
+  // no trace on the row it was sent with.
+  assert.equal(created.body.catch_all_taken_from, undefined);
+  assert.equal(created.body.takeOverCatchAll, undefined);
+  const stored = harness.store.findProfileById(created.body.id);
+  assert.equal(stored.takeOverCatchAll, undefined);
+  assert.equal(stored.browser_catch_all, true);
+});
+
 test('a browser site another grab profile already lists is refused through the API', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));

@@ -247,6 +247,78 @@ export function browserCatchAllPayload(hidden, checked) {
   return hidden ? {} : { browserCatchAll: Boolean(checked) };
 }
 
+// What the takeover offer says, and what it costs. The consequence is stated
+// next to the action rather than behind it: the profile it clears may not even
+// be on screen, and "it worked" is no answer to "what did it do?".
+export const CATCH_ALL_TAKEOVER_LABEL = 'Make this the fallback grab profile';
+
+export function catchAllTakeoverConsequence(name) {
+  return ` — this will stop ${name} being the fallback.`;
+}
+
+// The intent, added to the payload the save already had. Absent unless a
+// takeover was actually asked for: without it the refusal behaves exactly as
+// it always has. The holder id travels too, so a fallback that moved between
+// the refusal and the click is refused again rather than quietly cleared.
+export function catchAllTakeoverPayload(holderId) {
+  if (holderId == null || holderId === '') return {};
+  return { takeOverCatchAll: true, takeOverCatchAllFrom: Number(holderId) };
+}
+
+// A profile the user may never have had on screen just stopped being the
+// fallback. Under its own line after a blank one, for the reason the browser
+// site warnings are: the message being appended to may already end in a
+// labelled list, and a bare line would read as one more entry in it.
+export function withCatchAllTakeoverNote(message, profile) {
+  const taken = profile?.catch_all_taken_from ?? profile?.catchAllTakenFrom;
+  return taken?.name ? `${message}\n\n${taken.name} is no longer the fallback grab profile.` : message;
+}
+
+// It answered on the reply that carried it; keeping the key would leave a
+// stale note attached to the profile in state.
+export function withoutCatchAllTakeover(profile) {
+  const { catch_all_taken_from: taken, catchAllTakenFrom, ...rest } = profile;
+  return taken === undefined && catchAllTakenFrom === undefined ? profile : rest;
+}
+
+// The offer itself, appended to the refusal the message area is already
+// showing (#profileWizardMessage is white-space: pre-line, so the newlines are
+// the layout). A button rather than an anchor: the message sits inside the
+// wizard form, where an href="#" is a navigation that never happens and a
+// button with no type would submit the dialog. It is styled as a link, which
+// is what the reader was promised.
+export function renderCatchAllTakeover(element, holder, onTakeover) {
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'message-link';
+  link.dataset.testid = 'profile-catch-all-takeover';
+  link.textContent = CATCH_ALL_TAKEOVER_LABEL;
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    onTakeover(holder);
+  });
+  element.append(
+    // Reads as prose for anyone who never clicks: the sentence above says how
+    // to move the fallback by hand, and this says the same thing in one click.
+    document.createTextNode('\n\nOr: '),
+    link,
+    document.createTextNode(catchAllTakeoverConsequence(holder.name)),
+  );
+  return link;
+}
+
+// api() used to throw the reply's sentence and drop everything else, which left
+// callers matching prose to decide anything. The message is unchanged; the
+// status and every field the body carried come with it.
+export function apiError(status, body = {}) {
+  const error = new Error(body.error || `HTTP ${status}`);
+  error.status = status;
+  if (body.code) error.code = body.code;
+  if (body.catchAllHolder) error.catchAllHolder = body.catchAllHolder;
+  error.body = body;
+  return error;
+}
+
 // A grab profile has no category and no client to describe, so its card is
 // summarized by the browser grabs it claims: the sites it lists, and — for the
 // one profile that takes them — every site nobody listed.

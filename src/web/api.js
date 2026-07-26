@@ -1,4 +1,5 @@
 import { applyDownloadsUpdate } from './downloads.js';
+import { apiError } from './util.js';
 
 export const updates = {
   socket: undefined,
@@ -15,9 +16,9 @@ export async function api(path, options = {}) {
     },
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(body.error || `HTTP ${response.status}`);
-  }
+  // The whole body, not just its sentence: a caller that has to branch on what
+  // went wrong should read a field, not match prose.
+  if (!response.ok) throw apiError(response.status, body);
   return body;
 }
 

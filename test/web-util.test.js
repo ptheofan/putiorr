@@ -43,7 +43,13 @@ import {
   stagingCollisionSummary,
   remoteAlreadyGoneNotice,
   schemaMigrationWarning,
+  apiError,
+  catchAllTakeoverPayload,
+  withCatchAllTakeoverNote,
+  withoutCatchAllTakeover,
+  renderCatchAllTakeover,
 } from '../src/web/util.js';
+import { CATCH_ALL_CONFLICT_CODE } from '../src/web/constants.js';
 
 // util.js takes every element it touches as an argument and reads only a
 // handful of properties off it, so these stand-ins are the whole environment it
@@ -742,4 +748,98 @@ test('a delete put.io had nothing left to do is reported, not folded into succes
     remoteAlreadyGoneNotice([{ remoteAlreadyGone: true }, { ok: true }, { remoteAlreadyGone: true }]),
     'Removed from putiorr. put.io no longer had 2 downloads, so there was nothing to delete there.',
   );
+});
+
+// api() used to throw `body.error` and drop the rest of the reply on the floor,
+// which left every caller with prose as its only signal. The one refusal that
+// has an action behind it — a second catch-all — is decided on the code, so the
+// error has to carry the whole body across.
+test('the error api() throws keeps what the reply said beyond the sentence', () => {
+  const conflict = apiError(400, {
+    error: 'MOVIES already takes grabs from any site no other profile claims; untick it on that profile first',
+    code: CATCH_ALL_CONFLICT_CODE,
+    catchAllHolder: { id: 4, name: 'MOVIES' },
+  });
+
+  assert.ok(conflict instanceof Error);
+  // Unchanged for every caller that only ever showed error.message.
+  assert.match(conflict.message, /^MOVIES already takes grabs/);
+  assert.equal(conflict.status, 400);
+  assert.equal(conflict.code, CATCH_ALL_CONFLICT_CODE);
+  assert.deepEqual(conflict.catchAllHolder, { id: 4, name: 'MOVIES' });
+
+  // A reply with no body at all still says something a user can read.
+  assert.equal(apiError(503, {}).message, 'HTTP 503');
+  assert.equal(apiError(503).code, undefined);
+  assert.equal(apiError(400, { error: 'Profile not found' }).code, undefined);
+});
+
+// The wizard re-submits the payload it already had, with the intent added, so
+// nothing typed between the refusal and the click is lost.
+test('the takeover payload names the profile the user was shown, or is absent', () => {
+  assert.deepEqual(catchAllTakeoverPayload(4), { takeOverCatchAll: true, takeOverCatchAllFrom: 4 });
+  assert.deepEqual(catchAllTakeoverPayload('4'), { takeOverCatchAll: true, takeOverCatchAllFrom: 4 });
+  // No takeover asked for is no flag sent: the refusal has to behave exactly
+  // as it did on an ordinary save.
+  assert.deepEqual(catchAllTakeoverPayload(undefined), {});
+  assert.deepEqual(catchAllTakeoverPayload(null), {});
+  assert.deepEqual(catchAllTakeoverPayload(''), {});
+});
+
+// Clearing a profile the user may not have on screen is a real side effect, so
+// the confirmation names it rather than leaving it to be discovered.
+test('a completed takeover is named in the confirmation the wizard shows', () => {
+  const saved = { id: 2, name: 'MUSIC', catch_all_taken_from: { id: 4, name: 'MOVIES' } };
+
+  assert.equal(
+    withCatchAllTakeoverNote('Profile saved.', saved),
+    'Profile saved.\n\nMOVIES is no longer the fallback grab profile.',
+  );
+  // Nothing was taken from anybody, so nothing claims it was.
+  assert.equal(withCatchAllTakeoverNote('Profile saved.', { id: 2 }), 'Profile saved.');
+  assert.equal(withCatchAllTakeoverNote('Profile saved.', undefined), 'Profile saved.');
+  // The note answered on the reply that carried it and is never stored.
+  assert.deepEqual(withoutCatchAllTakeover(saved), { id: 2, name: 'MUSIC' });
+  assert.deepEqual(withoutCatchAllTakeover({ id: 2 }), { id: 2 });
+});
+
+// The owner asked for a link. It is a button because the dialog's message sits
+// inside the wizard form and an href="#" is a navigation that never happens;
+// what matters is that it reads as a link and takes one click.
+test('the refusal offers the takeover as an action, and still reads without it', () => {
+  const previousDocument = globalThis.document;
+  const created = [];
+  globalThis.document = {
+    createElement: (tag) => {
+      const node = { tag, dataset: {}, listeners: {}, addEventListener: (type, fn) => { node.listeners[type] = fn; } };
+      created.push(node);
+      return node;
+    },
+    createTextNode: (text) => ({ tag: '#text', textContent: text }),
+  };
+  try {
+    const appended = [];
+    const element = { append: (...nodes) => appended.push(...nodes) };
+    let clickedWith;
+
+    renderCatchAllTakeover(element, { id: 4, name: 'MOVIES' }, (holder) => { clickedWith = holder; });
+
+    const link = created[0];
+    assert.equal(link.tag, 'button');
+    // Inside a <form>: without this the link would submit the wizard.
+    assert.equal(link.type, 'button');
+    assert.equal(link.textContent, 'Make this the fallback grab profile');
+    assert.equal(link.dataset.testid, 'profile-catch-all-takeover');
+    // Read straight through, the message still says what the offer would do.
+    assert.deepEqual(appended.map((node) => node.textContent), [
+      '\n\nOr: ',
+      'Make this the fallback grab profile',
+      ' — this will stop MOVIES being the fallback.',
+    ]);
+
+    link.listeners.click({ preventDefault: () => {} });
+    assert.deepEqual(clickedWith, { id: 4, name: 'MOVIES' });
+  } finally {
+    globalThis.document = previousDocument;
+  }
 });

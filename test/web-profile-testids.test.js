@@ -417,3 +417,14 @@ test('the move picker names the preset it would hand the downloads to', () => {
   assert.match(profilesJs, /option\.textContent = `\$\{target\.name\} \(\$\{profileType\(target\.type\)\.label\}\)`/);
   assert.match(utilJs, /target\.autoRemoveCompleted && !preview\?\.profile\?\.autoRemoveCompleted/);
 });
+
+// api.js is a page module — it reaches the DOM through downloads.js, so it
+// cannot be imported here. The error it builds is testable on its own in
+// web-util.test.js; that it is the error api() actually throws is pinned here.
+test('api() throws the whole reply, not only its sentence', () => {
+  const apiJs = readFileSync(new URL('../src/web/api.js', import.meta.url), 'utf8');
+
+  assert.match(apiJs, /import \{ apiError \} from '\.\/util\.js';/);
+  assert.match(apiJs, /if \(!response\.ok\) throw apiError\(response\.status, body\);/);
+  assert.doesNotMatch(apiJs, /throw new Error\(body\.error/);
+});
