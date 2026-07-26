@@ -51,6 +51,21 @@ and every tracker away. put.io would still find the swarm, eventually, through
 the DHT — but the transfer would be named after its own hash and would take as
 long as the DHT takes.
 
+Reading to the end of the link over-reaches, though, and the magnet is trimmed
+back afterwards: it ends at the first parameter no magnet can have, and at the
+link's own `#fragment`. So a handler written
+`?url=magnet:?xt=…&dn=…&callback=/done&token=abc123` is grabbed as
+`magnet:?xt=…&dn=…` and nothing else. That matters because a token or a signed
+callback in a handler link is ordinary, and anything left glued to the magnet
+would be stored in putiorr's database, written to its logs, and forwarded to
+put.io. The keys kept are the ones a magnet is defined to carry — `xt`, `dn`,
+`tr`, `ws`, `xl`, `xs`, `as`, `kt`, `mt`, `so`, each optionally numbered
+(`xt.1`, `tr.2`), plus the experimental `x.` namespace such as `x.pe`. A magnet
+in the second form — one the site encoded into a single parameter — is never
+trimmed: nothing over-reached there, so an unfamiliar key inside it is the
+site's to keep. Neither is a plain `magnet:` link, which is what the page author
+wrote, in full and on purpose.
+
 A link is left alone when nothing in it names a swarm: `magnet` in the path, a
 page *about* magnet links, an `xt` of some other URN (`urn:ed2k:`). One
 consequence is worth knowing, because there is no way to have the feature

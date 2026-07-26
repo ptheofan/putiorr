@@ -16,7 +16,8 @@ const HANDLER_URL = 'https://put.io/default/magnet?url=magnet:?xt=urn:btih:86B9A
   + '&dn=Little.Chicks.5.1994.1080p.BluRay.x264-GROUP'
   + '&tr=udp%3A%2F%2Fz.mercax.com%3A53%2Fannounce'
   + '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce'
-  + '&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce';
+  + '&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce'
+  + '&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce';
 
 let contentLoad = 0;
 
@@ -220,8 +221,25 @@ test('a magnet wrapped in an http handler link is captured whole', async () => {
   const params = new URLSearchParams(magnet.slice(magnet.indexOf('?') + 1));
   assert.equal(params.get('xt'), 'urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F90123456789ABCD');
   assert.equal(params.get('dn'), 'Little.Chicks.5.1994.1080p.BluRay.x264-GROUP');
-  assert.equal(params.getAll('tr').length, 3);
+  assert.equal(params.getAll('tr').length, 4);
   assert.equal(anchor.clicks, 0, 'a captured link must not fall through to the handler page');
+});
+
+test('a handler link\'s own parameters are not forwarded with the magnet', async () => {
+  // End to end, because this is the leak: whatever the click sends is what
+  // putiorr stores, logs and hands to put.io.
+  const harness = await loadContent();
+
+  harness.dispatch(harness.anchor(
+    'https://site.example/send?url=magnet:?xt=urn:btih:abc&dn=Thing&callback=/done&token=SECRET123',
+  ));
+  await settle();
+
+  assert.deepEqual(harness.sent, [{
+    kind: 'grab',
+    magnet: 'magnet:?xt=urn:btih:abc&dn=Thing',
+    pageUrl: PAGE_URL,
+  }]);
 });
 
 test('a handler link ending in .torrent is sent as its magnet, not fetched', async () => {

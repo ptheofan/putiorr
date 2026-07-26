@@ -9,7 +9,8 @@ const HANDLER_URL = 'https://put.io/default/magnet?url=magnet:?xt=urn:btih:86B9A
   + '&dn=Little.Chicks.5.1994.1080p.BluRay.x264-GROUP'
   + '&tr=udp%3A%2F%2Fz.mercax.com%3A53%2Fannounce'
   + '&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce'
-  + '&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce';
+  + '&tr=udp%3A%2F%2Fopen.demonii.com%3A1337%2Fannounce'
+  + '&tr=udp%3A%2F%2Fexodus.desync.com%3A6969%2Fannounce';
 
 test('isMagnetLink detects magnet URIs only', () => {
   assert.equal(isMagnetLink('magnet:?xt=urn:btih:abc'), true);
@@ -53,7 +54,77 @@ test('magnetFromLink keeps the display name and every tracker of a wrapped magne
     'udp://z.mercax.com:53/announce',
     'udp://tracker.opentrackr.org:1337/announce',
     'udp://open.demonii.com:1337/announce',
+    'udp://exodus.desync.com:6969/announce',
   ]);
+  // The trim below must never reach this link: every key in it is a magnet key,
+  // so the magnet runs to the end of the href exactly as before.
+  assert.equal(magnet, HANDLER_URL.slice(HANDLER_URL.indexOf('magnet:?')));
+  assert.equal(params.getAll('tr').length, 4);
+});
+
+test('magnetFromLink stops the magnet at the handler URL\'s own parameters', () => {
+  // The raw-substring rule over-reaches on purpose — it runs to the end of the
+  // href — so a handler that puts its own parameters after the magnet used to
+  // have them swallowed into it. A session token or a signed callback is a
+  // normal thing to find there, and it would have gone into putiorr's database,
+  // into its logs, and on to put.io.
+  const href = 'https://site.example/send?url=magnet:?xt=urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F9012345'
+    + '&dn=Thing&callback=/done&token=SECRET123';
+
+  const magnet = magnetFromLink(href);
+  assert.equal(magnet, 'magnet:?xt=urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F9012345&dn=Thing');
+  assert.equal(magnet.includes('SECRET123'), false, 'the handler\'s token must not reach put.io');
+  assert.equal(magnet.includes('callback'), false);
+});
+
+test('magnetFromLink keeps every key a magnet is allowed to carry', () => {
+  // Getting this list wrong truncates real data, so it is spelled out: the
+  // magnet URI scheme's own keys, BEP 53's "so", the "ws" webseed clients
+  // added, and libtorrent's experimental "x." namespace. Any of them may be
+  // numbered ("xt.1", "tr.2") to carry more than one value.
+  const magnet = 'magnet:?xt.1=urn:btih:abc&xt.2=urn:btmh:1220caf1&dn=Name&xl=1024'
+    + '&tr=udp://a.example:80/announce&tr.2=udp://b.example:80/announce'
+    + '&ws=https://c.example/file&xs=https://d.example/meta&as=https://e.example/file'
+    + '&kt=key+words&mt=https://f.example/list&so=0-2&x.pe=1.2.3.4:51413';
+  assert.equal(magnetFromLink(`https://site.example/send?url=${magnet}`), magnet);
+});
+
+test('magnetFromLink never trims a genuine magnet href', () => {
+  // A magnet: href is what the site author wrote, in full and on purpose. The
+  // trim exists only to undo the raw scan's deliberate over-reach; applying it
+  // here would silently drop data handed to us correctly.
+  const magnet = 'magnet:?xt=urn:btih:abc&dn=Thing&sf=Season%201&token=keepme';
+  assert.equal(magnetFromLink(magnet), magnet);
+});
+
+test('magnetFromLink does not trim a magnet the site encoded into one parameter', () => {
+  // Nothing over-reached here: the parameter's value is the whole magnet and
+  // the site said so by encoding it, so an unfamiliar key inside is the site's
+  // to keep, not ours to cut.
+  const inner = 'magnet:?xt=urn:btih:abc&dn=Thing&sf=Season 1';
+  assert.equal(magnetFromLink(`https://x.example/dl?m=${encodeURIComponent(inner)}&token=SECRET`), inner);
+});
+
+test('magnetFromLink trims a fragment-embedded magnet the same way', () => {
+  // A magnet living in the fragment is captured like any other...
+  assert.equal(
+    magnetFromLink('https://x.example/page#magnet:?xt=urn:btih:abc&dn=Thing'),
+    'magnet:?xt=urn:btih:abc&dn=Thing',
+  );
+  // ...and a fragment *after* a wrapped magnet is the outer URL's, not the
+  // magnet's. Left glued on it would ride along inside the last value, which is
+  // the same leak by another route.
+  assert.equal(
+    magnetFromLink('https://x.example/go?url=magnet:?xt=urn:btih:abc&dn=Thing#session=SECRET'),
+    'magnet:?xt=urn:btih:abc&dn=Thing',
+  );
+});
+
+test('magnetFromLink refuses a link whose magnet is trimmed down to nothing', () => {
+  // The handler's own parameters come first here, so the trim cuts before the
+  // "xt" and what is left names no swarm. Validating after the trim rather than
+  // before is what keeps that from being captured as a magnet with no topic.
+  assert.equal(magnetFromLink('https://x.example/go?url=magnet:?token=SECRET&xt=urn:btih:abc'), '');
 });
 
 test('magnetFromLink reads a properly encoded inner magnet out of the query', () => {

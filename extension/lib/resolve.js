@@ -83,6 +83,43 @@ function namesATorrent(magnet) {
   return false;
 }
 
+// Every key a magnet URI is allowed to carry: the magnet scheme's own set, the
+// "ws" webseed BitTorrent clients added to it, BEP 53's "so" file selection,
+// and libtorrent's experimental "x." namespace ("x.pe" is a peer address). Any
+// of them may be numbered — "xt.1", "tr.2" — to carry more than one value.
+// This list is what decides where a wrapped magnet ends, so a key missing from
+// it truncates real data rather than merely leaking a little.
+const MAGNET_KEYS = new Set(['xt', 'dn', 'tr', 'ws', 'xl', 'xs', 'as', 'kt', 'mt', 'so']);
+
+function isMagnetKey(name) {
+  const key = safeDecode(name).trim().toLowerCase();
+  if (key.startsWith('x.')) return true;
+  return MAGNET_KEYS.has(key.replace(/\.\d+$/, ''));
+}
+
+// The raw scan below runs to the end of the href on purpose, so a handler that
+// puts its own parameters after the magnet has them swallowed into it. That is
+// not cosmetic: "&token=…" or a signed "&callback=…" is a normal thing to find
+// there, and it would be stored in putiorr's database, written to its logs and
+// forwarded to put.io. The magnet ends at the first key no magnet can have.
+function trimToMagnetParams(magnet) {
+  const separator = magnet.indexOf('?');
+  if (separator === -1) return magnet;
+  const kept = [];
+  for (const segment of magnet.slice(separator + 1).split('&')) {
+    // An empty segment is a stray "&", which ends nothing.
+    if (segment === '') {
+      kept.push(segment);
+      continue;
+    }
+    const equals = segment.indexOf('=');
+    if (equals === -1 || !isMagnetKey(segment.slice(0, equals))) break;
+    kept.push(segment);
+  }
+  while (kept.length && kept.at(-1) === '') kept.pop();
+  return magnet.slice(0, separator + 1) + kept.join('&');
+}
+
 // The magnet an anchor is really offering, or '' when there is none. Sites
 // routinely wrap magnets in an http(s) handler — a "send to put.io" link, a
 // download.php?magnet=…, a redirector — and following one of those hands the
@@ -99,10 +136,20 @@ export function magnetFromLink(href) {
   // with the inner "&dn=" and "&tr=" left unencoded, so the outer URL parser
   // claims them as top-level parameters of the *handler* URL: the parameter
   // then holds the infohash alone, and the display name and every tracker are
-  // gone. Everything from "magnet:?" to the end of the href keeps them.
+  // gone. Everything from "magnet:?" to the end of the href keeps them, and
+  // trimToMagnetParams then gives back the part of that over-reach which
+  // belonged to the handler rather than to the magnet. A "#" in what is left is
+  // the *outer* URL's fragment for the same reason — a magnet reaching us
+  // through a query could only carry one of its own as "%23" — and it would
+  // otherwise ride along inside the last value, past the key trim.
   const start = href.toLowerCase().indexOf('magnet:?');
   if (start !== -1) {
-    const candidate = href.slice(start);
+    const raw = href.slice(start);
+    const fragment = raw.indexOf('#');
+    const candidate = trimToMagnetParams(fragment === -1 ? raw : raw.slice(0, fragment));
+    // Validating the trimmed magnet rather than the raw one is deliberate: a
+    // handler whose own parameters come first is cut back to a magnet with no
+    // topic at all, and that must not be captured as one.
     if (namesATorrent(candidate)) return candidate;
   }
 
