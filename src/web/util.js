@@ -421,7 +421,16 @@ export function profileDeletionOutcome(preview, choice = {}) {
 export function profileDeletionRequest(preview, choice = {}) {
   if (Number(preview?.downloads?.total ?? 0) === 0) return {};
   if (choice.mode === 'move') {
-    if (!choice.reassignTo) throw new Error('Choose what happens to these downloads: pick the RR profile that takes them over');
+    // Answered against the list the dialog actually offered. The sentence above
+    // the picker is "Choose the RR profile that takes these over", and a target
+    // that is not in reassignTargets is not one of them: it stages into a
+    // different folder, so the server refuses it — after the dialog has already
+    // closed on an answer the user believed it took.
+    const offered = (preview?.reassignTargets ?? [])
+      .some((target) => String(target?.id) === String(choice.reassignTo));
+    if (!choice.reassignTo || !offered) {
+      throw new Error('Choose what happens to these downloads: pick the RR profile that takes them over');
+    }
     return { reassignTo: Number(choice.reassignTo) };
   }
   if (choice.mode !== 'delete') {

@@ -688,6 +688,26 @@ test('an unanswered profile delete dialog cannot serialise into a delete', () =>
   assert.deepEqual(profileDeletionRequest(empty, {}), {});
 });
 
+// The dialog says "Choose the RR profile that takes these over", and the list
+// it offers is reassignTargets. A pick from anywhere else has not answered that
+// sentence: the server refuses it, but this is where the user still has the
+// dialog open to fix it.
+test('a move target the dialog never offered is not a serialisable answer', () => {
+  const preview = {
+    profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
+    downloads: { total: 2, active: 2, removed: 0, filesOnDisk: 4, localBytes: 2048 },
+    reassignTargets: [{ id: 1, name: 'Sonarr' }],
+  };
+
+  assert.throws(
+    () => profileDeletionRequest(preview, { mode: 'move', reassignTo: 99 }),
+    /Choose what happens/,
+  );
+  // The one it did offer still serialises, in either spelling.
+  assert.deepEqual(profileDeletionRequest(preview, { mode: 'move', reassignTo: 1 }), { reassignTo: 1 });
+  assert.deepEqual(profileDeletionRequest(preview, { mode: 'move', reassignTo: '1' }), { reassignTo: 1 });
+});
+
 // "putiorr deleted it" and "put.io had already lost it" are different events,
 // and the second one means there is no remote copy left to re-fetch. The delete
 // endpoints report which one happened; without this the dashboard closed the
