@@ -1392,7 +1392,8 @@ export class TransmissionRpcServer {
   // opens with that field spelled exactly as the caller sends it, and one that
   // is a plain sentence opens capitalized.
   resolveGrabProfile(body, pageHost) {
-    // An unset <select> submits '' and a cleared cached pick is null; neither
+    // '' and null are how a caller spells "I made no pick" — a hand-written
+    // request building the body from an empty field, or a cleared one. Neither
     // is the caller naming a profile, so both fall through to site matching.
     const explicitId = body.profileId;
     if (explicitId !== undefined && explicitId !== null && String(explicitId) !== '') {

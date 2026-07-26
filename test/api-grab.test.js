@@ -406,8 +406,9 @@ test('a grab without a profileId lands in the profile that claims the page host'
 test('an empty or null profileId is a caller with no pick, not a bad one', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
-  // An unset options-page <select> submits '', and a cleared cached pick is
-  // null; neither is the user naming a profile, so both resolve by site.
+  // '' and null are how a caller spells "I made no pick" — a hand-written
+  // request built from an empty field, or a cleared one. Neither is the user
+  // naming a profile, so both resolve by site.
   const site = createSiteProfile(harness, 'browser', ['x.example']);
 
   for (const profileId of ['', null]) {
