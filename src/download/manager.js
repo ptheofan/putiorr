@@ -404,30 +404,38 @@ export class DownloadManager {
           });
           continue;
         }
-        const attempts = Number(job.attempts ?? 0) + 1;
-        this.store.updateDownloadFile(job.id, {
-          status: attempts >= 3 ? 'failed' : 'pending',
-          attempts,
-          download_speed: 0,
-          error_string: error.message,
-        });
-        const transfer = this.store.findDownloadById(job.download_id);
-        logger.warn('file download failed', {
-          worker: index,
-          transferId: job.download_id,
-          name: transfer?.name ?? job.download_name,
-          fileId: job.id,
-          putioFileId: job.putio_file_id,
-          attempts,
-          error: error.message,
-          stack: error.stack,
-        });
+        this.recordFileFailure(job, error, index);
       } finally {
         this.activeFileRates.delete(job.id);
         this.refreshTransferLocalMetrics(job.download_id);
         this.activeFileIds.delete(job.id);
       }
     }
+  }
+
+  // The attempt is already counted: nextPendingFile counts it when it claims
+  // the file. Counting it again here spent three allowed attempts in one and a
+  // half, so a file that hit two transient errors was marked failed and never
+  // retried.
+  recordFileFailure(job, error, worker) {
+    const attempts = Number(job.attempts ?? 0);
+    this.store.updateDownloadFile(job.id, {
+      status: attempts >= 3 ? 'failed' : 'pending',
+      attempts,
+      download_speed: 0,
+      error_string: error.message,
+    });
+    const transfer = this.store.findDownloadById(job.download_id);
+    logger.warn('file download failed', {
+      worker,
+      transferId: job.download_id,
+      name: transfer?.name ?? job.download_name,
+      fileId: job.id,
+      putioFileId: job.putio_file_id,
+      attempts,
+      error: error.message,
+      stack: error.stack,
+    });
   }
 
   nextPendingFile() {

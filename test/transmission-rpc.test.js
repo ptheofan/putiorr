@@ -239,9 +239,14 @@ test('torrent-add persists category and torrent-get returns Transmission shape',
     downloadDir: path.join(harness.config.targetDir, 'tv'),
     percentDone: 0,
   });
+  // Not a restatement of the two literals above: the right-hand side is the
+  // folder the downloader itself would write into, resolved by the same code
+  // the workers use. If those two ever disagree, every completed download
+  // stops importing.
+  const row = harness.store.findDownloadById(1);
   assert.equal(
     path.join(getBody.arguments.torrents[0].downloadDir, getBody.arguments.torrents[0].name),
-    path.join(harness.config.targetDir, 'tv', 'Example.Release'),
+    harness.service.requireStagingRoot(harness.store.findProfileById(row.profile_id), row),
   );
 });
 

@@ -308,6 +308,77 @@ test('poll prunes processed transfers after local staging data disappears', asyn
   }
 });
 
+// Phase 4 of the ownership cleanup (#67), audit finding 9: adoption of a
+// transfer putiorr did not create maps the put.io folder to a profile, and is
+// skipped unless exactly one profile owns that folder. Every profile defaults
+// to the same `putiorr` folder, which the README recommends — so in the
+// documented setup nothing is ever adopted, and it used to say nothing at all.
+test('put.io transfers a shared folder cannot attribute are reported, not skipped in silence', async () => {
+  const harness = await createHarness();
+  try {
+    harness.store.createProfile({
+      name: 'Radarr',
+      type: 'radarr',
+      slug: 'radarr',
+      putio_folder_name: 'putiorr',
+      downloadAt: harness.config.targetDir,
+      rpc_path: '/radarr/transmission/rpc',
+      enabled: true,
+    });
+
+    harness.putio.remoteTransfers = [
+      { id: 80, fileId: 81, saveParentId: 42, hash: 'sharedfolderhash', name: 'Shared.Folder.Release', status: 'COMPLETED', percentDone: 100 },
+      { id: 82, fileId: 83, saveParentId: 99, hash: 'unwatchedhash', name: 'Unwatched.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await harness.service.refreshRemoteTransfers();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.deepEqual(harness.store.listActiveDownloads(), []);
+    const notices = harness.store.adoptionNotices();
+    const shared = notices.find((notice) => notice.putioFolderId === 42);
+    assert.deepEqual(shared.profiles, ['Custom', 'Radarr']);
+    assert.equal(shared.transferCount, 1);
+    assert.deepEqual(shared.transfers, [{ id: 80, name: 'Shared.Folder.Release' }]);
+    const unwatched = notices.find((notice) => notice.putioFolderId === 99);
+    assert.deepEqual(unwatched.profiles, []);
+    assert.equal(unwatched.transferCount, 1);
+
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'put.io transfers cannot be attributed to one RR profile');
+    assert.equal(logged.meta.folders.length, 2);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the adoption notice clears once nothing is left unattributed', async () => {
+  const harness = await createHarness();
+  try {
+    harness.store.saveAdoptionNotices([{
+      putioFolderId: 42, folderName: 'putiorr', profiles: [], transfers: [], transferCount: 3,
+    }]);
+
+    harness.putio.remoteTransfers = [
+      { id: 84, fileId: 85, saveParentId: 42, hash: 'adoptablehash', name: 'Adoptable.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+    await harness.service.refreshRemoteTransfers();
+
+    // One profile owns folder 42, so the transfer is adopted and the notice
+    // has nothing left to report.
+    assert.equal(harness.store.findDownloadByPutioTransferId(84).name, 'Adoptable.Release');
+    assert.deepEqual(harness.store.adoptionNotices(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
 // Phase 1 of the ownership cleanup (#67): the poll is the only thing that moves
 // downloads forward, so anything that throws inside it stops every download on
 // the box. Both sweeps below used to propagate out of pollOnce on their first
@@ -782,6 +853,34 @@ test('a refused local delete never cancels the put.io transfer first', async () 
     assert.deepEqual(harness.putio.deletedFiles, []);
     assert.deepEqual(harness.putio.deletedTransfers, []);
     assert.ok(harness.store.findDownloadById(outer.id));
+  } finally {
+    harness.store.close();
+  }
+});
+
+// The two refusals that stand between a delete and a directory nobody meant to
+// remove. Both are branches nothing else in the suite reaches, and a refusal
+// that has never been executed is a refusal nobody has checked the wording of.
+test('the staging root and an unusable name are refused by name', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+
+    assert.throws(
+      () => harness.service.localPathOwners(profile.download_at),
+      new RegExp(`RR profile ${profile.name}'s download folder`),
+    );
+    assert.throws(
+      () => harness.service.localPathOwners(path.dirname(profile.download_at)),
+      /download folder or holds it/,
+    );
+
+    // A name that spells no folder at all: nothing to write into, and nothing
+    // that could be deleted later without taking the category directory.
+    assert.throws(
+      () => harness.service.requireStagingRoot(profile, { id: 7, name: '.', category: 'tv' }),
+      /no usable put\.io name/,
+    );
   } finally {
     harness.store.close();
   }

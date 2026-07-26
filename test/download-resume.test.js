@@ -352,6 +352,58 @@ test('a download does not inherit the files of a removed rival', async () => {
   }
 });
 
+// Minor, re-review: claiming a file counted an attempt and failing it counted
+// another, so three allowed attempts became one and a half — a file that hit
+// two transient errors was marked failed and never retried.
+test('a failed file is retried the number of times it is allowed', async () => {
+  const putio = new FakePutio();
+  const harness = await createHarness({}, putio);
+  try {
+    const transfer = createTransfer(harness.store);
+    const file = harness.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 901,
+      relative_path: 'movie.mkv',
+      size: 10,
+      status: 'pending',
+    });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: async () => { throw new Error('network is down'); },
+    });
+    manager.running = true;
+    harness.service.getPutio = () => ({
+      async getDownloadUrl() { throw new Error('network is down'); },
+    });
+
+    // One turn of the worker loop: claim the next pending file, fail it, and
+    // let the manager do its own bookkeeping.
+    const attempt = async () => {
+      const job = manager.nextPendingFile();
+      manager.activeFileIds.clear();
+      try {
+        await manager.processFile(job);
+        throw new Error('the file was expected to fail');
+      } catch (error) {
+        manager.recordFileFailure(job, error, 0);
+      }
+    };
+
+    await attempt();
+    assert.equal(harness.store.findDownloadFileById(file.id).status, 'pending');
+    await attempt();
+    assert.equal(harness.store.findDownloadFileById(file.id).status, 'pending');
+    await attempt();
+    const exhausted = harness.store.findDownloadFileById(file.id);
+    assert.equal(exhausted.status, 'failed');
+    assert.equal(exhausted.attempts, 3);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('prepareTransfer forgets files put.io no longer has', async () => {
   const putio = new FakePutio({
     remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],
