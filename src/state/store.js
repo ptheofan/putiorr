@@ -335,6 +335,41 @@ function profileBrowserCatchAll(input) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
+// "Set the catch-all on this profile, and clear whichever profile holds it."
+// Read in the same shapes the flag itself is, for the same reason. Absent
+// means the write refuses a second catch-all exactly as it always has: the
+// takeover is an intent the caller has to state, never a default.
+function profileTakeOverCatchAll(input) {
+  const value = input.takeOverCatchAll ?? input.take_over_catch_all;
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+// Which profile the caller was shown holding the catch-all. A takeover is
+// answered against the database as it is now, not as it was when the refusal
+// was rendered, and clearing a profile the user never saw is a side effect
+// they never agreed to — so the write refuses when the holder has changed.
+// Absent means "whichever profile holds it", which is what a seed or a script
+// with nobody to have shown anything to is asking for.
+function profileTakeOverCatchAllFrom(input) {
+  const value = input.takeOverCatchAllFrom ?? input.take_over_catch_all_from;
+  if (value == null || value === '') return undefined;
+  return Number(value);
+}
+
+// The refusal, in both the forms it has to take. The sentence is what every
+// human-facing surface has always shown and is unchanged; `catchAllHolder` is
+// what a caller acts on, because offering "make this the fallback instead" out
+// of prose means parsing a sentence for a profile name, and a client that
+// string-matches its server is a client that breaks on the next reword.
+function catchAllConflictError(holder) {
+  const error = new Error(
+    `${holder.name} already takes grabs from any site no other profile claims;`
+    + ' untick it on that profile first',
+  );
+  error.catchAllHolder = { id: holder.id, name: holder.name };
+  return error;
+}
+
 // The API lowercases the preset before it reaches the store, but the seed paths
 // do not go through it: PUTIORR_PROFILES_JSON and PUTIORR_DEFAULT_PROFILE_TYPE
 // are written straight in. A preset is only ever compared exactly, so storing
@@ -1415,35 +1450,37 @@ export class StateStore {
       ?? this.ensureDefaultDownloadProfile(this.config ?? {}).id;
     const autoRemoveCompleted = profileAutoRemoveCompleted(input) ?? profileDefaultsToAutoRemoveCompleted(input);
     const browserCatchAll = profileBrowserCatchAll(input) ?? false;
-    this.assertSingleCatchAll(profileTypeValue(input), browserCatchAll);
-    this.assertNoSharedBrowserSites(profileTypeValue(input), profileBrowserDomainsList(input));
-    const result = this.db.prepare(`
-      INSERT INTO profiles (
-        name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
-        download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains,
-        browser_catch_all, enabled, created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.name,
-      profileTypeValue(input),
-      input.slug,
-      normalizeOptionalId(downloadProfileId),
-      autoRemoveCompleted ? 1 : 0,
-      input.putio_folder_name,
-      input.putio_folder_id ?? null,
-      profileDownloadAt(input),
-      input.rpc_path ?? null,
-      profileClientHost(input) ?? 'putiorr',
-      profileClientPort(input) ?? '9091',
-      profileClientUseSsl(input) ? 1 : 0,
-      profileBrowserDomainsPatch(input) ?? null,
-      browserCatchAll ? 1 : 0,
-      input.enabled === false ? 0 : 1,
-      timestamp,
-      timestamp,
-    );
-    return this.findProfileById(Number(result.lastInsertRowid));
+    const type = profileTypeValue(input);
+    return this.writeProfileWithCatchAll({ type, catchAll: browserCatchAll, input }, () => {
+      this.assertNoSharedBrowserSites(type, profileBrowserDomainsList(input));
+      const result = this.db.prepare(`
+        INSERT INTO profiles (
+          name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
+          download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains,
+          browser_catch_all, enabled, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.name,
+        type,
+        input.slug,
+        normalizeOptionalId(downloadProfileId),
+        autoRemoveCompleted ? 1 : 0,
+        input.putio_folder_name,
+        input.putio_folder_id ?? null,
+        profileDownloadAt(input),
+        input.rpc_path ?? null,
+        profileClientHost(input) ?? 'putiorr',
+        profileClientPort(input) ?? '9091',
+        profileClientUseSsl(input) ? 1 : 0,
+        profileBrowserDomainsPatch(input) ?? null,
+        browserCatchAll ? 1 : 0,
+        input.enabled === false ? 0 : 1,
+        timestamp,
+        timestamp,
+      );
+      return this.findProfileById(Number(result.lastInsertRowid));
+    });
   }
 
   updateProfile(id, patch) {
@@ -1476,20 +1513,26 @@ export class StateStore {
     // patch: switching a profile that already carries the flag onto the grab
     // preset is the moment the flag starts to route grabs, and the patch that
     // does it need not mention the flag at all.
-    this.assertSingleCatchAll(
-      normalizedPatch.type ?? existing.type,
-      nextBrowserCatchAll ?? existing.browser_catch_all,
-      id,
-    );
-    // Checked against the row this update would leave behind, for the same
-    // reason: switching a profile that already lists sites onto the grab preset
-    // is the moment those sites start to route grabs, and the patch that does
-    // it need not mention them.
-    this.assertNoSharedBrowserSites(
-      normalizedPatch.type ?? existing.type,
-      nextBrowserDomains ?? existing.browser_domains,
-      id,
-    );
+    const nextType = normalizedPatch.type ?? existing.type;
+    return this.writeProfileWithCatchAll({
+      type: nextType,
+      catchAll: nextBrowserCatchAll ?? existing.browser_catch_all,
+      exceptId: id,
+      input: patch,
+    }, () => {
+      // Checked against the row this update would leave behind, for the same
+      // reason: switching a profile that already lists sites onto the grab
+      // preset is the moment those sites start to route grabs, and the patch
+      // that does it need not mention them.
+      this.assertNoSharedBrowserSites(nextType, nextBrowserDomains ?? existing.browser_domains, id);
+      return this.writeProfilePatch(id, normalizedPatch, existing);
+    });
+  }
+
+  // The column write itself, split out so updateProfile's checks can wrap it in
+  // the transaction a catch-all takeover needs. The allow-list is what keeps
+  // takeOverCatchAll — an intent, not a column — out of the UPDATE.
+  writeProfilePatch(id, normalizedPatch, existing) {
     const allowed = [
       'name',
       'type',
@@ -1576,10 +1619,48 @@ export class StateStore {
     if (!catchAll || type !== GRAB_PROFILE_TYPE) return;
     const holder = this.findCatchAllGrabProfile({ exceptId });
     if (!holder) return;
-    throw new Error(
-      `${holder.name} already takes grabs from any site no other profile claims;`
-      + ' untick it on that profile first',
-    );
+    throw catchAllConflictError(holder);
+  }
+
+  // The takeover, sat where assertSingleCatchAll is and for the same reason:
+  // it has to see the other rows, and every door that sets the flag comes
+  // through createProfile or updateProfile. Without the intent the refusal is
+  // untouched — "exactly one profile holds it, or none does" is the invariant
+  // either way, and only the number of saves it costs to move changes.
+  //
+  // One transaction around the clear and the write, so there is never a moment
+  // where two profiles hold it or none does: a write that fails afterwards —
+  // a duplicate slug, a browser site another profile claims — rolls the clear
+  // back with it.
+  //
+  // The holder is re-read inside that transaction rather than trusted from the
+  // refusal that prompted this: between the message being rendered and the
+  // link being clicked, the other profile may have been changed by somebody
+  // else. If the conflict is gone the save is just a save; if a profile the
+  // caller was never shown holds it now, the refusal comes back naming that
+  // one instead of quietly clearing it.
+  writeProfileWithCatchAll({ type, catchAll, exceptId = 0, input }, write) {
+    if (!profileTakeOverCatchAll(input)) {
+      this.assertSingleCatchAll(type, catchAll, exceptId);
+      return write();
+    }
+    return this.withTransaction(() => {
+      const holder = catchAll && type === GRAB_PROFILE_TYPE
+        ? this.findCatchAllGrabProfile({ exceptId })
+        : undefined;
+      if (!holder) return write();
+      const expected = profileTakeOverCatchAllFrom(input);
+      if (expected !== undefined && holder.id !== expected) throw catchAllConflictError(holder);
+      this.db.prepare('UPDATE profiles SET browser_catch_all = 0, updated_at = ? WHERE id = ?')
+        .run(nowIso(), holder.id);
+      const saved = write();
+      if (!saved) return saved;
+      // Not a column, and never stored: a profile the caller may not even have
+      // on screen just stopped being the fallback, and the confirmation has to
+      // be able to name it.
+      const takenFrom = { id: holder.id, name: holder.name };
+      return { ...saved, catch_all_taken_from: takenFrom, catchAllTakenFrom: takenFrom };
+    });
   }
 
   // The Putiorr Grab profile that lists `site` as one of its browser sites,
@@ -1649,6 +1730,15 @@ export class StateStore {
     return this.db.prepare('SELECT * FROM profiles ORDER BY id ASC')
       .all()
       .map(normalizeProfileRow);
+  }
+
+  // BEGIN IMMEDIATE fails inside an open transaction, and the profile writes
+  // now take one of their own for a catch-all takeover — from paths a caller
+  // is free to have wrapped already. Joining the open one keeps the write
+  // atomic with respect to everything outside it, which is what the takeover
+  // needs; it does not pretend to be a savepoint.
+  withTransaction(fn) {
+    return this.db.isTransaction ? fn() : this.transaction(fn);
   }
 
   transaction(fn) {

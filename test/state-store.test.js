@@ -760,6 +760,178 @@ test('a second catch-all is refused by naming the profile that already holds it'
   }
 });
 
+// assert.throws answers whether it threw, not with what: these tests are about
+// what rides along on the error, so the error itself has to come back.
+function thrownBy(run) {
+  try {
+    run();
+  } catch (error) {
+    return error;
+  }
+  return assert.fail('expected the write to be refused');
+}
+
+// "Exactly one profile holds it, or none does" is the invariant every one of
+// these tests ends on, takeover or refusal alike.
+function catchAllHolderIds(store) {
+  return store.listProfiles()
+    .filter((profile) => profile.type === 'grab' && profile.browser_catch_all)
+    .map((profile) => profile.id);
+}
+
+test('the refusal carries the profile that holds the fallback, not only a sentence', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+
+    // The sentence is for a human and stays exactly as it was. What a caller
+    // branches on is the holder riding along with it: the wizard has to offer
+    // an action naming that profile, and matching prose to find its name is
+    // how a client/server boundary rots.
+    const error = thrownBy(() => seedGrabProfile(store, 'music', { browser_catch_all: true }));
+    assert.equal(
+      error.message,
+      'MOVIES already takes grabs from any site no other profile claims; untick it on that profile first',
+    );
+    assert.deepEqual(error.catchAllHolder, { id: first.id, name: 'MOVIES' });
+
+    const second = seedGrabProfile(store, 'music');
+    const updateError = thrownBy(() => store.updateProfile(second.id, { browser_catch_all: true }));
+    assert.match(updateError.message, /MOVIES already takes grabs/);
+    assert.deepEqual(updateError.catchAllHolder, { id: first.id, name: 'MOVIES' });
+    assert.deepEqual(catchAllHolderIds(store), [first.id]);
+  } finally {
+    store.close();
+  }
+});
+
+test('takeOverCatchAll moves the fallback from the profile that held it', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+    const second = seedGrabProfile(store, 'music');
+
+    const moved = store.updateProfile(second.id, {
+      browser_catch_all: true,
+      takeOverCatchAll: true,
+      takeOverCatchAllFrom: first.id,
+    });
+
+    assert.equal(moved.browser_catch_all, true);
+    // Clearing a profile the user cannot see is a real side effect, so the
+    // reply says whose it was rather than leaving it to be discovered.
+    assert.deepEqual(moved.catch_all_taken_from, { id: first.id, name: 'MOVIES' });
+    assert.equal(store.findProfileById(first.id).browser_catch_all, false);
+    assert.deepEqual(catchAllHolderIds(store), [second.id]);
+    assert.equal(store.findCatchAllGrabProfile().id, second.id);
+
+    // A brand new profile may take it over too — every write path, not only
+    // the one the wizard happens to use for an existing profile.
+    const third = seedGrabProfile(store, 'books', {
+      browser_catch_all: true,
+      takeOverCatchAll: true,
+      takeOverCatchAllFrom: second.id,
+    });
+    assert.deepEqual(third.catch_all_taken_from, { id: second.id, name: 'MUSIC' });
+    assert.deepEqual(catchAllHolderIds(store), [third.id]);
+  } finally {
+    store.close();
+  }
+});
+
+test('a takeover whose conflict vanished mid-flight is simply a save', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+    const second = seedGrabProfile(store, 'music');
+    // Between the refusal being rendered and the link being clicked, the other
+    // profile stopped being the fallback.
+    store.updateProfile(first.id, { browser_catch_all: false });
+
+    const saved = store.updateProfile(second.id, {
+      browser_catch_all: true,
+      takeOverCatchAll: true,
+      takeOverCatchAllFrom: first.id,
+    });
+
+    assert.equal(saved.browser_catch_all, true);
+    // Nobody lost the fallback, so nothing claims anybody did.
+    assert.equal(saved.catch_all_taken_from, undefined);
+    assert.deepEqual(catchAllHolderIds(store), [second.id]);
+  } finally {
+    store.close();
+  }
+});
+
+test('a takeover refuses again when a different profile now holds the fallback', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+    const second = seedGrabProfile(store, 'music');
+    const third = seedGrabProfile(store, 'books');
+    // The fallback moved to a profile the user was never shown. Clearing that
+    // one silently would undo a decision this user never saw made.
+    store.updateProfile(first.id, { browser_catch_all: false });
+    store.updateProfile(third.id, { browser_catch_all: true });
+
+    const error = thrownBy(() => store.updateProfile(second.id, {
+      browser_catch_all: true,
+      takeOverCatchAll: true,
+      takeOverCatchAllFrom: first.id,
+    }));
+    assert.match(error.message, /BOOKS already takes grabs/);
+    assert.deepEqual(error.catchAllHolder, { id: third.id, name: 'BOOKS' });
+    assert.equal(store.findProfileById(second.id).browser_catch_all, false);
+    assert.deepEqual(catchAllHolderIds(store), [third.id]);
+  } finally {
+    store.close();
+  }
+});
+
+test('a takeover that cannot be saved leaves the previous fallback holding it', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+    seedGrabProfile(store, 'music');
+
+    // The clear and the write are one transaction, so a write that fails after
+    // the clear cannot leave the fallback held by nobody.
+    assert.throws(() => seedGrabProfile(store, 'music', {
+      browser_catch_all: true,
+      takeOverCatchAll: true,
+      takeOverCatchAllFrom: first.id,
+    }), /UNIQUE|constraint/i);
+
+    assert.equal(store.findProfileById(first.id).browser_catch_all, true);
+    assert.deepEqual(catchAllHolderIds(store), [first.id]);
+  } finally {
+    store.close();
+  }
+});
+
+test('without the takeover flag the refusal changes nothing at all', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+    const second = seedGrabProfile(store, 'music');
+
+    // Naming the holder without asking for the takeover is still a refusal:
+    // "exactly one or none" stays the invariant on every write that does not
+    // say otherwise.
+    assert.throws(
+      () => store.updateProfile(second.id, {
+        browser_catch_all: true,
+        takeOverCatchAllFrom: first.id,
+      }),
+      /MOVIES already takes grabs/,
+    );
+    assert.equal(store.findProfileById(first.id).browser_catch_all, true);
+    assert.deepEqual(catchAllHolderIds(store), [first.id]);
+  } finally {
+    store.close();
+  }
+});
+
 test('only a Putiorr Grab profile can hold the catch-all role', () => {
   const store = new StateStore(':memory:');
   try {
