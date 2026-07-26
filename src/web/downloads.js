@@ -22,6 +22,7 @@ import {
   placeChildAt,
   adoptionNoticeSummary,
   schemaMigrationSummary,
+  stagingCollisionSummary,
   schemaMigrationWarning,
 } from './util.js';
 import { renderTopology } from './topology.js';
@@ -70,6 +71,14 @@ export function renderAdoptionNotices() {
   const summary = adoptionNoticeSummary(state.settings?.adoptionNotices);
   setHidden(el.adoptionNotice, !summary);
   setText(el.adoptionNoticeText, summary);
+}
+
+// Two downloads put.io named the same thing: only the older one stages, and
+// the other would otherwise look like a download that just stopped.
+export function renderStagingCollisions() {
+  const summary = stagingCollisionSummary(state.settings?.stagingCollisions);
+  setHidden(el.stagingCollisionNotice, !summary);
+  setText(el.stagingCollisionText, summary);
 }
 
 export function renderOrphanedDownloads() {
@@ -159,6 +168,7 @@ export async function deleteOrphanedDownload(orphanId, { deleteRemote = false, d
 export function renderDownloads() {
   renderSchemaMigrations();
   renderAdoptionNotices();
+  renderStagingCollisions();
   renderOrphanedDownloads();
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();

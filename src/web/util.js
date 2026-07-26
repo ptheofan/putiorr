@@ -311,6 +311,22 @@ export function adoptionNoticeSummary(notices) {
   }).join(' ');
 }
 
+// Two downloads put.io named the same thing, under one profile and category.
+// Only the older one stages; the other waits, and would otherwise look like a
+// download that simply stopped.
+export function stagingCollisionSummary(collisions) {
+  const entries = Array.isArray(collisions)
+    ? collisions.filter((collision) => (collision?.downloads?.length ?? 0) > 1)
+    : [];
+  if (entries.length === 0) return '';
+  return entries.map((collision) => {
+    const [first, ...rest] = collision.downloads;
+    return `${pluralize(rest.length, 'download')} cannot start: put.io named ${rest.length === 1 ? 'it' : 'them'}`
+      + ` the same as download ${first.id} (${first.name}), which is using ${collision.localPath}.`
+      + ' Rename one of them on put.io, or delete the one you do not want.';
+  }).join(' ');
+}
+
 export function schemaMigrationWarning(migrations) {
   const stranded = migrations?.downloads?.strandedLegacyRows;
   if (stranded) {

@@ -9,8 +9,17 @@ import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
 
 class FakePutio {
-  constructor({ remoteFiles = [] } = {}) {
+  constructor({ remoteFiles = [], remoteTransfers = [] } = {}) {
     this.remoteFiles = remoteFiles;
+    this.remoteTransfers = remoteTransfers;
+  }
+
+  async ensureFolder() {
+    return 42;
+  }
+
+  async listTransfers() {
+    return this.remoteTransfers;
   }
 
   async listTransferFiles() {
@@ -136,6 +145,64 @@ test('a file whose local copy is gone is downloaded again, not reported complete
     assert.equal(file.status, 'pending');
     assert.equal(file.downloaded_bytes, 0);
     assert.notEqual(harness.store.findDownloadById(transfer.id).lifecycle, 'processed');
+  } finally {
+    harness.store.close();
+  }
+});
+
+// The owner's ruling keeps the put.io name as the folder, so two *distinct*
+// put.io transfers that put.io named the same thing, under one profile and
+// category, resolve to one directory. They are not interleaved: both would
+// write the same .part file and each would finish holding the other's bytes.
+test('two downloads of the same name never stage into one folder', async () => {
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],
+  });
+  const harness = await createHarness({}, putio);
+  try {
+    const first = createTransfer(harness.store, { total_size: 10, lifecycle: 'remote' });
+    const second = createTransfer(harness.store, {
+      putio_transfer_id: 11,
+      putio_file_id: 21,
+      hash: 'samenamehash',
+      total_size: 10,
+      lifecycle: 'remote',
+    });
+    assert.equal(second.name, first.name);
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    // The one that got there first keeps the folder; the newcomer refuses
+    // rather than writing into it.
+    await manager.prepareTransfer(harness.store.findDownloadById(first.id));
+    assert.equal(harness.store.listFilesForDownload(first.id).length, 1);
+
+    await assert.rejects(
+      () => manager.prepareTransfer(harness.store.findDownloadById(second.id)),
+      new RegExp(`download ${first.id}`, 'i'),
+    );
+    assert.deepEqual(harness.store.listFilesForDownload(second.id), []);
+
+    // And the poll reports it where the user will see it, rather than leaving
+    // a download that silently never progresses.
+    putio.remoteTransfers = [first, second].map((download) => ({
+      id: download.putio_transfer_id,
+      fileId: download.putio_file_id,
+      saveParentId: 42,
+      name: download.name,
+      hash: download.hash,
+      status: 'COMPLETED',
+      percentDone: 100,
+    }));
+    await manager.pollOnce();
+    const [collision] = harness.store.stagingCollisions();
+    assert.equal(collision.localPath, path.join(harness.config.targetDir, first.name));
+    assert.deepEqual(collision.downloads.map((download) => download.id), [first.id, second.id]);
+    assert.match(harness.store.findDownloadById(second.id).error_string, /already/i);
   } finally {
     harness.store.close();
   }

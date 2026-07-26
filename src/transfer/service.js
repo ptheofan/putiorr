@@ -309,6 +309,83 @@ export class TransferService {
     return root;
   }
 
+  // The staging folder is the put.io name, and put.io does not deduplicate
+  // names — so two *distinct* transfers it named the same thing, under one
+  // profile and category, resolve to one directory. Interleaving them means
+  // two workers writing one `.part` and each download finishing with a mix of
+  // the two, silently. The download that claimed the folder first keeps it,
+  // which is the older id, and every other one refuses and says whose folder
+  // it is. Ids only ever go up, so the winner never changes.
+  requireExclusiveStagingRoot(profile, download) {
+    const root = this.requireStagingRoot(profile, download);
+    const claimed = this.downloadsStagingAt(root)
+      .filter((rival) => rival.id < Number(download.id));
+    if (claimed.length === 0) return root;
+    throw new Error(
+      `${root} already belongs to download ${claimed[0].id} (${claimed[0].name}),`
+      + ' which put.io named the same thing; rename one of them on put.io, or delete the one you do not want',
+    );
+  }
+
+  downloadsStagingAt(root) {
+    const claims = [];
+    for (const download of this.store.listActiveDownloads()) {
+      const profile = this.findDownloadOwner(download);
+      if (!profile) continue;
+      let candidate;
+      try {
+        candidate = downloadLocalRoot(profile, download);
+      } catch {
+        continue;
+      }
+      if (candidate === root) claims.push({ id: download.id, name: download.name, profile: profile.name });
+    }
+    return claims.sort((left, right) => left.id - right.id);
+  }
+
+  // Every folder more than one live download resolves to, computed from the
+  // database alone. Rebuilt on every poll like the adoption notice, so it
+  // clears itself the moment one of the two is renamed or removed.
+  stagingCollisions() {
+    const byRoot = new Map();
+    for (const download of this.store.listActiveDownloads()) {
+      const profile = this.findDownloadOwner(download);
+      if (!profile) continue;
+      let root;
+      try {
+        root = downloadLocalRoot(profile, download);
+      } catch {
+        continue;
+      }
+      if (!root) continue;
+      const group = byRoot.get(root) ?? [];
+      group.push({ id: download.id, name: download.name, profile: profile.name });
+      byRoot.set(root, group);
+    }
+    return [...byRoot.entries()]
+      .filter(([, group]) => group.length > 1)
+      .map(([localPath, group]) => ({
+        localPath,
+        downloads: group.sort((left, right) => left.id - right.id),
+      }));
+  }
+
+  recordStagingCollisions() {
+    const collisions = this.stagingCollisions();
+    if (JSON.stringify(collisions) === JSON.stringify(this.store.stagingCollisions())) return collisions;
+    this.store.saveStagingCollisions(collisions);
+    if (collisions.length === 0) {
+      logger.info('no downloads are competing for a staging folder any more');
+      return collisions;
+    }
+    logger.warn('downloads share a staging folder and cannot both use it', {
+      consequence: 'only the oldest of each group is downloaded; the others wait',
+      fix: 'rename one of them on put.io, or delete the one you do not want',
+      folders: collisions,
+    });
+    return collisions;
+  }
+
   async ensureProfileFolder(profile) {
     const current = this.requireProfile(profile);
     if (current.putio_folder_id) return current;

@@ -893,6 +893,10 @@ export class TransmissionRpcServer {
       // The dashboard renders it; without it, a shared put.io folder means
       // nothing is ever adopted and nothing ever says so.
       adoptionNotices: this.service.store.adoptionNotices(),
+      // Staging folders two downloads resolve to. Only the older one is
+      // downloaded, so the other is waiting on a decision nobody has been
+      // asked for yet.
+      stagingCollisions: this.service.store.stagingCollisions(),
     };
   }
 

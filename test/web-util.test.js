@@ -37,6 +37,7 @@ import {
   truncateLabel,
   adoptionNoticeSummary,
   schemaMigrationSummary,
+  stagingCollisionSummary,
   schemaMigrationWarning,
 } from '../src/web/util.js';
 
@@ -510,4 +511,25 @@ test('the adoption notice names the folder, the profiles and the cost', () => {
   }]);
   assert.match(unwatched, /1 put\.io transfer/);
   assert.match(unwatched, /no RR profile/);
+});
+
+// put.io does not deduplicate transfer names and the staging folder is the
+// name, so two distinct transfers can resolve to one folder. Only the older
+// one stages; without this the other looks like a download that just stopped.
+test('the staging collision notice names the folder and who is using it', () => {
+  assert.equal(stagingCollisionSummary(undefined), '');
+  assert.equal(stagingCollisionSummary([]), '');
+  assert.equal(stagingCollisionSummary([{ localPath: '/downloads/x', downloads: [{ id: 1, name: 'x' }] }]), '');
+
+  const summary = stagingCollisionSummary([{
+    localPath: '/downloads/tv/Example.Release',
+    downloads: [
+      { id: 4, name: 'Example.Release', profile: 'Sonarr' },
+      { id: 9, name: 'Example.Release', profile: 'Sonarr' },
+    ],
+  }]);
+  assert.match(summary, /1 download cannot start/);
+  assert.match(summary, /download 4 \(Example\.Release\)/);
+  assert.match(summary, /\/downloads\/tv\/Example\.Release/);
+  assert.match(summary, /Rename one of them on put\.io/);
 });

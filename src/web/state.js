@@ -138,6 +138,8 @@ export const el = {
   schemaMigrationWarning: document.querySelector('#schemaMigrationWarning'),
   adoptionNotice: document.querySelector('#adoptionNotice'),
   adoptionNoticeText: document.querySelector('#adoptionNoticeText'),
+  stagingCollisionNotice: document.querySelector('#stagingCollisionNotice'),
+  stagingCollisionText: document.querySelector('#stagingCollisionText'),
   orphanedDownloads: document.querySelector('#orphanedDownloads'),
   orphanedDownloadsList: document.querySelector('#orphanedDownloadsList'),
   topologyCanvas: document.querySelector('#topologyCanvas'),

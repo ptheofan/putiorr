@@ -23,6 +23,8 @@ test('downloads UI exposes stable data-testid hooks for frontend tests', () => {
     'delete-confirm-submit',
     'adoption-notice',
     'adoption-notice-text',
+    'staging-collision-notice',
+    'staging-collision-text',
     'schema-migration-notice',
     'schema-migration-summary',
     'schema-migration-warning',
@@ -82,4 +84,8 @@ test('the downloads view renders the adoption notice it is served', () => {
 
   assert.match(downloadsJs, /state\.settings\?\.adoptionNotices/);
   assert.match(downloadsJs, /renderAdoptionNotices\(\);/);
+  // Same for two downloads put.io named the same thing: only the older one
+  // stages, and the other looks like a download that just stopped.
+  assert.match(downloadsJs, /state\.settings\?\.stagingCollisions/);
+  assert.match(downloadsJs, /renderStagingCollisions\(\);/);
 });

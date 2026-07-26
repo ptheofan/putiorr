@@ -95,6 +95,10 @@ export class DownloadManager {
   }
 
   async pollOnce() {
+    // Before anything reads or writes a staging folder: two downloads put.io
+    // named the same thing resolve to one, and the poll is where that becomes
+    // visible instead of one of them simply never progressing.
+    this.service.recordStagingCollisions();
     await this.pruneProcessedTransfersMissingLocalData();
     const purgedFiles = this.store.purgeDeletedFilesForProcessedDownloads();
     if (purgedFiles > 0) {
@@ -216,7 +220,7 @@ export class DownloadManager {
       error: false,
       error_string: '',
     });
-    const downloadRoot = this.service.requireStagingRoot(profile, updated);
+    const downloadRoot = this.service.requireExclusiveStagingRoot(profile, updated);
     const remoteFileIds = [];
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
@@ -445,7 +449,7 @@ export class DownloadManager {
     const profile = this.service.requireDownloadOwner(transfer);
 
     const targetPath = resolveInside(
-      this.service.requireStagingRoot(profile, transfer),
+      this.service.requireExclusiveStagingRoot(profile, transfer),
       file.relative_path,
     );
     await mkdir(path.dirname(targetPath), { recursive: true });

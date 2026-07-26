@@ -534,6 +534,29 @@ export class StateStore {
     this.setSetting('adoption_notices', JSON.stringify(notices));
   }
 
+  // Staging folders more than one live download resolves to. put.io does not
+  // deduplicate transfer names, and the staging folder is the name, so two
+  // distinct transfers can land on one folder — which is refused rather than
+  // interleaved, and has to be visible somewhere the user looks.
+  stagingCollisions() {
+    const raw = this.getSetting('staging_collisions');
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  saveStagingCollisions(collisions) {
+    if (!Array.isArray(collisions) || collisions.length === 0) {
+      this.deleteSetting('staging_collisions');
+      return;
+    }
+    this.setSetting('staging_collisions', JSON.stringify(collisions));
+  }
+
   legacyRowsAfterMigration() {
     if (this.getSetting('downloads_schema_v1') !== '1') return undefined;
     if (!this.hasTable('transfers')) return undefined;

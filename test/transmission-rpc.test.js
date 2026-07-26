@@ -1814,6 +1814,7 @@ test('web API exposes settings and profile CRUD', async (t) => {
   // The dashboard's adoption notice reads this; a fresh store has nothing to
   // report, and the field still has to be there rather than undefined.
   assert.deepEqual(settingsBody.adoptionNotices, []);
+  assert.deepEqual(settingsBody.stagingCollisions, []);
   assert.equal(settingsBody.putioOAuth.appId, '12345');
   assert.equal(settingsBody.putioOAuth.defaultAppId, '12345');
   assert.equal(settingsBody.putioOAuth.appIdOverridden, false);
