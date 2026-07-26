@@ -48,21 +48,26 @@ the *arr completed-download workflow.
 ## Upgrading From 2.0.x
 
 This release collapses the several different ways a download used to be linked
-to a profile into one: the RPC path for *arr apps, the site match for browser
-grabs, resolved once and frozen. See
+to a profile into one: the request identifies the app, the ownership it implies
+is recorded once and frozen. See
 [Which profile owns a download](#which-profile-owns-a-download). Each item
 below is a setup that works on 2.0.x and stops working on upgrade.
 
-**Prowlarr on the shared endpoint with mapped categories.** The User-Agent
-bypass that let anything calling itself Prowlarr claim an add is gone, and so is
-category routing. *Fix:* point Prowlarr at its own RPC path,
-`/prowlarr/transmission/rpc`.
+**Category routing is gone.** The *arr download-client category no longer picks
+a profile, vetoes one, or has to agree with the app's labels: it names the
+staging subfolder under the owning profile's download folder and nothing more.
+*Fix:* nothing for the recommended setup, where each app already names itself.
+Prowlarr's per-release mapped categories, which used to need a User-Agent
+bypass to get past the category check, simply work.
 
-**Any multi-profile setup where the *arr apps share `/transmission/rpc`.** That
-endpoint now serves exactly one *arr profile and refuses otherwise, naming each
-profile's path in the refusal. *Fix:* give each *arr its own RPC path,
-including the seeded profile that still holds the shared one. A single-profile
-install is unaffected.
+**A download client that does not name itself, on a multi-profile install.**
+The shared `/transmission/rpc` endpoint identifies the calling app from its
+`User-Agent`, so the five *arr apps need no change. Anything else — a script, a
+generic Transmission client — resolves to no profile there, and is refused an
+add and a removal, naming each profile's path in the refusal. `torrent-get`
+still answers, with every download. *Fix:* give that client the RPC path of the
+profile it means. The same applies to two profiles answering to one name, such
+as a second Sonarr instance.
 
 **Downloads with no owning profile no longer acquire one at boot.** They were
 handed to whichever profile sorted first; now they appear in the dashboard's
@@ -147,11 +152,53 @@ trigger grabs cross-site. Grabs land only in profiles built with the **Putiorr
 Grab** app preset, which is the only preset the extension is offered. Such a
 profile has no Transmission RPC endpoint at all — nothing connects to it as a
 download client — and it auto-removes completed downloads by default, the way
-`prowlarr` profiles do, since nothing imports a browser grab. Each one lists
-the **Browser sites** whose grabs it takes, and one of them can additionally be
-set to take every site no other profile lists, so putiorr resolves every grab
-itself. Nothing in the extension decides where a grab lands: it holds the
-connection to putiorr and whether clicks are captured, and nothing else.
+`prowlarr` profiles do, since nothing imports a browser grab. Nothing in the
+extension decides where a grab lands: it holds the connection to putiorr and
+whether clicks are captured, and nothing else.
+
+The toolbar icon grabs nothing. It opens a popup naming the current tab's site
+and the profile a grab from it would reach, and — when no profile claims it —
+offers to claim it for one through `POST /api/profiles/:id/browser-sites`,
+which requires the same `X-Putiorr-Grab` header `/api/grab` does. The site it
+stores is whatever is in an editable field, pre-filled with the tab's hostname
+exactly as it is and hinting at the `*.` prefix. Nothing shortens a host to the
+registrable domain behind it: neither putiorr nor the extension carries a
+public-suffix list, and the rule that turns `www.x.example` into `x.example`
+would turn `x.co.uk` into `co.uk`.
+
+### Which Site Goes Where
+
+Each Putiorr Grab profile lists the **Browser sites** whose grabs it takes.
+Sites live on the profile; the extension holds no copy of them. An entry is
+written one of two ways, and both are compared against the page's hostname
+alone — scheme, port and path are stripped before matching:
+
+| Entry | Matches |
+| --- | --- |
+| `x.example` | `x.example`, and nothing under it |
+| `*.x.example` | `x.example` **and** every subdomain of it, at any depth |
+
+A plain entry does **not** cover subdomains. The leading `*.` is what does, and
+it covers the apex as well, so claiming a whole tracker is one entry rather
+than two. The star is only ever the first thing in an entry — `dl.*.example`
+and `example.*` are refused — and a wildcard on a single label, `*.com` or
+`*.lan`, saves with a warning, because putiorr carries no public-suffix list
+and cannot tell one from your LAN.
+
+A grab resolves in this order:
+
+1. the profile picked by hand from the extension's right-click menu;
+2. the profile listing the page's host **exactly**;
+3. the profile with the most specific wildcard covering it — the longest base
+   wins, so `*.dl.x.example` beats `*.x.example`;
+4. the one profile set to **take grabs from any site no other profile claims**;
+5. otherwise a refusal, naming that setting.
+
+Exactly one profile may hold the catch-all, or none, and a second save is
+refused naming the one that has it. The **same entry** on two profiles is
+refused too. Coverage that merely overlaps is not: `dl.x.example` on one
+profile and `*.x.example` on another sends that one host to the first and the
+rest of the domain to the second, which is the point of the order above.
 
 See [`extension/README.md`](extension/README.md) for setup and limitations.
 
@@ -411,8 +458,11 @@ Recommended profiles:
 | Lidarr | `putiorr` | `/putiorr` | `/lidarr/transmission/rpc` |
 | Readarr | `putiorr` | `/putiorr` | `/readarr/transmission/rpc` |
 
-Set each app's URL Base to the part of its path before `/rpc`, for example
-`/radarr/transmission`.
+Leave every app on the default `/transmission/rpc` and set no URL Base: each
+one is identified by the name it sends in its `User-Agent`. Give an app the
+distinct path above, as its URL Base without the `/rpc` — `/radarr/transmission`
+— when the name cannot settle it: two Sonarr instances, or a client that does
+not name itself.
 
 ### Which Profile Owns A Download
 
@@ -422,9 +472,9 @@ download is created, and is never re-derived afterwards:
 | How it arrived | Owner |
 | --- | --- |
 | RPC on a profile's own path | that profile |
-| RPC on the shared `/transmission/rpc` | the one *arr profile, else a refusal |
+| RPC on the shared `/transmission/rpc` | the profile the app's `User-Agent` names, else the one *arr profile, else a refusal |
 | `POST /api/grab` naming a profile | that profile |
-| `POST /api/grab` from a listed site | the grab profile listing it |
+| `POST /api/grab` from a claimed site | the grab profile claiming it — exact entry first, then the longest wildcard base |
 | `POST /api/grab`, neither | the grab profile set to take any other site, else a refusal |
 
 Nothing else selects an owner. In particular:
@@ -433,16 +483,33 @@ Nothing else selects an owner. In particular:
   name of the staging subfolder under the owning profile's download folder,
   computed after the owner is already known. It never picks a profile and never
   vetoes one, so two apps may use the same category and an app may use several.
-- **The User-Agent selects nothing.** No header decides which profile a request
-  belongs to, which is why an app naming itself Prowlarr no longer bypasses
-  anything.
+- **The User-Agent routes a request; it never re-owns a download.** It decides
+  which profile a request is addressed to, once, before anything is created. It
+  is never consulted again: the owner recorded on a download is read back from
+  the download, so no header can move an existing one between profiles.
 
-The shared `/transmission/rpc` endpoint serves exactly one *arr profile, so a
-single-profile install needs no URL Base change at all. Create a second *arr
-profile and that endpoint refuses every add, listing and removal, naming the
-RPC path each profile should be pointed at instead — including the profile
-still sitting on the shared path, which needs one of its own. `session-get`
-still answers, because that is the call an *arr uses to test the connection.
+**Every *arr can share `/transmission/rpc` with no URL Base change**, which is
+what the shared endpoint is for. Sonarr, Radarr, Lidarr, Readarr and Prowlarr
+each put their own name in the `User-Agent` — `Sonarr/4.0.19.2932 (linux x64)`
+— and putiorr matches the part before the slash against each profile's slug,
+its name, and its app preset unless that preset is `custom`. Case and
+punctuation are ignored. It is either an exact match or a profile identity of
+at least four characters that the client's name starts with, and it has to be
+the only one: two profiles answering to the same name resolve to neither.
+Putiorr Grab profiles are never matched, whatever they are called.
+
+**A distinct RPC path is the override for the cases the name cannot settle**:
+two Sonarr instances, or a client that does not name itself. Point it at
+`/sonarr-4k/transmission/rpc` and that path wins over whatever `User-Agent` it
+sends. A request that neither the path nor the name resolves is refused for
+`torrent-add` and `torrent-remove`, naming the RPC path each profile should be
+pointed at instead — including the profile still sitting on the shared path,
+which needs one of its own.
+
+`session-get` and `torrent-get` always answer. `session-get` is the call an
+*arr uses to test the connection; `torrent-get` is the queue poll that drives
+completed-download import, and an unresolved one returns every download rather
+than an error — each labelled with its own owner's download folder.
 
 One put.io transfer belongs to one download, keyed on put.io's own transfer id.
 put.io de-duplicates, so a second profile grabbing a release the first already
@@ -481,12 +548,12 @@ Profiles may share one put.io folder, which is what the recommended setup does.
 `enabled = 0` means **the profile accepts no new work**. It is a refusal, never
 a disappearance.
 
-A disabled profile still holds its RPC path, still claims its browser sites, is
-still counted when the shared endpoint decides whether it is ambiguous, and
-still owns its put.io folder. Whether it accepts work is asked only where work
-is created: `torrent-add`, `/api/grab`, and the adoption of a put.io transfer
-putiorr did not create. Each of those refuses with one sentence naming the
-profile.
+A disabled profile still holds its RPC path, still answers to its own name on
+the shared endpoint, still claims its browser sites, is still counted when the
+shared endpoint decides whether it is ambiguous, and still owns its put.io
+folder. Whether it accepts work is asked only where work is created:
+`torrent-add`, `/api/grab`, and the adoption of a put.io transfer putiorr did
+not create. Each of those refuses with one sentence naming the profile.
 
 It is not asked on `torrent-get`, `torrent-remove` or `session-get`. The
 downloads already queued keep downloading and stay listable, importable and

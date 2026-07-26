@@ -58,25 +58,43 @@
             <p>
               A download belongs to exactly one profile, and the owner is decided
               once — when the download is created — and never re-derived. For an
-              *arr app that is the RPC path the request arrived on. For a browser
-              grab it is the profile that lists the page's site. Nothing else
-              selects an owner: the category names the staging subfolder and
-              never picks or vetoes a profile, and the client's User-Agent
-              selects nothing at all.
+              *arr app that is the profile the request named: the RPC path it
+              arrived on, or the app's own <code>User-Agent</code>. For a browser
+              grab it is the profile the caller picked, else the one claiming the
+              page's site, else the one set to take the sites nobody claims. The
+              category selects nothing: it names the staging subfolder and never
+              picks or vetoes a profile.
             </p>
             <p>
-              The shared <code>/transmission/rpc</code> endpoint serves exactly
-              one *arr profile, so a single-profile install needs no URL Base
-              change. Add a second and that endpoint refuses every add, listing
-              and removal, naming the RPC path each profile should use instead —
-              including the profile still sitting on the shared path, which needs
-              one of its own. <code>session-get</code> still answers, because
-              that is the call an *arr uses to test the connection.
+              Every *arr can share the <code>/transmission/rpc</code> endpoint
+              with no URL Base change. Sonarr, Radarr, Lidarr, Readarr and
+              Prowlarr each put their own name in the
+              <code>User-Agent</code> — <code>Sonarr/4.0.19.2932 (linux x64)</code>
+              — and putiorr matches the part before the slash against each
+              profile's slug, name and app preset. The header routes the request
+              and nothing else; it never moves an existing download between
+              profiles.
             </p>
             <p>
-              One put.io transfer belongs to one download. put.io de-duplicates,
-              so a second profile grabbing a release the first already owns is
-              refused by name rather than sharing it.
+              A distinct RPC path is the override for what the name cannot
+              settle: two Sonarr instances, or a client that does not name
+              itself. That path always wins over the header. A request neither
+              resolves is refused for <code>torrent-add</code> and
+              <code>torrent-remove</code>, naming the RPC path each profile
+              should use instead — including the profile still sitting on the
+              shared path, which needs one of its own.
+              <code>session-get</code> and <code>torrent-get</code> always
+              answer: the first is the call an *arr uses to test the connection,
+              the second is the queue poll that drives completed-download
+              import, and an unresolved one lists every download rather than
+              failing.
+            </p>
+            <p>
+              One put.io transfer belongs to one download, keyed on put.io's own
+              transfer id. put.io de-duplicates, so a second profile grabbing a
+              release the first already owns gets that same transfer back, and
+              putiorr refuses the second add by name rather than letting two
+              profiles share one download.
             </p>
             <div class="doc-table-wrap">
               <table class="doc-table">
@@ -145,13 +163,14 @@
             <p>
               A disabled profile <strong>accepts no new work</strong>. It is a
               refusal, never a disappearance: it still holds its RPC path, still
-              claims its browser sites, and is still counted when the shared
-              endpoint decides whether it is ambiguous. Only the doors that
-              create work ask — <code>torrent-add</code>, <code>/api/grab</code>,
-              and the adoption of a put.io transfer putiorr did not create — and
-              each refuses with one sentence naming the profile. The downloads
-              already queued keep downloading and stay listable, importable, and
-              removable.
+              answers to its own name on the shared endpoint, still claims its
+              browser sites and the catch-all if it holds that, and is still
+              counted when the shared endpoint decides whether it is ambiguous.
+              Only the doors that create work ask — <code>torrent-add</code>,
+              <code>/api/grab</code>, and the adoption of a put.io transfer
+              putiorr did not create — and each refuses with one sentence naming
+              the profile. The downloads already queued keep downloading and
+              stay listable, importable, and removable.
             </p>
             <h3>Deleting a profile</h3>
             <p>
@@ -324,7 +343,7 @@ Lidarr URL: http://lidarr:8686</code></pre>
                   </tr>
                   <tr>
                     <td>Browser sites</td>
-                    <td>Comma-separated sites whose grabs land here, such as <code>x.example, z.example</code>. Subdomains match automatically, so <code>x.example</code> also covers <code>dl.x.example</code>.</td>
+                    <td>Comma-separated sites whose grabs land here, such as <code>x.example, z.example</code>. A plain entry matches that host and nothing under it; put <code>*.</code> in front — <code>*.x.example</code> — to match it and every subdomain of it, at any depth. The star is only ever the first thing in an entry.</td>
                   </tr>
                   <tr>
                     <td>Take grabs from any site no other profile claims</td>
@@ -335,32 +354,47 @@ Lidarr URL: http://lidarr:8686</code></pre>
             </div>
             <p>
               putiorr resolves every grab itself, and nothing in the extension
-              takes part in that decision. A click on a listed site goes to the
-              profile that lists it; a click anywhere else goes to the profile
-              that takes the unlisted sites, or is refused when no profile does.
-              A grab aimed at a profile that is not a Putiorr Grab profile is
-              refused by name. A grab profile has no Transmission RPC endpoint at
-              all — nothing connects to one as a download client — so
-              <code>/api/grab</code> is the only way in.
+              takes part in that decision. It answers in a fixed order: the
+              profile picked by hand from the right-click menu, then the profile
+              claiming the page's host <strong>exactly</strong>, then the
+              profile with the most specific wildcard covering it — the longest
+              base wins, so <code>*.dl.x.example</code> beats
+              <code>*.x.example</code> — then the profile that takes the
+              unclaimed sites, and otherwise a refusal. Matching compares the
+              hostname alone; scheme, port, and path are stripped first. A grab
+              aimed at a profile that is not a Putiorr Grab profile is refused by
+              name. A grab profile has no Transmission RPC endpoint at all —
+              nothing connects to one as a download client — so
+              <code>/api/grab</code> is the only way in, and it requires the
+              <code>X-Putiorr-Grab</code> header.
+            </p>
+            <p class="doc-note">
+              Two profiles may not hold the <em>same</em> entry, and that save is
+              refused naming the one that already has it. Coverage that merely
+              overlaps is intended: <code>dl.x.example</code> on one profile and
+              <code>*.x.example</code> on another sends that one host to the
+              first and the rest of the domain to the second, which is what the
+              order above is for.
             </p>
             <p>
               The extension's toolbar icon opens a popup about the page in the
               current tab. It names that page's site and says which profile a
-              grab from it would land in — the profile that lists it, the profile
-              that takes the sites nobody lists, or nobody at all — and, when no
-              profile lists it, offers to claim it for one of them. What it
-              stores is the page's hostname exactly as the popup shows it,
-              <code>www.</code> and all; it never shortens a host to the
-              registrable domain behind it, because the rule that would turn
+              grab from it would land in — the profile that claims it, the
+              profile that takes the sites nobody claims, or nobody at all — and,
+              when no profile claims it, offers to claim it for one of them. The
+              site it stores sits in an editable field, pre-filled with the
+              page's hostname exactly as it is, <code>www.</code> and all, and
+              the popup says to start it with <code>*.</code> to take the
+              subdomains too. Nothing here shortens a host to the registrable
+              domain behind it: neither putiorr nor the extension carries a
+              public-suffix list, and the rule that would turn
               <code>www.x.example</code> into <code>x.example</code> would also
-              turn <code>x.co.uk</code> into <code>co.uk</code>. Subdomain
-              matching then covers whatever sits under what was stored.
+              turn <code>x.co.uk</code> into <code>co.uk</code>.
             </p>
             <p>
               A site another profile already claims is not offered a second time:
-              the popup names that profile and stops. Listing one site on two
-              profiles changes nothing — resolution stops at the first profile
-              that matches — and moving it is two profiles changing at once,
+              the popup names that profile and stops. Moving a site is two
+              profiles changing at once, from a popup that shows one of them,
               which belongs on the profiles themselves. The popup writes through
               <code>POST /api/profiles/&lt;id&gt;/browser-sites</code>, which
               appends one site to one Putiorr Grab profile, normalizes it exactly
