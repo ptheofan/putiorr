@@ -834,6 +834,17 @@ test('takeOverCatchAll moves the fallback from the profile that held it', () => 
     });
     assert.deepEqual(third.catch_all_taken_from, { id: second.id, name: 'MUSIC' });
     assert.deepEqual(catchAllHolderIds(store), [third.id]);
+
+    // Both key styles, like every other field the seed paths write:
+    // PUTIORR_PROFILES_JSON goes straight into the store without passing the
+    // API, and it can hand the role over too.
+    const fourth = seedGrabProfile(store, 'shows', {
+      browser_catch_all: '1',
+      take_over_catch_all: 'true',
+      take_over_catch_all_from: String(third.id),
+    });
+    assert.deepEqual(fourth.catchAllTakenFrom, { id: third.id, name: 'BOOKS' });
+    assert.deepEqual(catchAllHolderIds(store), [fourth.id]);
   } finally {
     store.close();
   }
