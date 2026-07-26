@@ -9,7 +9,13 @@
 
   const bypass = new WeakSet();
   const inFlight = new Set();
+  // Right-click grabs run in the service worker, which sends the page an
+  // acknowledgement and then its answer; the id ties the two together so the
+  // second resolves the first in place instead of stacking on top of it.
+  const menuFeedback = new Map();
   let lib;
+  let toastLib;
+  let surface;
   let autoCapture = true;
 
   // Until the helpers land, clicks fall through to the browser untouched. A
@@ -22,6 +28,58 @@
     .catch((error) => {
       console.warn('[putiorr] link helpers failed to load, capture is off on this page:', error);
     });
+
+  // Imported separately from the helpers above, so that feedback failing to
+  // load costs the page its toasts and not its capture. The notification the
+  // service worker sends is unaffected either way.
+  import(chrome.runtime.getURL('lib/toast.js'))
+    .then((module) => {
+      toastLib = module;
+      surface = module.createFeedbackSurface(document);
+    })
+    .catch((error) => {
+      console.warn('[putiorr] in-page feedback failed to load, grabs report by notification only:', error);
+    });
+
+  // Everything below is decoration, and decoration must never speak up in the
+  // click handler. Its catch means "the grab never left the page" and answers by
+  // refiring the click; a throw from a toast landing there would turn one
+  // successful grab into a second, duplicate download. So each of these
+  // swallows its own failure and hands back nothing rather than throwing.
+  function showFeedback(state) {
+    try {
+      return surface?.show(state) ?? null;
+    } catch (error) {
+      console.warn('[putiorr] could not draw the in-page feedback:', error);
+      return null;
+    }
+  }
+
+  function acknowledge() {
+    return toastLib ? showFeedback(toastLib.pendingFeedback()) : null;
+  }
+
+  function settleFeedback(handle, result) {
+    if (!toastLib) return;
+    const state = toastLib.feedbackFor(result);
+    if (!handle) {
+      showFeedback(state);
+      return;
+    }
+    try {
+      handle.update(state);
+    } catch (error) {
+      console.warn('[putiorr] could not update the in-page feedback:', error);
+    }
+  }
+
+  function withdrawFeedback(handle) {
+    try {
+      handle?.dismiss();
+    } catch (error) {
+      console.warn('[putiorr] could not remove the in-page feedback:', error);
+    }
+  }
 
   // The one storage key this script reads, spelled out rather than imported from
   // lib/settings.js: a content script can only import web-accessible resources,
@@ -156,21 +214,32 @@
     // download the very file the pending capture is already handling.
     if (inFlight.has(anchor)) return;
     inFlight.add(anchor);
+    // Outside the async block below, and outside its try, on purpose: this is
+    // the one call that says "the click landed", it has to happen before any
+    // await for that to be true, and its structural distance from the catch is
+    // what keeps a failure to draw out of the refire path.
+    const feedback = acknowledge();
     (async () => {
       try {
         const payload = magnet
           ? { kind: 'grab', magnet, pageUrl: window.location.href }
           : { kind: 'grab', ...(await fetchTorrent(href)), pageUrl: window.location.href };
-        await chrome.runtime.sendMessage(payload);
+        const result = await chrome.runtime.sendMessage(payload);
+        settleFeedback(feedback, result);
       } catch (error) {
+        // The click is about to be replayed, so the browser is going to do what
+        // it would have done unaided; leaving the acknowledgement up would
+        // claim a grab that never happened.
+        withdrawFeedback(feedback);
         // The grab never reached putiorr: the .torrent fetch failed or timed
         // out, or an extension reload orphaned this content script and
         // sendMessage has nothing left to talk to. Refire the click so the
         // browser does what it would have without the extension — download the
         // .torrent, hand a magnet: href to the OS protocol handler, or follow a
-        // handler link to the page it points at. A grab that
-        // did reach putiorr and failed there resolves normally and was already
-        // reported by the service worker, so it must never land here.
+        // handler link to the page it points at. A grab that did reach putiorr
+        // and failed there resolves normally, and is reported by the toast
+        // above and by the service worker's notification, so it must never land
+        // here — and neither may a toast that could not be drawn.
         console.warn('[putiorr] capture failed, falling back to the browser:', error);
         refire(anchor);
       } finally {
@@ -179,7 +248,30 @@
     })();
   }, true);
 
+  // A right-click grab happens entirely in the service worker, so the page only
+  // hears about it if the worker says so. The message arrives twice: once
+  // without a result to acknowledge the pick, once with it. An answer whose
+  // acknowledgement was never seen — a page that navigated in between, a
+  // content script that had not built its surface yet — still shows up, because
+  // the answer is the half that matters.
+  function applyMenuFeedback({ id, result }) {
+    if (result === undefined) {
+      const handle = acknowledge();
+      if (handle) menuFeedback.set(id, handle);
+      return;
+    }
+    settleFeedback(menuFeedback.get(id) ?? null, result);
+    menuFeedback.delete(id);
+  }
+
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.kind === 'grab-feedback') {
+      applyMenuFeedback(message);
+      // Answered on the spot: the worker awaits this, and a port left to close
+      // on its own would reject there and be reported as a failed grab.
+      sendResponse({ ok: true });
+      return undefined;
+    }
     if (message?.kind !== 'fetch-link') return undefined;
     fetchTorrent(message.url)
       .then((result) => sendResponse({ ok: true, ...result }))

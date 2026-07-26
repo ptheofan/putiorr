@@ -21,8 +21,13 @@ const HANDLER_URL = 'https://put.io/default/magnet?url=magnet:?xt=urn:btih:86B9A
 
 let contentLoad = 0;
 
+// Captured before the harness swaps in a recording setTimeout below: the toast
+// lifetimes are 6s and 20s, and real timers for those would hold the test
+// process open long after the assertions are done.
+const realSetTimeout = globalThis.setTimeout;
+
 function wait(ms = 0) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  return new Promise((resolve) => realSetTimeout(resolve, ms));
 }
 
 async function settle(ms = 20) {
@@ -65,7 +70,85 @@ class FakeAnchor extends FakeElement {
   }
 }
 
-function createHarness({ sync = {}, fetch: fetchStub, sendMessage } = {}) {
+// Stand-in for the nodes lib/toast.js builds. `broken` is shared with the
+// harness so a test can take the DOM away mid-grab, which is the one failure
+// that must never reach the click handler's fallback.
+class FakeNode {
+  constructor(tag, state) {
+    this.tagName = String(tag).toUpperCase();
+    this.state = state;
+    this.id = '';
+    this.children = [];
+    this.parent = null;
+    this.attributes = {};
+    this.classes = new Set();
+    this.listeners = {};
+    this.isConnected = false;
+    this.shadow = null;
+    this.text = '';
+  }
+
+  get classList() {
+    return {
+      add: (name) => this.classes.add(name),
+      remove: (name) => this.classes.delete(name),
+    };
+  }
+
+  set textContent(value) {
+    if (this.state.broken) throw new Error('the page took the DOM away');
+    this.text = String(value);
+  }
+
+  get textContent() {
+    return this.children.length ? this.children.map((child) => child.textContent).join('') : this.text;
+  }
+
+  connect(state) {
+    this.isConnected = state;
+    for (const child of this.children) child.connect(state);
+    this.shadow?.connect(state);
+  }
+
+  appendChild(child) {
+    child.parent = this;
+    this.children.push(child);
+    child.connect(this.isConnected);
+    return child;
+  }
+
+  remove() {
+    if (this.parent) this.parent.children = this.parent.children.filter((node) => node !== this);
+    this.parent = null;
+    this.connect(false);
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value);
+  }
+
+  addEventListener(type, fn) {
+    (this.listeners[type] ??= []).push(fn);
+  }
+
+  attachShadow({ mode }) {
+    this.shadow = new FakeNode('#shadow-root', this.state);
+    this.shadow.mode = mode;
+    this.shadow.connect(this.isConnected);
+    return this.shadow;
+  }
+}
+
+function findByClass(node, name) {
+  if (node.classes.has(name)) return node;
+  for (const child of node.children) {
+    const hit = findByClass(child, name);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function createHarness({ sync = {}, fetch: fetchStub, sendMessage, broken = false } = {}) {
   const sent = [];
   const warnings = [];
   const listeners = {};
@@ -118,10 +201,19 @@ function createHarness({ sync = {}, fetch: fetchStub, sendMessage } = {}) {
 
   const anchor = (href) => new FakeAnchor(href, (target, overrides) => dispatch(target, overrides));
 
+  const dom = { broken };
+  const documentElement = new FakeNode('html', dom);
+  documentElement.isConnected = true;
+
   globalThis.chrome = chrome;
   globalThis.Element = FakeElement;
   globalThis.window = { location: { href: PAGE_URL } };
   globalThis.document = {
+    documentElement,
+    createElement: (tag) => {
+      if (dom.broken) throw new Error('the page replaced document.createElement');
+      return new FakeNode(tag, dom);
+    },
     addEventListener: (type, fn) => {
       if (type === 'click') listeners.click = fn;
     },
@@ -129,11 +221,46 @@ function createHarness({ sync = {}, fetch: fetchStub, sendMessage } = {}) {
   globalThis.fetch = fetchStub ?? (async () => {
     throw new Error('fetch not stubbed');
   });
+  // The toast lifetimes are 6s and 20s; recording them instead of scheduling
+  // them keeps the suite from waiting on either, and makes them assertable.
+  const timers = [];
+  globalThis.setTimeout = (fn, ms) => {
+    timers.push({ fn, ms });
+    return timers.length;
+  };
+  globalThis.clearTimeout = (id) => {
+    if (timers[id - 1]) timers[id - 1].cleared = true;
+  };
   // The fallback paths are supposed to warn; capturing keeps the expected
   // noise out of the suite output and makes it assertable.
   globalThis.console = { ...console, warn: (...args) => warnings.push(args.map(String).join(' ')) };
 
-  return { sent, warnings, listeners, events, anchor, dispatch };
+  // What the page actually shows. The feedback lives in a closed shadow root,
+  // which the stand-in keeps reachable so the tests can read it.
+  const toasts = () => {
+    const host = documentElement.children.find((node) => node.id === 'putiorr-grab-feedback');
+    const stack = host?.shadow ? findByClass(host.shadow, 'stack') : null;
+    return (stack?.children ?? []).map((toast) => ({
+      tone: [...toast.classes].find((name) => name !== 'toast'),
+      title: findByClass(toast, 'title').textContent,
+      detail: findByClass(toast, 'detail').textContent,
+    }));
+  };
+
+  // The lifetime each visible toast is holding, newest last.
+  const lifetimes = () => timers.filter((timer) => !timer.cleared).map((timer) => timer.ms);
+
+  return {
+    sent,
+    warnings,
+    listeners,
+    events,
+    anchor,
+    dispatch,
+    toasts,
+    lifetimes,
+    breakRendering: () => { dom.broken = true; },
+  };
 }
 
 function torrentResponse(bytes, headers = {}) {
@@ -658,6 +785,208 @@ test('a failed fetch-link answers with the error rather than hanging the menu cl
   });
 
   assert.deepEqual(response, { ok: false, error: 'network down' });
+});
+
+test('a captured click says so at once, then names the profile and the release', async () => {
+  // The click was swallowed by preventDefault and the round trip to putiorr
+  // takes a second or two; without an immediate acknowledgement the page looks
+  // exactly like a broken extension, which is what the project owner saw.
+  let answer;
+  const harness = await loadContent({
+    sendMessage: async (message) => {
+      harness.sent.push(message);
+      return new Promise((resolve) => { answer = resolve; });
+    },
+  });
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc&dn=Example');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{ tone: 'pending', title: 'Sending to putiorr…', detail: '' }]);
+
+  answer({ ok: true, profileName: 'Movies', transferName: 'Example.Release.2024.1080p' });
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{
+    tone: 'success',
+    title: 'Downloading with Movies profile',
+    detail: 'Example.Release.2024.1080p',
+  }]);
+  assert.equal(anchor.clicks, 0, 'reporting the grab is not a reason to also download it');
+  assert.deepEqual(harness.warnings, []);
+});
+
+test('a .torrent click is acknowledged before the tracker has even answered', async () => {
+  // The in-page fetch is on the same click, and a private tracker is exactly
+  // the kind of server that takes its time about it.
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const harness = await loadContent({
+    fetch: async () => {
+      await pending;
+      return torrentResponse(new Uint8Array([0x64, 0x65]));
+    },
+  });
+
+  harness.dispatch(harness.anchor('https://tracker.test/dl/1234.torrent'));
+  await settle();
+
+  assert.deepEqual(harness.toasts().map((toast) => toast.tone), ['pending']);
+
+  release();
+  await settle();
+
+  assert.deepEqual(harness.toasts().map((toast) => toast.tone), ['success']);
+});
+
+test("a rejected grab shows putiorr's message verbatim, and outstays a success", async () => {
+  // That sentence is the entire remediation path, and it is already worded for
+  // it. Summarising it here would put a second copy of it on a surface that
+  // ships on Chrome's schedule, free to drift from the one putiorr sends.
+  const refusal = 'No Putiorr Grab profile claims tracker.test and none is set to take everything else;'
+    + ' tick "Take grabs from any site no other profile claims" on a profile in putiorr';
+  const harness = await loadContent({
+    sendMessage: async (message) => (message.magnet.includes('bad')
+      ? { ok: false, error: refusal }
+      : { ok: true, profileName: 'Movies', transferName: 'Fine' }),
+  });
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:bad');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{ tone: 'failure', title: `Failed — ${refusal}`, detail: '' }]);
+  // putiorr had the grab and refused it, so the browser must not be handed the
+  // link on top of a reported failure.
+  assert.equal(anchor.clicks, 0);
+  assert.deepEqual(harness.warnings, []);
+
+  harness.dispatch(harness.anchor('magnet:?xt=urn:btih:good'));
+  await settle();
+
+  const [failure, success] = harness.lifetimes();
+  assert.ok(failure > success, `a failure must linger longer than a success: ${failure} vs ${success}`);
+});
+
+test('grabs in quick succession stack rather than overwrite one another', async () => {
+  const harness = await loadContent({
+    sendMessage: async (message) => (message.magnet.includes('bad')
+      ? { ok: false, error: 'putiorr is unreachable at http://nas:9091' }
+      : { ok: true, profileName: 'Movies', transferName: 'One' }),
+  });
+
+  harness.dispatch(harness.anchor('magnet:?xt=urn:btih:good'));
+  harness.dispatch(harness.anchor('magnet:?xt=urn:btih:bad'));
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [
+    { tone: 'success', title: 'Downloading with Movies profile', detail: 'One' },
+    { tone: 'failure', title: 'Failed — putiorr is unreachable at http://nas:9091', detail: '' },
+  ]);
+});
+
+test('a grab that never reaches the worker takes its acknowledgement with it', async () => {
+  // The click is replayed here, so the browser is about to do what it would
+  // have done unaided. Leaving "Sending to putiorr…" on screen would claim a
+  // grab that never happened.
+  const harness = await loadContent({
+    sendMessage: async () => {
+      throw new Error('Extension context invalidated.');
+    },
+  });
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(anchor.clicks, 1, 'the magnet must still reach the OS protocol handler');
+  assert.deepEqual(harness.toasts(), []);
+});
+
+test('feedback that cannot be drawn at all does not become a second download', async () => {
+  // The click handler's catch means "the grab never left the page", and it
+  // answers by refiring the click. A toast is decoration; if a throw from it
+  // landed there, one successful grab would become two downloads.
+  const harness = await loadContent({ broken: true });
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(harness.sent.length, 1, 'the grab itself still goes through');
+  assert.equal(anchor.clicks, 0, 'a failure to draw is not a failure to grab');
+  assert.match(harness.warnings.join('\n'), /feedback/);
+});
+
+test('feedback that breaks between the click and the answer does not refire either', async () => {
+  // The riskier half: the surface built fine, the page tore it down while
+  // putiorr was thinking, and the throw lands inside the very try that decides
+  // whether to hand the link back to the browser.
+  let answer;
+  const harness = await loadContent({
+    sendMessage: async (message) => {
+      harness.sent.push(message);
+      return new Promise((resolve) => { answer = resolve; });
+    },
+  });
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc');
+  harness.dispatch(anchor);
+  await settle();
+  assert.deepEqual(harness.toasts().map((toast) => toast.tone), ['pending']);
+
+  harness.breakRendering();
+  answer({ ok: true, profileName: 'Movies', transferName: 'Example' });
+  await settle();
+
+  assert.equal(anchor.clicks, 0, 'the grab succeeded; the browser must not download it again');
+  assert.equal(harness.sent.length, 1);
+  assert.match(harness.warnings.join('\n'), /feedback/);
+});
+
+test('a right-click grab is reported on the page it came from', async () => {
+  // The menu grab runs entirely in the service worker, so the page only learns
+  // about it if the worker says so — and it is the same wait, on the same page.
+  const harness = await loadContent();
+
+  const held = harness.listeners.message({ kind: 'grab-feedback', id: 7 }, {}, () => {});
+  await settle();
+
+  assert.equal(held, undefined, 'nothing here is async, so the port must not be held');
+  assert.deepEqual(harness.toasts().map((toast) => toast.tone), ['pending']);
+
+  harness.listeners.message(
+    { kind: 'grab-feedback', id: 7, result: { ok: true, profileName: 'TV', transferName: 'Example.S01E01' } },
+    {},
+    () => {},
+  );
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{
+    tone: 'success',
+    title: 'Downloading with TV profile',
+    detail: 'Example.S01E01',
+  }]);
+});
+
+test('a right-click answer with no acknowledgement waiting still shows up', async () => {
+  // The pending message can be lost — a page that navigated between the two,
+  // or a worker that answered before the content script had the surface.
+  const harness = await loadContent();
+
+  harness.listeners.message(
+    { kind: 'grab-feedback', id: 9, result: { ok: false, error: 'Reload the page, then try again' } },
+    {},
+    () => {},
+  );
+  await settle();
+
+  assert.deepEqual(harness.toasts(), [{
+    tone: 'failure',
+    title: 'Failed — Reload the page, then try again',
+    detail: '',
+  }]);
 });
 
 test('unrelated runtime messages release the port instead of swallowing them', async () => {
