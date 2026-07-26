@@ -569,7 +569,7 @@ test('the staging collision notice names the folder and who is using it', () => 
 test('the profile deletion prompt states what each answer would do, in counts', () => {
   const preview = {
     profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
-    downloads: { total: 4, active: 3, removed: 1, filesOnDisk: 9, localBytes: 2048 },
+    downloads: { total: 4, active: 3, removed: 1, filesOnDisk: 9, localBytes: 2048, unreadableFolders: 0 },
     reassignTargets: [{ id: 1, name: 'Sonarr' }],
   };
 
@@ -604,14 +604,24 @@ test('the profile deletion prompt states what each answer would do, in counts', 
 
   const purged = profileDeletionOutcome(preview, { mode: 'delete', deleteRemote: true, deleteLocal: true });
   assert.match(purged, /cancels their 4 put\.io transfers/);
-  assert.match(purged, /deletes 9 downloaded files \(2\.0 KB\) from disk/);
+  // The count is the staging folders' own, so it says so: it includes the
+  // .part files and anything else in them, which rm(recursive) takes too.
+  assert.match(purged, /deletes everything in their staging folders — 9 files, 2\.0 KB/);
   assert.doesNotMatch(purged, /unattributed/);
+
+  // A folder it could not read is named rather than quietly left out of the
+  // total: silently under-reporting is the failure this count replaces.
+  const partlyBlind = profileDeletionOutcome(
+    { ...preview, downloads: { ...preview.downloads, unreadableFolders: 2 } },
+    { mode: 'delete', deleteLocal: true },
+  );
+  assert.match(partlyBlind, /2 more it could not read/);
 });
 
 test('the profile deletion prompt says plainly when there is nothing to decide', () => {
   const preview = {
     profile: { id: 3, name: 'Radarr', downloadAt: '/downloads' },
-    downloads: { total: 0, active: 0, removed: 0, filesOnDisk: 0, localBytes: 0 },
+    downloads: { total: 0, active: 0, removed: 0, filesOnDisk: 0, localBytes: 0, unreadableFolders: 0 },
     reassignTargets: [],
   };
 

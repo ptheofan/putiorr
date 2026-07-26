@@ -1,4 +1,4 @@
-import { rm, rmdir, stat } from 'node:fs/promises';
+import { readdir, rm, rmdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 const MAX_FOLDER_SEGMENT_BYTES = 255;
@@ -98,6 +98,40 @@ export function oversizedFolderSegment(value) {
   return downloadFolderSegments(value)
     .split(path.sep)
     .find((segment) => Buffer.byteLength(segment, 'utf8') > MAX_FOLDER_SEGMENT_BYTES) ?? '';
+}
+
+// What `deleteLocalData` would actually remove, measured rather than inferred.
+// The file rows are not that answer: they carry completed downloads only, so an
+// in-flight download reads as zero while its `.part` holds tens of gigabytes,
+// and nothing records a file the user dropped in beside it. Both go to
+// rm(recursive), so both are counted here.
+//
+// An unreadable folder is reported, never guessed at: a confirmation that
+// silently omits what it could not see is the failure this replaces.
+export async function measureDownloadFolder(root) {
+  const empty = { files: 0, bytes: 0, unreadable: false };
+  if (!root) return empty;
+  let entries;
+  try {
+    entries = await readdir(root, { withFileTypes: true, recursive: true });
+  } catch (error) {
+    // Nothing staged yet is a real answer; anything else is one we do not have.
+    if (error.code === 'ENOENT') return empty;
+    return { ...empty, unreadable: true };
+  }
+  let files = 0;
+  let bytes = 0;
+  let unreadable = false;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    files += 1;
+    try {
+      bytes += (await stat(path.join(entry.parentPath ?? root, entry.name))).size;
+    } catch {
+      unreadable = true;
+    }
+  }
+  return { files, bytes, unreadable };
 }
 
 export async function fileExistsWithSize(filePath, size) {

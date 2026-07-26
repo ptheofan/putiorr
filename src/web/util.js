@@ -378,9 +378,17 @@ export function profileDeletionOutcome(preview, choice = {}) {
   const remote = choice.deleteRemote
     ? `cancels ${total === 1 ? 'its' : 'their'} ${total === 1 ? 'put.io transfer' : `${total} put.io transfers`}`
     : 'leaves them on put.io';
+  // Named as the folders, not as the downloaded files: deleting is rm on the
+  // whole staging folder, so it takes the `.part` of anything still running and
+  // whatever else is in there — none of which putiorr has a row for. A count of
+  // completed file rows read as "0 downloaded files" for a download holding the
+  // entire release.
   const filesOnDisk = Number(preview?.downloads?.filesOnDisk ?? 0);
+  const unreadable = Number(preview?.downloads?.unreadableFolders ?? 0);
+  const blind = unreadable > 0 ? `, plus ${unreadable} more it could not read` : '';
   const local = choice.deleteLocal
-    ? `deletes ${pluralize(filesOnDisk, 'downloaded file')} (${formatBytes(preview?.downloads?.localBytes)}) from disk`
+    ? `deletes everything in ${total === 1 ? 'its staging folder' : 'their staging folders'}`
+      + ` — ${pluralize(filesOnDisk, 'file')}, ${formatBytes(preview?.downloads?.localBytes)}${blind}`
     : 'leaves the downloaded files on disk';
   // Kept on put.io, in a folder no RR profile owns any more, they stop being
   // adoptable. The dashboard says so on the next poll; the dialog says so

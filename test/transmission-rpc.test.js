@@ -3408,10 +3408,13 @@ test('the deletion preview counts what each option would touch', async (t) => {
     relative_path: 'owned.mkv',
     size: 400,
   });
-  harness.store.updateDownloadFile(
-    harness.store.listFilesForDownload(download.id)[0].id,
-    { downloaded_bytes: 400, status: 'complete' },
-  );
+  // deleteLocal is rm -rf on the staging folder, so the count has to be the
+  // folder's, not the file rows'. An in-flight download has no completed rows
+  // at all and can still be holding tens of gigabytes of .part.
+  const root = path.join(harness.config.targetDir, 'movies', 'Owned.Release');
+  await mkdir(path.join(root, 'extras'), { recursive: true });
+  await writeFile(path.join(root, 'owned.mkv.part'), 'x'.repeat(300));
+  await writeFile(path.join(root, 'extras', 'notes.nfo'), 'y'.repeat(100));
   const tombstoned = harness.store.upsertDownload({
     profile_id: profile.id,
     putio_transfer_id: 910,
@@ -3430,6 +3433,9 @@ test('the deletion preview counts what each option would touch', async (t) => {
   assert.equal(preview.body.downloads.total, 2);
   assert.equal(preview.body.downloads.active, 1);
   assert.equal(preview.body.downloads.removed, 1);
+  // The .part nothing has recorded and the file the user dropped in beside it
+  // both go, so both are counted.
+  assert.equal(preview.body.downloads.filesOnDisk, 2);
   assert.equal(preview.body.downloads.localBytes, 400);
   // Only profiles staging into the same folder can take these downloads: the
   // files do not move, so anything else would strand them.

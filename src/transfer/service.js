@@ -7,6 +7,7 @@ import {
   downloadFolderSegments,
   downloadLocalRoot,
   extractCategory,
+  measureDownloadFolder,
   oversizedFolderSegment,
   stagingFolderName,
 } from '../download/paths.js';
@@ -1194,16 +1195,29 @@ export class TransferService {
   // whatever the dashboard happens to be showing: tombstoned downloads are not
   // in the working list, still hold their put.io transfer and their files, and
   // still block the profile's deletion.
-  profileDeletionPreview(profileId) {
+  async profileDeletionPreview(profileId) {
     const profile = this.store.findProfileById(profileId);
     if (!profile) throw new Error('Profile not found');
     const downloads = this.store.listDownloadsForProfile(profile.id);
     let localBytes = 0;
     let filesOnDisk = 0;
+    let unreadableFolders = 0;
     for (const download of downloads) {
-      const stats = this.store.getDownloadFileStats(download.id);
-      localBytes += Number(stats.downloaded_size ?? 0);
-      filesOnDisk += Number(stats.completed_files ?? 0);
+      // Measured off the disk, because that is what rm(recursive) will take.
+      // The file rows count completed downloads only: an in-flight one reads
+      // as zero while its `.part` holds the whole release, and nothing records
+      // a file the user put there. A folder whose name cannot be resolved has
+      // nothing staged under it yet.
+      let root;
+      try {
+        root = downloadLocalRoot(profile, download);
+      } catch {
+        root = undefined;
+      }
+      const measured = await measureDownloadFolder(root);
+      localBytes += measured.bytes;
+      filesOnDisk += measured.files;
+      if (measured.unreadable) unreadableFolders += 1;
     }
     return {
       profile: { id: profile.id, name: profile.name, slug: profile.slug, downloadAt: profile.download_at },
@@ -1213,6 +1227,7 @@ export class TransferService {
         removed: downloads.filter((download) => download.removed_at).length,
         filesOnDisk,
         localBytes,
+        unreadableFolders,
       },
       reassignTargets: this.reassignTargetsFor(profile).map((target) => ({
         id: target.id,

@@ -784,7 +784,12 @@ export class TransmissionRpcServer {
       // hold files, and still block the delete.
       const profilePreviewMatch = requestPath.match(/^\/api\/profiles\/(\d+)\/deletion-preview$/);
       if (profilePreviewMatch && method === 'GET') {
-        jsonResponse(res, 200, this.service.profileDeletionPreview(Number(profilePreviewMatch[1])), this.sessionId);
+        jsonResponse(
+          res,
+          200,
+          await this.service.profileDeletionPreview(Number(profilePreviewMatch[1])),
+          this.sessionId,
+        );
         return;
       }
 
