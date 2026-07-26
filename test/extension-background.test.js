@@ -217,7 +217,7 @@ test('credentials are sent as UTF-8 basic auth rather than Latin-1', async () =>
     );
   });
 
-  assert.deepEqual(response, { ok: true });
+  assert.deepEqual(response, { ok: true, profileName: 'Movies', transferName: 'Example' });
   assert.equal(request.url, 'http://putiorr.test/api/grab');
   // btoa on the raw string would yield the Latin-1 "dXNlcjpw5HNzd/ZyZA==".
   assert.equal(request.init.headers.Authorization, 'Basic dXNlcjpww6Rzc3fDtnJk');
@@ -387,6 +387,53 @@ test('the success notification names the profile putiorr actually used', async (
 
   assert.equal(harness.notifications[0].title, 'Sent to putiorr → Books');
   assert.equal(harness.notifications[0].message, 'Example');
+});
+
+test('a grab answers with the profile and the release, not just that it worked', async () => {
+  // The notification is not the only surface any more: the page draws
+  // "Downloading with <profile> profile" and names the release under it. Both
+  // are already built here for the notification, so discarding them would leave
+  // the content script with nothing to say and no way to find out.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 2, name: 'Movies' }] },
+    fetch: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, profile: { id: 9, name: 'Books' }, transfer: { name: 'Example.Release.2024' } }),
+    }),
+  });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  // The same name the notification uses: the one the response gave, not the
+  // cached pick.
+  assert.deepEqual(response, { ok: true, profileName: 'Books', transferName: 'Example.Release.2024' });
+  assert.equal(harness.notifications[0].title, 'Sent to putiorr → Books');
+});
+
+test('a putiorr too old to name the profile answers with no name rather than a guess', async () => {
+  // Which profile takes an unclaimed site is resolved on the server, from a
+  // list this side does not hold; the page says "Downloading with putiorr".
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 2, name: 'Movies' }] },
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ ok: true, transfer: { name: 'Example' } }) }),
+  });
+
+  const response = await new Promise((resolve) => {
+    harness.listeners.message(
+      { kind: 'grab', magnet: 'magnet:?xt=urn:btih:abc', pageUrl: 'https://tracker.x.example/page' },
+      { id: 'putiorr-extension-id' },
+      resolve,
+    );
+  });
+
+  assert.deepEqual(response, { ok: true, profileName: '', transferName: 'Example' });
 });
 
 test('the response outranks the cached name even for an explicit pick', async () => {
@@ -573,7 +620,7 @@ test('credentials outside Latin-1 are encodable rather than fatal', async () => 
   });
 
   // A raw btoa would throw a DOMException here and be misreported as unreachable.
-  assert.deepEqual(response, { ok: true });
+  assert.deepEqual(response, { ok: true, profileName: 'Movies', transferName: '' });
   assert.equal(request.init.headers.Authorization, `Basic ${Buffer.from('user:pass😀', 'utf8').toString('base64')}`);
 });
 

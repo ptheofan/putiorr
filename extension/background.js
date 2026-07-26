@@ -139,8 +139,12 @@ async function handleGrab(payload) {
       ? settings.profiles.find((profile) => profile.id === Number(explicitId))?.name ?? `profile #${explicitId}`
       : '';
     const profileName = result.profile?.name ?? cachedName;
-    notify(profileName ? `Sent to putiorr → ${profileName}` : 'Sent to putiorr', result.transfer?.name ?? '');
-    return { ok: true };
+    const transferName = result.transfer?.name ?? '';
+    notify(profileName ? `Sent to putiorr → ${profileName}` : 'Sent to putiorr', transferName);
+    // Both ride back to the caller rather than dying with the notification: the
+    // page draws the same two facts, and the notification is not a channel that
+    // can be relied on — macOS drops it under Focus, silently.
+    return { ok: true, profileName, transferName };
   } catch (error) {
     // The one id a grab can still carry comes from the right-click menu, which
     // is built from the last Save — so a profile deleted in putiorr stays on it
