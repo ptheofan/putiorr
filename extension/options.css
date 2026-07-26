@@ -6,7 +6,7 @@
      src/web/styles/01-tokens.css  — the violet/ink token set
      src/web/styles/02-base.css    — page reset and shell
      src/web/styles/03-panels.css  — card surfaces
-     src/web/styles/04-forms.css   — labels, inputs, selects, buttons
+     src/web/styles/04-forms.css   — labels, inputs, buttons
      src/web/styles/09-theme-dark.css — the dark surface overrides
    A copy rather than a reference: an extension page cannot load anything out
    of src/web at runtime, and only the rules this page uses are kept. The
@@ -76,8 +76,7 @@ body {
 }
 
 button,
-input,
-select {
+input {
   font: inherit;
 }
 
@@ -176,8 +175,7 @@ label {
   font-weight: 700;
 }
 
-input,
-select {
+input {
   width: 100%;
   min-height: 38px;
   border: 1px solid var(--line);
@@ -191,8 +189,7 @@ input::placeholder {
   color: var(--muted);
 }
 
-input:focus,
-select:focus {
+input:focus {
   outline: 2px solid var(--focus-ring);
   border-color: var(--accent);
 }

@@ -890,3 +890,12 @@ test('every token the stylesheet uses is one it also defines', () => {
   assert.deepEqual([...used].filter((name) => !defined.has(name)), [], 'used but never defined');
   assert.deepEqual([...defined].filter((name) => !used.has(name)), [], 'defined but never used');
 });
+
+test('the stylesheet styles no control the page no longer has', () => {
+  // The dropdown is gone, and a rule for it would be theming for markup that
+  // does not exist — the same dead weight the token check above refuses.
+  const css = readFileSync(OPTIONS_CSS, 'utf8');
+  const html = readFileSync(OPTIONS_HTML, 'utf8');
+  assert.doesNotMatch(html, /<select/);
+  assert.doesNotMatch(css, /\bselect\b/);
+});
