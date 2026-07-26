@@ -45,8 +45,17 @@ test('what the popup would store is the host itself, normalized as putiorr store
   assert.equal(storableSite('[::1]'), '[::1]');
 });
 
+test('what the popup would store keeps a leading wildcard the user typed', () => {
+  // The claim field is editable, so the popup has to be able to say what a
+  // wildcard entry normalizes to before it is sent — the star is not part of
+  // the host, and everything under it is rewritten as any host would be.
+  assert.equal(storableSite('*.x.example'), '*.x.example');
+  assert.equal(storableSite(' *.X.Example. '), '*.x.example');
+  assert.equal(storableSite('*.bücher.example'), '*.xn--bcher-kva.example');
+});
+
 test('a host putiorr could never match is refused before the request is made', () => {
-  for (const value of ['*.x.example', 'x..example', '-x.example', '', '   ', undefined, null]) {
+  for (const value of ['x..example', '-x.example', '*', 'x.*.example', '*.', '*x.example', '', '   ', undefined, null]) {
     assert.equal(storableSite(value), '', String(value));
   }
 });
@@ -257,6 +266,7 @@ const POPUP_IDS = [
   'routing',
   'picker',
   'profileChoices',
+  'siteInput',
   'storeNote',
   'claim',
   'openOptions',
@@ -321,7 +331,7 @@ function createPopupHarness({
   fetch: fetchStub,
 } = {}) {
   const fields = {};
-  for (const id of POPUP_IDS) fields[id] = popupElement('div');
+  for (const id of POPUP_IDS) fields[id] = popupElement(id === 'siteInput' ? 'input' : 'div');
   const opened = [];
   const requests = [];
 
@@ -570,9 +580,12 @@ test('a site nobody claims and nobody catches says the grab would be refused', a
   assert.equal(harness.pickerShown(), true);
 });
 
-test('what will be stored is on screen before the click, not after it', async () => {
-  // The exact host, including the "www." the user is looking at: nothing here
-  // shortens it to a registrable domain, so nothing may imply that it does.
+test('what will be stored is in an editable field, pre-filled with the exact host', async () => {
+  // The exact host, including the "www." the user is looking at: the extension
+  // carries no public-suffix list, so it must never guess that "www.x.example"
+  // meant "x.example" — trimming that would trim "x.co.uk" to "co.uk" too. The
+  // field is how the user says what they meant, and it shows them the string
+  // before the click rather than after it.
   const harness = await loadPopup({
     sync: { baseUrl: 'http://nas:9091' },
     tabs: [{ url: 'https://www.x.example/torrents' }],
@@ -580,8 +593,60 @@ test('what will be stored is on screen before the click, not after it', async ()
   });
 
   assert.equal(harness.fields.host.textContent, 'www.x.example');
-  assert.match(harness.fields.storeNote.textContent, /www\.x\.example/);
-  assert.equal(harness.fields.claim.textContent, 'Claim www.x.example');
+  assert.equal(harness.fields.siteInput.value, 'www.x.example');
+  // The one thing the field cannot say for itself: what the star does.
+  assert.match(harness.fields.storeNote.textContent, /\*\./);
+  assert.match(harness.fields.storeNote.textContent, /subdomain/i);
+});
+
+test('claiming posts what the field holds, not the host the popup opened on', async () => {
+  // The whole point of the field: a user on dl.x.example claiming the domain.
+  const harness = await loadPopup({
+    sync: { baseUrl: 'http://nas:9091' },
+    tabs: [{ url: 'https://dl.x.example/torrents' }],
+    fetch: async (url) => (url.includes('browser-sites')
+      ? {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          profile: { id: 4, name: 'Movies' },
+          browser_domains: ['*.x.example'],
+          added: '*.x.example',
+        }),
+      }
+      : { ok: true, status: 200, json: async () => [grabProfile(4, 'Movies')] }),
+  });
+
+  harness.fields.siteInput.value = ' *.X.Example ';
+  harness.fields.claim.click();
+  await settle();
+
+  // Normalized before it is sent, so the confirmation names what was stored.
+  assert.deepEqual(JSON.parse(harness.requests.at(-1).options.body), { host: '*.x.example' });
+  assert.match(harness.status(), /Movies now claims \*\.x\.example/);
+  assert.equal(harness.tone(), 'ok');
+});
+
+test('a field putiorr could never match is refused here rather than sent', async () => {
+  const harness = await loadPopup({
+    sync: { baseUrl: 'http://nas:9091' },
+    fetch: answering([grabProfile(4, 'Movies')]),
+  });
+  const before = harness.requests.length;
+
+  for (const value of ['', '   ', 'x.*.example', 'x..example']) {
+    harness.fields.siteInput.value = value;
+    harness.fields.claim.click();
+    await settle();
+
+    assert.equal(harness.requests.length, before, value);
+    assert.equal(harness.tone(), 'error', value);
+    assert.match(harness.status(), /site to claim/i, value);
+    // Refused, not disabled: the fix is to type something else.
+    assert.equal(harness.fields.claim.disabled, false, value);
+    assert.equal(harness.pickerShown(), true, value);
+  }
 });
 
 test('claiming posts one site to the picked profile, with the anti-CSRF header', async () => {

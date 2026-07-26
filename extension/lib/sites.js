@@ -61,15 +61,17 @@ export function hostFromTabUrl(url) {
   return normalizeSite(parsed.hostname);
 }
 
-// What putiorr would store for this host — the host itself, and never a guess
+// What putiorr would store for this entry — the host itself, and never a guess
 // at the registrable domain behind it. An extension carries no public-suffix
 // list, so the only rule available for shortening "www.x.example" to
 // "x.example" would shorten "x.co.uk" to "co.uk" and claim a whole TLD with
-// it. '' for a host putiorr could not match, so the popup can refuse before it
-// asks the server to.
+// it. Which is why the popup's field is editable: a leading "*." is how the
+// user asks for the whole domain, and it survives here spelled as putiorr
+// stores it. '' for an entry putiorr could not match, so the popup can refuse
+// before it asks the server to.
 export function storableSite(host) {
-  const site = normalizeSite(host);
-  return site && MATCHABLE_DOMAIN.test(site) ? site : '';
+  const entry = storedEntry(host);
+  return entry && MATCHABLE_DOMAIN.test(entry.base) ? entry.domain : '';
 }
 
 // Rows come off the network and may have been written by an older putiorr, so

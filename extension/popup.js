@@ -96,13 +96,16 @@ function renderChoices(profiles, preferredId) {
   el('profileChoices').replaceChildren(...page.choices.map((choice) => choice.row));
 }
 
+// The field is pre-filled with the page's host exactly as it is, and it is
+// editable because the alternative is guessing. An extension carries no
+// public-suffix list, so the only rule available for shortening "www.x.example"
+// to "x.example" would shorten "x.co.uk" to "co.uk" and claim a whole TLD with
+// it. The user types what they mean, and sees the string before the click.
 function showPicker(profiles, preferredId) {
   renderChoices(profiles, preferredId);
-  // What will be stored, before the click and not after it: the host as it is,
-  // never a guess at the registrable domain behind it.
-  el('storeNote').textContent = `Claiming stores ${page.site} on the profile you pick.`
-    + ' Subdomains of it match too.';
-  el('claim').textContent = `Claim ${page.site}`;
+  el('siteInput').value = page.site;
+  el('storeNote').textContent = 'Claimed as typed, for the profile you pick.'
+    + ' Start it with "*." — as in *.x.example — to include the subdomains too.';
   el('claim').disabled = false;
   el('picker').hidden = false;
 }
@@ -115,7 +118,7 @@ function tabLabel(tab) {
   return url ? url.slice(0, 80) : 'No page';
 }
 
-async function postClaim(profileId) {
+async function postClaim(profileId, site) {
   let endpoint;
   try {
     endpoint = new URL(`/api/profiles/${profileId}/browser-sites`, page.baseUrl);
@@ -136,7 +139,7 @@ async function postClaim(profileId) {
         // host to a profile and collect the grabs that followed.
         'X-Putiorr-Grab': '1',
       },
-      body: JSON.stringify({ host: page.site }),
+      body: JSON.stringify({ host: site }),
       signal: AbortSignal.timeout(CLAIM_TIMEOUT_MS),
     });
   } catch (error) {
@@ -168,13 +171,24 @@ async function claim() {
   const picked = page.choices.find((choice) => choice.input.checked) ?? page.choices[0];
   if (!picked) return;
 
+  // Read at click time, unlike everything else here: the field is the one thing
+  // on this page the user changes, so what it holds now is what they meant.
+  // Normalized before it is sent so the confirmation names what was stored, and
+  // refused here when putiorr could never match it — a round trip to be told
+  // that is a round trip that teaches nothing the popup did not already know.
+  const site = storableSite(el('siteInput').value);
+  if (!site) {
+    setStatus('Site to claim must be a hostname, optionally starting with "*."', 'error');
+    return;
+  }
+
   page.claiming = true;
   el('claim').disabled = true;
-  setStatus(`Claiming ${page.site} for ${picked.profile.name}…`);
+  setStatus(`Claiming ${site} for ${picked.profile.name}…`);
 
   let result;
   try {
-    result = await postClaim(picked.profile.id);
+    result = await postClaim(picked.profile.id, site);
   } catch (error) {
     setStatus(error.message, 'error');
     page.claiming = false;
@@ -187,13 +201,15 @@ async function claim() {
   // offering to do what was just done, so the picker goes away either way.
   const name = String(result.profile?.name ?? '').trim() || picked.profile.name;
   el('picker').hidden = true;
-  el('routing').textContent = `${name} claims this site; grabs from here go there.`;
+  el('routing').textContent = site === page.site
+    ? `${name} claims this site; grabs from here go there.`
+    : `${name} claims ${site}, which covers ${page.site}, so grabs from here go there.`;
   // putiorr's advice about what was just stored — a single-label site is a rule
   // over everything ending in it — is shown with the confirmation. Dropping it
   // would leave the confirmation looking complete when it is not.
   const warnings = Array.isArray(result.browser_domain_warnings) ? result.browser_domain_warnings : [];
   setStatus([
-    result.added ? `${name} now claims ${page.site}` : `${name} already claims ${page.site}`,
+    result.added ? `${name} now claims ${site}` : `${name} already claims ${site}`,
     ...warnings.map((warning) => String(warning ?? '')),
   ], 'ok');
 }
