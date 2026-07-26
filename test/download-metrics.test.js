@@ -745,6 +745,48 @@ test('deleting a download refuses a folder holding another download', async () =
   }
 });
 
+// Re-review RI1: the refusal has to come before put.io is touched. Resolving
+// the path early is not the same as asking who owns it early — the assertion
+// lived inside deleteLocalData, which runs after the remote delete, so a
+// refused deletion still cancelled the transfer and left a row with no put.io
+// backing behind it.
+test('a refused local delete never cancels the put.io transfer first', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const outer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 64,
+      putio_file_id: 65,
+      hash: 'outerremotehash',
+      name: 'Nested.Show',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 66,
+      putio_file_id: 67,
+      hash: 'innerremotehash',
+      name: 'Nested.Show/Extras',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    await mkdir(path.join(harness.config.targetDir, 'tv', 'Nested.Show', 'Extras'), { recursive: true });
+
+    await assert.rejects(
+      () => harness.service.deleteDownloadBucket(outer.id, { deleteRemote: true, deleteLocal: true }),
+      /2 downloads own it/,
+    );
+
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.ok(harness.store.findDownloadById(outer.id));
+  } finally {
+    harness.store.close();
+  }
+});
+
 function quarantineRow(store, overrides = {}) {
   const row = {
     putio_transfer_id: 4242,

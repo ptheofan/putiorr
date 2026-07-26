@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {
+  assertSoleOwnedDownloadRoot,
   deleteLocalData,
   deleteLocalFileData,
   downloadCategoryDir,
@@ -303,6 +304,15 @@ export class TransferService {
 
   ownershipCheck() {
     return { ownersOfPath: (localPath) => this.localPathOwners(localPath) };
+  }
+
+  // Asked before the first irreversible step of any delete, not at the last
+  // one. Resolving the path early is not the same as asking who owns it early:
+  // a delete that cancels the put.io transfer and only then finds the folder
+  // contested has destroyed the remote copy for a deletion it goes on to
+  // refuse, leaving a row nothing can complete.
+  assertDeletable(localPath) {
+    return assertSoleOwnedDownloadRoot(localPath, this.ownershipCheck());
   }
 
   // Where this download's files go: `<download_at>/<category>/<put.io name>`,
@@ -728,7 +738,7 @@ export class TransferService {
       // cancelling the put.io transfer leaves a row that fails the same way on
       // every retry. The row was found scoped to this profile, so this is that
       // profile.
-      const localTarget = deleteLocal ? this.requireStagingRoot(currentProfile, transfer) : undefined;
+      const localTarget = deleteLocal ? this.assertDeletable(this.requireStagingRoot(currentProfile, transfer)) : undefined;
 
       // One download owns its put.io transfer outright, so removing it always
       // removes the remote side too; there is no second profile left holding a
@@ -760,7 +770,7 @@ export class TransferService {
     // never be removed again: put.io 404s on the retry and the local half
     // throws before it gets there.
     const localTarget = deleteLocal
-      ? this.requireStagingRoot(this.requireDownloadOwner(transfer), transfer)
+      ? this.assertDeletable(this.requireStagingRoot(this.requireDownloadOwner(transfer), transfer))
       : undefined;
 
     const remoteDeleted = deleteRemote;
@@ -821,7 +831,7 @@ export class TransferService {
     // Same rule as the bucket delete: resolve the owner before the first
     // irreversible step, never after it.
     const downloadRoot = deleteLocal
-      ? this.requireStagingRoot(this.requireDownloadOwner(transfer), transfer)
+      ? this.assertDeletable(this.requireStagingRoot(this.requireDownloadOwner(transfer), transfer))
       : undefined;
 
     const remoteDeleted = deleteRemote;

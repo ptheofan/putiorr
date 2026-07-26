@@ -92,12 +92,12 @@ export async function fileExistsWithSize(filePath, size) {
 // quarantine — carries a path recorded years ago, and joining a name onto a
 // directory here would hide which of the two the refusal is about.
 export async function deleteLocalData(downloadRoot, { ownersOfPath } = {}) {
-  const localPath = requireSoleOwnedDownloadRoot(downloadRoot, ownersOfPath);
+  const localPath = assertSoleOwnedDownloadRoot(downloadRoot, { ownersOfPath });
   await rm(localPath, { recursive: true, force: true });
 }
 
 export async function deleteLocalFileData(downloadRoot, relativePath, { ownersOfPath } = {}) {
-  const transferRoot = requireSoleOwnedDownloadRoot(downloadRoot, ownersOfPath);
+  const transferRoot = assertSoleOwnedDownloadRoot(downloadRoot, { ownersOfPath });
   const localPath = resolveInside(transferRoot, relativePath);
   await rm(localPath, { force: true });
   await rm(`${localPath}.part`, { force: true });
@@ -110,7 +110,13 @@ export async function deleteLocalFileData(downloadRoot, relativePath, { ownersOf
 // belong to exactly one download? A caller that cannot say who owns the path
 // has not established that it is putiorr's to delete, so silence is refused
 // the same way a shared directory is.
-function requireSoleOwnedDownloadRoot(downloadRoot, ownersOfPath) {
+// Exported because the answer is needed before the first irreversible step of
+// a delete, not at the last one: a caller that cancels the put.io transfer and
+// only then finds the path contested has destroyed the remote copy for a
+// deletion it refuses to perform. The delete helpers still ask again — this is
+// the one function standing between a user's files and rm(recursive), and it
+// costs nothing to be sure twice.
+export function assertSoleOwnedDownloadRoot(downloadRoot, { ownersOfPath } = {}) {
   const resolved = String(downloadRoot ?? '');
   if (!path.isAbsolute(resolved)) {
     throw new Error(`refusing to delete ${resolved || '(nothing)'}: a download folder must be an absolute path`);
