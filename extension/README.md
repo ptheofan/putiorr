@@ -37,10 +37,12 @@ Which site grabs into which profile is a putiorr setting, kept on the profile
 itself — the extension holds no copy of it. In the putiorr dashboard, open a
 profile's setup wizard and set **App preset** to **Putiorr Grab**. The wizard
 then drops the RPC endpoint step — no *arr download client connects to a grab
-profile, so its path, host, port, and SSL are not asked for; putiorr reserves a
-path behind the scenes — and shows step **3. Browser grabs** instead.
-**Browser sites** there is a comma-separated list of the sites whose grabs land
-in that profile. Subdomains match automatically, so list the domain itself —
+profile, so its path, host, port, and SSL are not asked for, and no path is
+reserved for it either: a grab profile has no Transmission RPC endpoint at all,
+and `/api/grab` is the only way in — and shows step **3. Browser grabs**
+instead. **Browser sites** there is a comma-separated list of the sites whose
+grabs land in that profile. Subdomains match automatically, so list the domain
+itself —
 `x.example` also covers `dl.x.example`. Leave it empty to keep a profile out of
 browser grabs. Sites listed on any other preset are never consulted.
 
@@ -114,10 +116,9 @@ putiorr resolves this on every grab, in this order, and every path ends at a
 Putiorr Grab profile:
 
 1. The profile picked from the right-click menu, when the grab came from there.
-2. Otherwise the first enabled Putiorr Grab profile, in creation order, whose
-   **Browser sites** match the page's hostname exactly or as a suffix. Listing
-   one site on two profiles is therefore not an error; the older profile simply
-   wins.
+2. Otherwise the first Putiorr Grab profile, in creation order, whose **Browser
+   sites** match the page's hostname exactly or as a suffix. Listing one site on
+   two profiles is therefore not an error; the older profile simply wins.
 3. Otherwise the default profile configured in the extension options.
 4. Otherwise nothing: putiorr answers `400`, and the notification reads "No
    profile matches this site and no default profile is set — click here to
@@ -130,18 +131,27 @@ in putiorr". Both lists were loaded with the preset filter applied, so this is
 what a stale one looks like — load profiles again in the options, or change that
 profile's preset in putiorr.
 
-A disabled profile does not claim its sites — routing to it is exactly what
-disabling turned off. An explicit right-click pick is still sent to it, and
-putiorr refuses that one by name ("RR profile X is disabled") rather than
-quietly grabbing somewhere else.
+A disabled profile still claims its sites. Disabling means the profile accepts
+no new work, not that it is absent, so a grab from one of its sites is refused
+by name ("RR profile X is disabled") instead of falling through to your default
+profile — which would put the transfer in a folder you never chose, as a result
+of switching a profile off. An explicit right-click pick is refused the same
+way. Delete the profile if you want its sites released.
+
+The **Profiles** card and the right-click menu list only enabled profiles, so a
+site claimed by a disabled one is a click that fails against a profile this page
+does not show. The refusal names it, which is where to look.
 
 ## Pick The Right Profile
 
 Browser grabs get their own profile, created with the **Putiorr Grab** preset,
 which ticks its auto-remove checkbox — **Nothing imports a browser grab; remove
 from putiorr once files download locally**, in the wizard's Options step — by
-default. A browser grab has no *arr app that will import it and signal
-completion, so without that flag the transfer sits in the putiorr list forever.
+default. So does a grab profile created through `POST /api/profiles` or seeded
+from `PUTIORR_PROFILES_JSON`: the default is putiorr's, not the wizard's. Send
+`auto_remove_completed: false` to opt out. A browser grab has no *arr app that
+will import it and signal completion, so without that flag the transfer sits in
+the putiorr list forever.
 With it — exactly like a `prowlarr` profile, which gets the flag for the same
 reason — the completed transfer is removed from putiorr and from put.io once
 the files have downloaded, while the downloaded files stay on disk. Switching
@@ -227,8 +237,8 @@ that decide the profile:
   putiorr does not have is a `404`, never a silent fallback. Empty or `null`
   counts as no pick at all and falls through to the site match.
 - `pageHost` — optional, the hostname of the page the grab came from, matched
-  against the **Browser sites** of the enabled Putiorr Grab profiles. Omitting
-  it skips straight to the default.
+  against the **Browser sites** of every Putiorr Grab profile, switched on or
+  off. Omitting it skips straight to the default.
 - `defaultProfileId` — optional, used only when no site matches. Missing (or
   `0`, `''`, `null`), with no match, is the `400` "No profile matches this site
   and no default profile is configured"; a value that is not an id is the `400`
