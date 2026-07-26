@@ -840,6 +840,17 @@ export class TransmissionRpcServer {
         return;
       }
 
+      // One site, appended to one profile. The browser toolbar popup claims the
+      // site of the page it is open on, and appending here rather than there is
+      // the whole reason this route exists: a popup that read the list, added
+      // to it and wrote it back would drop another window's site whenever two
+      // were open, under a reply that said the claim had worked.
+      const browserSiteMatch = requestPath.match(/^\/api\/profiles\/(\d+)\/browser-sites$/);
+      if (browserSiteMatch && method === 'POST') {
+        await this.handleClaimBrowserSite(req, res, Number(browserSiteMatch[1]));
+        return;
+      }
+
       if (profileMatch && method === 'DELETE') {
         const body = await readJsonBody(req);
         // Neither delete flag defaults to true (design decision 5), and the
@@ -1316,13 +1327,19 @@ export class TransmissionRpcServer {
     }
   }
 
+  // A custom header cannot be set by a cross-site simple request, so browsers must preflight
+  // it; the server never answers preflights, which keeps attacker pages out of these endpoints.
+  // Shared by the two routes a web page can reach from the user's own browser:
+  // spending their put.io account, and handing a site to a profile so that a
+  // later grab from it lands there. Answers true when the request was refused.
+  refuseWithoutGrabHeader(req, res, subject) {
+    if (req.headers['x-putiorr-grab']) return false;
+    jsonResponse(res, 403, { error: `${subject} requires the X-Putiorr-Grab header` }, this.sessionId);
+    return true;
+  }
+
   async handleGrab(req, res) {
-    // A custom header cannot be set by a cross-site simple request, so browsers must preflight
-    // it; the server never answers preflights, which keeps attacker pages out of this endpoint.
-    if (!req.headers['x-putiorr-grab']) {
-      jsonResponse(res, 403, { error: 'grab requires the X-Putiorr-Grab header' }, this.sessionId);
-      return;
-    }
+    if (this.refuseWithoutGrabHeader(req, res, 'grab')) return;
     const body = await readJsonBody(req);
     const pageHost = String(body.pageHost ?? '').trim();
     const resolved = this.resolveGrabProfile(body, pageHost);
@@ -1374,6 +1391,84 @@ export class TransmissionRpcServer {
         name: result['torrent-added'].name,
       },
     }, this.sessionId);
+  }
+
+  // Claims one site for one Putiorr Grab profile: the toolbar popup's only
+  // write. The site goes through normalizeBrowserDomains, the same path the
+  // profile form uses, so the popup can state what will be stored before the
+  // click and be right about it.
+  //
+  // A site another profile already claims is refused rather than moved. A move
+  // is two profiles changing at once, from a popup that shows one of them; and
+  // resolution stops at the first profile that matches, so a site added to a
+  // second profile behind an existing claim would look like a claim and route
+  // nothing at all. The refusal names the profile to edit, and the dashboard is
+  // where that edit can be seen whole.
+  async handleClaimBrowserSite(req, res, profileId) {
+    if (this.refuseWithoutGrabHeader(req, res, 'claiming a site')) return;
+    const body = await readJsonBody(req);
+
+    const profile = this.service.store.findProfileById(profileId);
+    if (!profile) {
+      jsonResponse(res, 404, { error: 'Profile not found' }, this.sessionId);
+      return;
+    }
+    // Same refusal an explicit grab into the wrong preset gets: only a Putiorr
+    // Grab profile's browser sites are ever consulted, so listing one anywhere
+    // else would be a setting that reads as configuration and routes nothing.
+    const wrongPreset = refuseNonGrabProfile(profile);
+    if (wrongPreset) {
+      jsonResponse(res, wrongPreset.status, { error: wrongPreset.error }, this.sessionId);
+      return;
+    }
+
+    const host = String(body.host ?? '').trim();
+    if (!host) {
+      jsonResponse(res, 400, { error: 'host is required' }, this.sessionId);
+      return;
+    }
+    const { domains, errors, warnings } = normalizeBrowserDomains(host);
+    if (errors.length) {
+      jsonResponse(res, 400, { error: browserDomainError(errors) }, this.sessionId);
+      return;
+    }
+    // The popup is about the page in one tab, and it states the one site it is
+    // about to store. A list would make that sentence wrong the moment it was
+    // sent; editing several at once is the profile form's job.
+    if (domains.length !== 1) {
+      jsonResponse(res, 400, {
+        error: `A claim adds one site at a time; "${host}" is more than one`,
+      }, this.sessionId);
+      return;
+    }
+    const site = domains[0];
+
+    // Read and write in one synchronous stretch, with no await between them:
+    // the store is synchronous, so no second request can interleave here and
+    // append onto the list this one already read.
+    const grabProfiles = this.service.store.listProfiles()
+      .filter((row) => row.type === GRAB_PROFILE_TYPE);
+    // Disabled profiles are deliberately included, exactly as they are when a
+    // grab resolves: one still claims its sites, and a second profile listing
+    // the same site would change nothing about where that grab goes.
+    const owner = matchProfileByHost(grabProfiles, site);
+    if (owner && owner.id !== profile.id) {
+      jsonResponse(res, 409, { error: claimedElsewhereRefusal(owner, site) }, this.sessionId);
+      return;
+    }
+    // Already handled by this profile — the same site twice, or a subdomain of
+    // one it lists. Storing it again would add a row that routes nothing, so
+    // the answer is the list as it stands and `added: null`.
+    if (owner) {
+      jsonResponse(res, 200, claimResponse(profile, null, warnings), this.sessionId);
+      return;
+    }
+
+    const updated = this.service.store.updateProfile(profile.id, {
+      browser_domains: [...profile.browser_domains, site],
+    });
+    logger.info('browser site claimed', { profile: updated.slug, site });
+    jsonResponse(res, 200, claimResponse(updated, site, warnings), this.sessionId);
   }
 
   // Resolution order for a browser grab: the caller's explicit pick, then the
@@ -1553,6 +1648,41 @@ function browserDomainError(errors) {
   return errors.length > BROWSER_DOMAIN_ERROR_LIMIT
     ? `${shown}\n…and ${errors.length - BROWSER_DOMAIN_ERROR_LIMIT} more`
     : shown;
+}
+
+// What a claim answers with: the profile it was about and the list it now
+// holds, in both key styles the rest of the profile API uses. `added` is the
+// site that was stored, or null when the profile already handled the host —
+// the popup says "claimed" for one and "already claims it" for the other.
+function claimResponse(profile, added, warnings = []) {
+  return {
+    ok: true,
+    profile: { id: profile.id, name: profile.name },
+    browser_domains: profile.browser_domains,
+    browserDomains: profile.browser_domains,
+    added,
+    ...(added && warnings.length ? { browser_domain_warnings: warnings } : {}),
+  };
+}
+
+// Names the profile that already has the site and the entry it actually lists,
+// which is not always the host asked about: a claim on "dl.x.example" loses to
+// a profile listing "x.example", and "already claims dl.x.example" alone would
+// send the user looking for an entry that is not on any profile.
+function claimedElsewhereRefusal(owner, site) {
+  const tail = 'first if it should belong to another profile';
+  const domains = Array.isArray(owner.browser_domains) ? owner.browser_domains : [];
+  // Recomputed rather than returned by matchProfileByHost: that function
+  // answers the one question every grab asks, and widening it for one message
+  // would put a second shape on the path every grab takes. A row written
+  // before normalization existed can match without any entry reading as a
+  // suffix of the site, and then there is no entry to name.
+  const listed = domains.includes(site)
+    ? ''
+    : domains.find((domain) => site.endsWith(`.${domain}`)) ?? '';
+  return listed
+    ? `${owner.name} already claims ${site} through ${listed}; remove or narrow that site there ${tail}`
+    : `${owner.name} already claims ${site}; remove the site there ${tail}`;
 }
 
 // Warnings are advice about what was just typed, not profile data: they ride

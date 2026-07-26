@@ -1098,3 +1098,245 @@ test('a second catch-all is refused through the API, naming the profile that hol
   // The refusal is a refusal, not a partial save.
   assert.equal(harness.store.findProfileBySlug('also-everything'), undefined);
 });
+
+// The toolbar popup claims one site for one profile. It appends through the
+// server rather than reading the list, adding to it and writing it back: two
+// popups open in two windows would each write the list they had read, and the
+// later save would drop the other's site with no sign that it ever existed.
+async function claimSite(harness, profileId, payload, { grabHeader = true } = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (grabHeader) headers['X-Putiorr-Grab'] = '1';
+  const response = await fetch(`${harness.base}/api/profiles/${profileId}/browser-sites`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+test('claiming a site appends it and answers with the whole resulting list', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', ['z.example']);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: 'x.example' });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.profile, { id: profile.id, name: profile.name });
+  assert.equal(body.added, 'x.example');
+  assert.deepEqual(body.browser_domains, ['z.example', 'x.example']);
+  assert.deepEqual(body.browserDomains, ['z.example', 'x.example']);
+  assert.deepEqual(harness.store.findProfileById(profile.id).browser_domains, ['z.example', 'x.example']);
+});
+
+test('a claimed site routes the very next grab from it', async (t) => {
+  // The whole point of the popup: the claim is not a note, it is the routing.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  assert.equal((await claimSite(harness, profile.id, { host: 'x.example' })).status, 200);
+  const grab = await postGrab(harness, {
+    pageHost: 'dl.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(grab.status, 200);
+  assert.deepEqual(grab.body.profile, { id: profile.id, name: profile.name });
+});
+
+test('a claimed site is normalized the way the profile form normalizes one', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: 'BÜCHER.Example.' });
+
+  assert.equal(status, 200);
+  assert.equal(body.added, 'xn--bcher-kva.example');
+  assert.deepEqual(body.browser_domains, ['xn--bcher-kva.example']);
+});
+
+test('claiming the same site twice adds it once', async (t) => {
+  // Two clicks on a popup whose page has not caught up, or the same site
+  // claimed from two windows. Neither is an error, and neither may duplicate.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  assert.equal((await claimSite(harness, profile.id, { host: 'x.example' })).body.added, 'x.example');
+  const { status, body } = await claimSite(harness, profile.id, { host: 'x.example' });
+
+  assert.equal(status, 200);
+  assert.equal(body.added, null);
+  assert.deepEqual(body.browser_domains, ['x.example']);
+});
+
+test('a site this profile already covers by suffix is not listed a second time', async (t) => {
+  // "dl.x.example" under a profile that already lists "x.example" would be a
+  // row that changes nothing: the suffix match already routes it there.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', ['x.example']);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: 'dl.x.example' });
+
+  assert.equal(status, 200);
+  assert.equal(body.added, null);
+  assert.deepEqual(body.browser_domains, ['x.example']);
+});
+
+test('a site another profile claims is refused, naming that profile', async (t) => {
+  // Refuse rather than move: the same principle the rest of the grab paths
+  // follow. A move is two profiles changing at once, from a popup that shows
+  // one of them, and the dashboard is where that edit can be seen whole.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const owner = createSiteProfile(harness, 'movies', ['x.example']);
+  const other = createSiteProfile(harness, 'books', []);
+
+  const { status, body } = await claimSite(harness, other.id, { host: 'x.example' });
+
+  assert.equal(status, 409);
+  assert.equal(
+    body.error,
+    'MOVIES already claims x.example; remove the site there first if it should belong to another profile',
+  );
+  assert.deepEqual(harness.store.findProfileById(other.id).browser_domains, []);
+  assert.deepEqual(harness.store.findProfileById(owner.id).browser_domains, ['x.example']);
+});
+
+test('a refusal by suffix match names the site that was actually listed', async (t) => {
+  // Adding "dl.x.example" to a second profile would not even win: resolution
+  // stops at the first profile that matches, and that is the one listing
+  // "x.example". Storing it would look like a claim and route nothing.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'movies', ['x.example']);
+  const other = createSiteProfile(harness, 'books', []);
+
+  const { status, body } = await claimSite(harness, other.id, { host: 'dl.x.example' });
+
+  assert.equal(status, 409);
+  assert.equal(
+    body.error,
+    'MOVIES already claims dl.x.example through x.example; remove or narrow that site there'
+      + ' first if it should belong to another profile',
+  );
+  assert.deepEqual(harness.store.findProfileById(other.id).browser_domains, []);
+});
+
+test('a disabled profile holds its claim against a new one', async (t) => {
+  // It still claims its sites for a grab, so it still claims them here: a
+  // second profile listing the same site would change nothing about where the
+  // grab goes, and the refusal is what points at the profile to fix.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'movies', ['x.example'], { enabled: false });
+  const other = createSiteProfile(harness, 'books', []);
+
+  const { status, body } = await claimSite(harness, other.id, { host: 'x.example' });
+
+  assert.equal(status, 409);
+  assert.match(body.error, /^MOVIES already claims x\.example;/);
+});
+
+test('a site only the catch-all was taking can still be claimed outright', async (t) => {
+  // The catch-all takes what nobody claimed; that is not a claim, and listing
+  // the site is exactly how a user takes it off the catch-all.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'everything', [], { catchAll: true });
+  const other = createSiteProfile(harness, 'books', []);
+
+  const { status, body } = await claimSite(harness, other.id, { host: 'x.example' });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.browser_domains, ['x.example']);
+});
+
+test('claiming a site for a profile that is not a Putiorr Grab profile is refused by name', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const sonarr = createSiteProfile(harness, 'sonarr', [], { type: 'sonarr' });
+
+  const { status, body } = await claimSite(harness, sonarr.id, { host: 'x.example' });
+
+  assert.equal(status, 400);
+  assert.equal(body.error, 'SONARR is not a Putiorr Grab profile; set its App preset to Putiorr Grab in putiorr');
+  assert.deepEqual(harness.store.findProfileById(sonarr.id).browser_domains, []);
+});
+
+test('claiming a site for a profile putiorr does not have is a 404', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const { status, body } = await claimSite(harness, 987654, { host: 'x.example' });
+
+  assert.equal(status, 404);
+  assert.equal(body.error, 'Profile not found');
+});
+
+test('claiming a site without the anti-CSRF header returns 403 and stores nothing', async (t) => {
+  // A browser-facing write reachable from any page the user visits, exactly
+  // like /api/grab: without the header a cross-site "simple" request could
+  // hand the attacker's own site to a profile and route later grabs to it.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: 'x.example' }, { grabHeader: false });
+
+  assert.equal(status, 403);
+  assert.equal(body.error, 'claiming a site requires the X-Putiorr-Grab header');
+  assert.deepEqual(harness.store.findProfileById(profile.id).browser_domains, []);
+});
+
+test('a host putiorr could never match is refused, naming the entry', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  const wildcard = await claimSite(harness, profile.id, { host: '*.x.example' });
+  assert.equal(wildcard.status, 400);
+  assert.match(wildcard.body.error, /\*\.x\.example/);
+
+  const missing = await claimSite(harness, profile.id, {});
+  assert.equal(missing.status, 400);
+  assert.equal(missing.body.error, 'host is required');
+
+  const blank = await claimSite(harness, profile.id, { host: '   ' });
+  assert.equal(blank.status, 400);
+  assert.equal(blank.body.error, 'host is required');
+
+  assert.deepEqual(harness.store.findProfileById(profile.id).browser_domains, []);
+});
+
+test('only one site is claimed per request, whatever the caller sends', async (t) => {
+  // The popup is about the page in the current tab. A comma-separated list
+  // would be the profile form's job, and would make "what will be stored" —
+  // which the popup states before the click — a different thing after it.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: 'x.example, z.example' });
+
+  assert.equal(status, 400);
+  assert.match(body.error, /one site/);
+  assert.deepEqual(harness.store.findProfileById(profile.id).browser_domains, []);
+});
+
+test('a claimed site that matches more than the user meant carries the warning along', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: 'lan' });
+
+  assert.equal(status, 200);
+  assert.deepEqual(body.browser_domains, ['lan']);
+  assert.deepEqual(body.browser_domain_warnings, ['"lan" also matches every site ending in ".lan"']);
+  // The warning is advice about what was just sent, not profile data.
+  assert.equal('browser_domain_warnings' in harness.store.findProfileById(profile.id), false);
+});
