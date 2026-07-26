@@ -483,6 +483,66 @@ test('a failed file is retried the number of times it is allowed', async () => {
   }
 });
 
+test('a file that has spent its attempts is not picked up again forever', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createTransfer(harness.store);
+    const exhausted = harness.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 901,
+      relative_path: 'gone.mkv',
+      size: 10,
+      status: 'failed',
+      attempts: 3,
+    });
+    const retriable = harness.store.upsertDownloadFile({
+      download_id: transfer.id,
+      putio_file_id: 902,
+      relative_path: 'retry.mkv',
+      size: 10,
+      status: 'failed',
+      attempts: 1,
+    });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    // A failed file is picked up again after a restart, which is the point of
+    // keeping it in the queue — but one that has used every attempt was being
+    // claimed, failed and re-claimed on every pass, forever.
+    const claimed = [manager.nextPendingFile(), manager.nextPendingFile()].filter(Boolean);
+    assert.deepEqual(claimed.map((file) => file.id), [retriable.id]);
+    assert.equal(harness.store.findDownloadFileById(exhausted.id).attempts, 3);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a download whose put.io name is too long can still be deleted', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createTransfer(harness.store, {
+      name: `${'W'.repeat(400)}.1080p`,
+      lifecycle: 'remote',
+    });
+
+    // It never staged anything — that is the whole point of refusing it — so
+    // there is nothing to lose, and refusing to remove it too leaves the user
+    // with a download they cannot get rid of.
+    const result = await harness.service.deleteDownloadBucket(transfer.id, {
+      deleteRemote: false,
+      deleteLocal: true,
+    });
+    assert.equal(result.ok, true);
+    assert.ok(harness.store.findDownloadById(transfer.id).removed_at);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('prepareTransfer forgets files put.io no longer has', async () => {
   const putio = new FakePutio({
     remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],

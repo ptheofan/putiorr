@@ -331,21 +331,28 @@ export class TransferService {
         + ' so putiorr cannot tell which folder its files belong in',
       );
     }
-    // Refused here rather than truncated, and refused before anything is
-    // written. Truncating would give the download a folder that no longer
-    // matches the name torrent-get reports, and the *arr would look for its
-    // files under the untruncated one — a failure with no symptom. Left to the
-    // filesystem it was worse: mkdir failed inside the worker, on every poll,
-    // while the download sat at 50% reporting no error at all.
-    const oversized = oversizedFolderSegment(stagingFolderName(download));
-    if (oversized) {
-      throw new Error(
-        `Download ${download?.id ?? '(unknown)'} cannot be staged: put.io named it`
-        + ` "${oversized.slice(0, 40)}…", which is ${Buffer.byteLength(oversized, 'utf8')} bytes,`
-        + ' and a folder name can be at most 255; rename it on put.io and it will start',
-      );
-    }
     return root;
+  }
+
+  // Refused rather than truncated, and refused before anything is written.
+  // Truncating would give the download a folder that no longer matches the
+  // name torrent-get reports, and the *arr would look for its files under the
+  // untruncated one — a failure with no symptom. Left to the filesystem it was
+  // worse: mkdir failed inside the worker, on every poll, while the download
+  // sat at 50% reporting no error at all.
+  //
+  // Only the paths that write ask this. Such a download has staged nothing, so
+  // the paths that delete have nothing to lose by resolving a folder that does
+  // not exist — and refusing there would leave the user with a download they
+  // cannot get rid of either.
+  assertStageableName(download) {
+    const oversized = oversizedFolderSegment(stagingFolderName(download));
+    if (!oversized) return;
+    throw new Error(
+      `Download ${download?.id ?? '(unknown)'} cannot be staged: put.io named it`
+      + ` "${oversized.slice(0, 40)}…", which is ${Buffer.byteLength(oversized, 'utf8')} bytes,`
+      + ' and a folder name can be at most 255; rename it on put.io and it will start',
+    );
   }
 
   // The staging folder is the put.io name, and put.io does not deduplicate
@@ -357,6 +364,7 @@ export class TransferService {
   // it is. Ids only ever go up, so the winner never changes.
   requireExclusiveStagingRoot(profile, download) {
     const root = this.requireStagingRoot(profile, download);
+    this.assertStageableName(download);
     const claimed = this.downloadsStagingAt(root)
       .filter((rival) => rival.id < Number(download.id));
     if (claimed.length === 0) return root;

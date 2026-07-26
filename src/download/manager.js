@@ -13,6 +13,9 @@ import {
 
 const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
 const SLOW_RESET_PAUSE_MS = 500;
+// How many times a file is fetched before it is left alone. It bounds both
+// ends of the retry: what counts as spent, and what the queue stops offering.
+const MAX_FILE_ATTEMPTS = 3;
 
 class SlowSpeedResetError extends Error {
   constructor(message) {
@@ -420,7 +423,7 @@ export class DownloadManager {
   recordFileFailure(job, error, worker) {
     const attempts = Number(job.attempts ?? 0);
     this.store.updateDownloadFile(job.id, {
-      status: attempts >= 3 ? 'failed' : 'pending',
+      status: attempts >= MAX_FILE_ATTEMPTS ? 'failed' : 'pending',
       attempts,
       download_speed: 0,
       error_string: error.message,
@@ -439,7 +442,9 @@ export class DownloadManager {
   }
 
   nextPendingFile() {
-    const candidates = this.store.listPendingFiles(this.config.workers * 4);
+    const candidates = this.store.listPendingFiles(this.config.workers * 4, {
+      maxAttempts: MAX_FILE_ATTEMPTS,
+    });
     const job = candidates.find((candidate) => !this.activeFileIds.has(candidate.id));
     if (!job) return undefined;
     this.store.updateDownloadFile(job.id, {

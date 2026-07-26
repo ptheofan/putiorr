@@ -1857,16 +1857,21 @@ export class StateStore {
     `).all(downloadId).map(normalizeFileRow);
   }
 
-  listPendingFiles(limit = 100) {
+  // A failed file stays in the queue so a restart retries it — that is what
+  // the status is for — but only while it has attempts left. Without the
+  // bound, a file that can never succeed was claimed, failed and re-claimed on
+  // every pass for as long as the process ran. The caller owns the limit: it
+  // is the same number it marks a file failed with.
+  listPendingFiles(limit = 100, { maxAttempts = Number.MAX_SAFE_INTEGER } = {}) {
     return this.db.prepare(`
       SELECT f.*, d.category, d.name AS download_name, d.hash AS download_hash
       FROM download_files f
       JOIN downloads d ON d.id = f.download_id
-      WHERE f.status IN ('pending', 'failed')
+      WHERE (f.status = 'pending' OR (f.status = 'failed' AND f.attempts < ?))
         AND d.removed_at IS NULL
       ORDER BY f.id ASC
       LIMIT ?
-    `).all(limit).map(normalizeFileRow);
+    `).all(maxAttempts, limit).map(normalizeFileRow);
   }
 
   updateDownloadFile(id, patch) {
