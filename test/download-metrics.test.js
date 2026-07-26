@@ -735,7 +735,7 @@ test('deleting a quarantined download never resolves its files against the worki
 
     await assert.rejects(
       () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
-      /does not know where .* files are/,
+      /cannot tell which files belong to/,
     );
 
     // Nothing was touched, and the entry is still there to be dealt with.
@@ -760,6 +760,61 @@ test('deleting a quarantined download removes the files at its recorded absolute
     assert.equal(result.ok, true);
     await assert.rejects(() => stat(target), { code: 'ENOENT' });
     assert.deepEqual(harness.store.listOrphanedDownloads(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 4 review, C2, reproduced end to end: the quarantine's recorded path
+// went to rm(recursive) after only two checks — absolute, and claimed by
+// exactly one thing — and a quarantine row claims itself. With no live
+// download to contest it, which is exactly the install the quarantine exists
+// for, every one of these deleted for real. The recorded path is built from
+// the row's own name, and put.io transfer names come from torrent metadata.
+test('a quarantined download can never delete a folder that is not its own', async () => {
+  const harness = await createHarness();
+  const outside = await mkdtemp(path.join(tmpdir(), 'putiorr-outside-'));
+  try {
+    const root = harness.config.targetDir;
+    const categoryDir = path.join(root, 'tv');
+    await mkdir(categoryDir, { recursive: true });
+    await writeFile(path.join(categoryDir, 'other.mkv'), 'other');
+    await writeFile(path.join(outside, 'unrelated.mkv'), 'unrelated');
+
+    const cases = [
+      // A legacy row with no name recorded the category directory itself.
+      { name: '', category: 'tv', legacy_download_dir: categoryDir, target: categoryDir },
+      // No name and no category recorded the profile's whole staging root.
+      { name: '', category: '', legacy_download_dir: root, target: root },
+      // A put.io name of '..' walked out of the staging root entirely.
+      { name: '..', category: '', legacy_download_dir: path.dirname(root), target: path.dirname(root) },
+      // Anything putiorr never staged into is not putiorr's to delete.
+      { name: path.basename(outside), category: '', legacy_download_dir: outside, target: outside },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const orphanId = quarantineRow(harness.store, {
+        putio_transfer_id: 5000 + index,
+        name: testCase.name,
+        category: testCase.category,
+        legacy_download_dir: testCase.legacy_download_dir,
+      });
+      await assert.rejects(
+        () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+        (error) => {
+          assert.match(error.message, /cannot|refusing/i);
+          return true;
+        },
+        `case ${index} deleted ${testCase.target}`,
+      );
+      // Still there to be dealt with, and so are the files.
+      assert.ok(harness.store.findOrphanedDownloadById(orphanId));
+    }
+
+    assert.equal(await readFile(path.join(categoryDir, 'other.mkv'), 'utf8'), 'other');
+    assert.equal(await readFile(path.join(outside, 'unrelated.mkv'), 'utf8'), 'unrelated');
+    await stat(root);
+    await stat(path.dirname(root));
   } finally {
     harness.store.close();
   }
@@ -831,7 +886,9 @@ test('deleting a quarantined download refuses a whole category folder', async ()
 
     await assert.rejects(
       () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
-      /downloads own it/,
+      // Refused before the ownership count is even consulted: the recorded
+      // path is not the folder this row's own name spells.
+      /cannot tell which files belong to/,
     );
     assert.equal(await readFile(path.join(categoryDir, 'keep.mkv'), 'utf8'), 'keep');
   } finally {

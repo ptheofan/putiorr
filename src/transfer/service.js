@@ -3,6 +3,7 @@ import {
   deleteLocalData,
   deleteLocalFileData,
   downloadCategoryDir,
+  downloadFolderSegments,
   downloadLocalRoot,
   extractCategory,
 } from '../download/paths.js';
@@ -235,6 +236,7 @@ export class TransferService {
   // quarantine recorded for rows it could not attach to a profile.
   localPathOwners(localPath) {
     const target = path.resolve(String(localPath ?? ''));
+    this.assertNotAStagingRoot(target);
     const owners = [];
     for (const download of [...this.store.listActiveDownloads(), ...this.store.listRemovedDownloads()]) {
       const profile = this.findDownloadOwner(download);
@@ -247,6 +249,25 @@ export class TransferService {
       owners.push(`quarantined download ${orphan.id} (${orphan.name})`);
     }
     return owners;
+  }
+
+  // A profile's staging root, and everything above it, is never deletable —
+  // however many downloads happen to exist. The count is the wrong question
+  // for these paths: a database with no downloads left is exactly the install
+  // that gets one thing claiming the root and passes an exactly-one-owner
+  // check. Thrown rather than reported as contested, because the reason is
+  // different and the user needs to read it.
+  assertNotAStagingRoot(target) {
+    for (const profile of this.store.listProfiles({ includeDisabled: true })) {
+      const root = profile.download_at ? path.resolve(profile.download_at) : '';
+      if (!root) continue;
+      if (target === root || root.startsWith(`${target}${path.sep}`)) {
+        throw new Error(
+          `refusing to delete ${target}: it is RR profile ${profile.name}'s download folder`
+          + `${target === root ? '' : ' or holds it'}`,
+        );
+      }
+    }
   }
 
   downloadClaimsPath(profile, download, target) {
@@ -940,6 +961,37 @@ export class TransferService {
     return { ok: true, downloadId: created.id };
   }
 
+  // The one deletion target putiorr does not compute from a live profile and
+  // a live download: a path a previous version recorded, from a put.io name
+  // that came out of torrent metadata. Three things have to be true before it
+  // can go to rm(recursive), and every one of them was reproduced deleting
+  // something else when it was missing.
+  //
+  // It must be absolute — a relative path resolves against process.cwd(), and
+  // whatever sits there is not this download. It must be somewhere putiorr
+  // stages, because putiorr never put files anywhere else and cannot claim
+  // what it did not write. And it must be the folder this row's own name
+  // spells, so a row whose name is empty cannot name the category directory
+  // holding every other download, and one whose name is '..' cannot name the
+  // directory above the staging root.
+  quarantinedDownloadFolder(row) {
+    const recorded = String(row.legacy_download_dir ?? '');
+    const refusal = `putiorr cannot tell which files belong to ${row.name || 'this download'},`
+      + ' so it will not delete any; remove them by hand, then delete this entry'
+      + ' without the local-files option';
+    if (!path.isAbsolute(recorded)) throw new Error(refusal);
+
+    const target = path.resolve(recorded);
+    const staged = this.store.listProfiles({ includeDisabled: true }).some((profile) => (
+      profile.download_at && target.startsWith(`${path.resolve(profile.download_at)}${path.sep}`)
+    ));
+    if (!staged) throw new Error(refusal);
+
+    const segments = downloadFolderSegments(row.name);
+    if (!segments || !target.endsWith(`${path.sep}${segments}`)) throw new Error(refusal);
+    return target;
+  }
+
   async deleteOrphanedDownload(orphanId, { deleteRemote = false, deleteLocal = false } = {}) {
     const row = this.store.findOrphanedDownloadById(orphanId);
     if (!row) throw new Error('Quarantined download not found');
@@ -969,13 +1021,7 @@ export class TransferService {
     // cannot say which files those are — silently skipping reported success
     // for a deletion that never happened.
     if (deleteLocal) {
-      if (!path.isAbsolute(row.legacy_download_dir ?? '')) {
-        throw new Error(
-          `putiorr does not know where ${row.name || 'this download'}'s files are, so it cannot delete them;`
-          + ' remove them by hand, then delete this entry without the local-files option',
-        );
-      }
-      await deleteLocalData(row.legacy_download_dir, this.ownershipCheck());
+      await deleteLocalData(this.quarantinedDownloadFolder(row), this.ownershipCheck());
     }
     this.store.deleteOrphanedDownload(orphanId);
     logger.info('quarantined download deleted', {

@@ -69,7 +69,7 @@ export function downloadCategoryDir(profile, download) {
 // *arr apps — while '.' and '..' name no folder at all. Anything that escapes
 // the category directory is refused by resolveInside rather than rewritten
 // into something that silently stages elsewhere.
-function downloadFolderSegments(value) {
+export function downloadFolderSegments(value) {
   const segments = String(value ?? '')
     .split(/[\\/]+/)
     .map((segment) => segment.trim())
