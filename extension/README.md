@@ -1,6 +1,7 @@
 # putiorr grab — Chrome extension
 
-Captures `magnet:` links and `.torrent` downloads on any site and sends them to
+Captures `magnet:` links, `.torrent` downloads, and the `http(s)` links that
+carry a magnet in their query on any site, and sends them to
 putiorr, which adds them to put.io and downloads them to the local folder of the
 putiorr profile the grab resolved to. That profile is always one whose **App
 preset** is **Putiorr Grab**: no other preset is offered here, and a grab aimed
@@ -12,10 +13,17 @@ There are two ways to grab:
   decides where it goes: the profile that lists the page's site under **Browser
   sites**, or the one profile set to take every site nobody listed.
   Auto-capture can be switched off in the options.
+- **Click a link that carries a magnet in its query**, like
+  `https://put.io/default/magnet?url=magnet:?xt=…` or `download.php?magnet=…`.
+  Sites wrap magnets in handler links and redirectors all the time; following
+  one hands the torrent to whoever wrote that page instead of to putiorr, so
+  the magnet is pulled out of the link and grabbed like any other. See
+  [What Counts As A Wrapped Magnet](#what-counts-as-a-wrapped-magnet).
 - **Right-click any link → Send to putiorr → `<profile>`.** This overrides
   the profile for that one grab, and it is also the way to grab from trackers
   whose download URLs do not end in `.torrent` (`download.php?id=…` and
-  friends), because click capture only recognises a path ending in `.torrent`.
+  friends), because click capture only recognises a path ending in `.torrent`
+  or a link with a magnet in it.
 
 `.torrent` files are fetched from inside the page, so private-tracker session
 cookies apply.
@@ -23,6 +31,34 @@ cookies apply.
 The toolbar icon grabs nothing. It opens a popup about the page you are on:
 which profile a grab from this site would land in, and — when no profile claims
 it yet — a way to claim it for one without opening the dashboard.
+
+## What Counts As A Wrapped Magnet
+
+A link is treated as a magnet when the magnet is somewhere in it and names a
+BitTorrent swarm — an `xt` of `urn:btih:` (v1) or `urn:btmh:` (v2). Both of
+these are captured, and both keep the display name and every tracker:
+
+| Link | Where the magnet is |
+| --- | --- |
+| `https://put.io/default/magnet?url=magnet:?xt=…&dn=…&tr=…` | written plain, so the `&dn=` and `&tr=` read as the *outer* link's parameters |
+| `https://x.example/download.php?magnet=magnet%3A%3Fxt%3D…` | percent-encoded inside one parameter |
+
+The first form is the common one and the reason the magnet is taken as
+everything from `magnet:?` to the end of the link rather than read out of the
+parameter that appears to hold it: to a URL parser, that parameter stops at the
+first unencoded `&`, so reading it would grab the infohash and throw the name
+and every tracker away. put.io would still find the swarm, eventually, through
+the DHT — but the transfer would be named after its own hash and would take as
+long as the DHT takes.
+
+A link is left alone when nothing in it names a swarm: `magnet` in the path, a
+page *about* magnet links, an `xt` of some other URN (`urn:ed2k:`). One
+consequence is worth knowing, because there is no way to have the feature
+without it: **a link whose query genuinely contains a valid magnet is captured
+even when the page meant it as something else** — a search URL for a magnet
+string, a "report this magnet" form link. The click is not followed; the magnet
+is grabbed instead. Alt+click, which is never captured, is the way past it, and
+auto-capture can be switched off entirely in the options.
 
 ## Install
 
@@ -267,15 +303,20 @@ Run this once after loading the extension, against a running putiorr (the
    dashboard.
 2. Click a `.torrent` link → the same, with the put.io transfer created from
    the uploaded file.
-3. Right-click a link → **Send to putiorr → `<other profile>`** → the
+3. Click a link that wraps a magnet — a site's "send to put.io" link, or paste
+   `https://put.io/default/magnet?url=magnet:?xt=…&dn=…&tr=…` into a page → the
+   notification appears, put.io's own add-magnet page does **not** open, and the
+   transfer is named after the magnet's `dn` rather than after its hash, which
+   is how you can tell the trackers came along too.
+4. Right-click a link → **Send to putiorr → `<other profile>`** → the
    transfer lands under that other profile's folder.
-4. In putiorr, set **Browser sites** on a Putiorr Grab profile that is *not* the
+5. In putiorr, set **Browser sites** on a Putiorr Grab profile that is *not* the
    one taking the unlisted sites to the site you are testing on, save, and click
    a `magnet:` link there → the notification names that profile, not the
    catch-all, and the transfer lands under its folder. Nothing in the extension
    is touched for this: the options page shows the new site after the next
    **Test connection & load profiles**, but grabs route correctly before that.
-5. On a site no profile lists, click the toolbar icon → the popup says no
+6. On a site no profile lists, click the toolbar icon → the popup says no
    profile claims it, offers the enabled grab profiles, and the button reads
    **Claim `<that exact host>`**. Click it → the popup says that profile now
    claims the site, and a `magnet:` click on the same page lands there. Open the
@@ -301,7 +342,8 @@ Run this once after loading the extension, against a running putiorr (the
 - If a capture fails before the grab reaches the extension's service worker —
   the `.torrent` fetch failed or timed out, or an extension reload orphaned the
   page's content script — the click is replayed as a normal browser action: a
-  magnet goes to the OS handler, a `.torrent` downloads. Once the worker has the
+  magnet goes to the OS handler, a `.torrent` downloads, and a link that
+  wrapped a magnet is followed to the page it points at. Once the worker has the
   grab, every outcome is reported by notification and nothing is replayed: an
   unreachable or sleeping putiorr, rejected credentials, and an error putiorr
   returned all end there, with no fallback download.
@@ -432,8 +474,14 @@ does to every other putiorr route.
   above roughly 1.5 MiB comes back as a failure notification — with no
   fallback download, because the grab did reach putiorr — and has to be added
   by hand.
+- A link whose query holds a valid magnet is captured whatever the page meant
+  by it, so a search or report link built around a magnet string is grabbed
+  rather than followed — see
+  [What Counts As A Wrapped Magnet](#what-counts-as-a-wrapped-magnet).
 - A malicious page can overlay an invisible magnet link under a real button and
-  harvest a genuine click — the grab notification is the only tell.
+  harvest a genuine click — the grab notification is the only tell. A wrapped
+  magnet widens the shapes such a link can take, but not what it can do: the
+  click still has to be a real one, and it still ends in a notification.
 - Any page can detect that the extension is installed by fetching its
   web-accessible `lib/resolve.js`; `use_dynamic_url` was deliberately not used
   because it broke dynamic import from content scripts before Chrome 132, and is

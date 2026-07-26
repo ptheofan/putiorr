@@ -145,7 +145,9 @@ API changes, for anything scripted against putiorr:
 ## Browser Extension
 
 The [`extension/`](extension) directory holds a Chrome (Manifest V3) extension
-that captures `magnet:` links and `.torrent` downloads on any site and sends
+that captures `magnet:` links, `.torrent` downloads, and the `http(s)` links
+that carry a magnet in their query — a site's "send to put.io" link, a
+`download.php?magnet=…` — on any site, and sends
 them to putiorr via `POST /api/grab`. That endpoint requires the
 `X-Putiorr-Grab` header and answers `403` without it, so a web page cannot
 trigger grabs cross-site. Grabs land only in profiles built with the **Putiorr
