@@ -511,11 +511,11 @@ export class TransmissionRpcServer {
       return;
     }
 
-    // The request path is the only thing that names a profile here. The
-    // client's User-Agent used to select one when the path did not — and to
-    // veto the one the category picked — which made a header any client on the
-    // LAN can set the boundary between one profile's downloads and another's.
-    // RPC auth is off by default, so that header was the whole barrier.
+    // The request path names the profile when it can. When it cannot — the
+    // shared endpoint every *arr is pointed at out of the box — the calling
+    // app's own User-Agent does, which is what lets them share one endpoint
+    // with no URL Base change. A profile addressed on its own path is never
+    // overruled by the header, so the client-side override always wins.
     //
     // Whether the profile is switched on is not asked here. It used to be, and
     // it refused every method — so an *arr pointed at a profile the user had
@@ -523,6 +523,9 @@ export class TransmissionRpcServer {
     // its queue, and re-grabbed all of them on its next RSS cycle. Disabled
     // means "accepts no new work", so torrent-add is the method that asks.
     const currentProfile = profile;
+    const clientProfile = currentProfile
+      ? undefined
+      : this.service.findProfileByUserAgent(req.headers['user-agent']);
 
     let rpcRequest;
     if (req.method === 'GET') {
@@ -541,6 +544,7 @@ export class TransmissionRpcServer {
         rpcRequest.method,
         rpcRequest.arguments ?? {},
         currentProfile,
+        clientProfile,
       );
     } catch (error) {
       // Transmission RPC reports failures in the `result` field as a
@@ -556,12 +560,15 @@ export class TransmissionRpcServer {
         requestPath,
         requestHeaders: requestHeadersForLog(req.headers),
         requestPayload: rpcRequest,
-        matchedProfile: currentProfile
+        // Whichever named the profile — the path, or the client's own name.
+        // A failure on the shared endpoint is read to find out which profile
+        // answered, and "none" is itself the answer worth recording.
+        matchedProfile: (currentProfile ?? clientProfile)
           ? {
-              id: currentProfile.id,
-              name: currentProfile.name,
-              slug: currentProfile.slug,
-              rpcPath: currentProfile.rpc_path,
+              id: (currentProfile ?? clientProfile).id,
+              name: (currentProfile ?? clientProfile).name,
+              slug: (currentProfile ?? clientProfile).slug,
+              rpcPath: (currentProfile ?? clientProfile).rpc_path,
             }
           : null,
         // Every profile, switched on or off, with which it is. A disabled
@@ -1251,7 +1258,7 @@ export class TransmissionRpcServer {
       && timingSafeEqualString(password, this.config.rpcPassword);
   }
 
-  async dispatch(method, args, profile) {
+  async dispatch(method, args, profile, clientProfile) {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
@@ -1276,7 +1283,7 @@ export class TransmissionRpcServer {
       case 'torrent-add':
         return this.service.addTorrent(args, profile);
       case 'torrent-get':
-        return this.service.getTorrents(args, profile);
+        return this.service.getTorrents(args, profile, clientProfile);
       case 'torrent-set':
       case 'queue-move-top':
         return {};

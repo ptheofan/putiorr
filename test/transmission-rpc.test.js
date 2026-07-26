@@ -1487,11 +1487,14 @@ test('RPC listing is scoped to the profile selected by the request path', async 
   }]);
 });
 
-// An unowned shared endpoint used to answer torrent-get with every profile's
-// downloads, each carrying another profile's downloadDir. session-get is the
-// connection test *arr apps run, so that one still answers — with the server's
-// own target dir, which names no profile and gives nothing away.
-test('unowned generic RPC endpoint answers session-get but refuses cross-profile discovery', async (t) => {
+// A shared endpoint that resolves to nobody still answers both of the calls an
+// *arr makes before it can do anything: session-get, which is the connection
+// test, and torrent-get, which is the queue poll that drives completed-download
+// import. session-get answers with the server's own target dir, which names no
+// profile; torrent-get answers with every download, each carrying its own
+// owner's downloadDir. Refusing either was the phase 1/2 regression — it showed
+// the client as failed and stopped imports outright.
+test('a shared endpoint that resolves to nobody still answers session-get and torrent-get', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -1541,15 +1544,29 @@ test('unowned generic RPC endpoint answers session-get but refuses cross-profile
 
   const getResponse = await fetch(harness.url, {
     method: 'POST',
-    headers: { 'X-Transmission-Session-Id': sessionId },
+    headers: { 'X-Transmission-Session-Id': sessionId, 'User-Agent': 'UnknownRR/4.0' },
     body: JSON.stringify({
       method: 'torrent-get',
-      arguments: { fields: ['hashString', 'labels'] },
+      arguments: { fields: ['hashString', 'downloadDir'] },
     }),
   });
   const getBody = await getResponse.json();
-  assert.match(getBody.result, /shared RPC endpoint .* is ambiguous/);
-  assert.equal(getBody.arguments, undefined);
+  assert.equal(getBody.result, 'success');
+  assert.deepEqual(getBody.arguments.torrents, [
+    {
+      id: 1,
+      hashString: 'defaulthash',
+      downloadDir: path.join(harness.config.targetDir, 'default'),
+    },
+    {
+      id: 2,
+      hashString: 'sonarrhash',
+      // Each row is rendered against the profile that owns it, so a listing
+      // that resolved to nobody never labels one profile's download with
+      // another's folder.
+      downloadDir: path.join(harness.config.targetDir, 'sonarr', 'sonarr'),
+    },
+  ]);
 
   // Each profile still sees its own downloads on the path it owns.
   for (const [rpcPath, hash] of [['/default/transmission/rpc', 'defaulthash'], [sonarr.rpc_path, 'sonarrhash']]) {
@@ -2755,7 +2772,62 @@ test('a spoofed client name cannot add into another profile on the shared endpoi
   assert.equal(harness.store.listActiveDownloads().length, 0);
 });
 
-test('an unresolved shared torrent-get refuses instead of listing every profile', async (t) => {
+test('each *arr sees only its own downloads on the shared endpoint, by its own name', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr, radarr } = createTwoArrProfiles(harness);
+  const lidarr = harness.store.createProfile({
+    name: 'Lidarr',
+    type: 'lidarr',
+    slug: 'lidarr',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/lidarr/transmission/rpc',
+    enabled: true,
+  });
+  for (const [profile, hash] of [[sonarr, 'sonarrhash'], [radarr, 'radarrhash'], [lidarr, 'lidarrhash']]) {
+    harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 100 + profile.id,
+      hash,
+      name: `${profile.name}.Release`,
+      category: profile.slug,
+      lifecycle: 'downloading',
+    });
+  }
+
+  // The real thing each app sends, version and platform included: the vendor
+  // token before the slash is what names it.
+  const agents = [
+    ['Sonarr/4.0.19.2932 (linux x64)', 'sonarrhash'],
+    ['Radarr/5.14.0.9383 (linux x64)', 'radarrhash'],
+    ['Lidarr/2.5.3.4341 (linux x64)', 'lidarrhash'],
+  ];
+  for (const [userAgent, hash] of agents) {
+    const listed = await sharedRpcAs(harness, userAgent, 'torrent-get', {
+      fields: ['hashString'],
+    });
+    assert.equal(listed.result, 'success', userAgent);
+    assert.deepEqual(listed.arguments.torrents.map((torrent) => torrent.hashString), [hash], userAgent);
+  }
+
+  // A client none of them names still gets an answer — every download — rather
+  // than the refusal that used to break the queue poll.
+  const listed = await sharedRpcAs(harness, 'UnknownRR/4.0', 'torrent-get', { fields: ['hashString'] });
+  assert.equal(listed.result, 'success');
+  assert.deepEqual(
+    listed.arguments.torrents.map((torrent) => torrent.hashString),
+    ['sonarrhash', 'radarrhash', 'lidarrhash'],
+  );
+});
+
+test('the RPC path a client is pointed at beats the name it calls itself', async (t) => {
+  // Two Sonarr instances is the case the per-profile path exists for: the
+  // second one is given /radarr/transmission/rpc and must be served that
+  // profile however it names itself.
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -2770,7 +2842,7 @@ test('an unresolved shared torrent-get refuses instead of listing every profile'
     category: 'sonarr',
     lifecycle: 'downloading',
   });
-  harness.store.upsertDownload({
+  const owned = harness.store.upsertDownload({
     profile_id: radarr.id,
     putio_transfer_id: 102,
     hash: 'radarrhash',
@@ -2779,12 +2851,69 @@ test('an unresolved shared torrent-get refuses instead of listing every profile'
     lifecycle: 'downloading',
   });
 
-  const listed = await sharedRpcAs(harness, 'Sonarr/5.0', 'torrent-get', {
-    fields: ['id', 'hashString', 'downloadDir'],
+  const url = harness.url.replace('/transmission/rpc', radarr.rpc_path);
+  const handshake = await fetch(url, { method: 'POST', headers: { 'User-Agent': 'Sonarr/5.0' } });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+      'User-Agent': 'Sonarr/5.0',
+    },
+    body: JSON.stringify({ method: 'torrent-get', arguments: { fields: ['id', 'hashString'] } }),
+  });
+  const listed = await response.json();
+
+  assert.equal(listed.result, 'success');
+  assert.deepEqual(listed.arguments.torrents, [{ id: owned.id, hashString: 'radarrhash' }]);
+});
+
+test('a grab profile is never the profile a client name selects', async (t) => {
+  // Nothing an *arr sends may select a grab profile — not the shared endpoint,
+  // not a download-dir category, and not the client's own name. A grab profile
+  // called "Sonarr" would otherwise take Sonarr's queue poll and answer it with
+  // downloads staged in a folder nothing imports from.
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const grab = createGrabProfile(harness, { name: 'Sonarr', slug: 'sonarr-grab' });
+  const arr = harness.store.createProfile({
+    name: 'Television',
+    type: 'custom',
+    slug: 'television',
+    putio_folder_name: 'putiorr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/television/transmission/rpc',
+    enabled: true,
+  });
+  harness.store.upsertDownload({
+    profile_id: grab.id,
+    putio_transfer_id: 101,
+    hash: 'grabhash',
+    name: 'Grab.Release',
+    category: 'grab',
+    lifecycle: 'downloading',
+  });
+  harness.store.upsertDownload({
+    profile_id: arr.id,
+    putio_transfer_id: 102,
+    hash: 'arrhash',
+    name: 'Arr.Release',
+    category: 'television',
+    lifecycle: 'downloading',
   });
 
-  assert.match(listed.result, /shared RPC endpoint .* is ambiguous/);
-  assert.equal(listed.arguments, undefined);
+  assert.equal(harness.service.findProfileByUserAgent('Sonarr/5.0'), undefined);
+
+  // Unresolved, so it lists everything — including the grab profile's own
+  // downloads, which is a listing and not a claim. What it must not do is
+  // resolve to the grab profile and scope the answer to it.
+  const listed = await sharedRpcAs(harness, 'Sonarr/5.0', 'torrent-get', { fields: ['hashString'] });
+  assert.equal(listed.result, 'success');
+  assert.deepEqual(listed.arguments.torrents.map((torrent) => torrent.hashString), ['grabhash', 'arrhash']);
 });
 
 // The endpoint grab profiles used to derive is gone from the database, so a
@@ -2866,11 +2995,17 @@ test('an RR profile that owns a /grab/…/rpc path still answers on it', async (
   assert.equal(harness.store.listActiveDownloads({ profileId: grab.id }).length, 0);
 });
 
-// Phase 2 of the ownership cleanup (#67): the RPC path is the only thing that
-// names a profile. The shared endpoint serves exactly one *arr profile or
-// refuses, and the refusal has to be actionable because it is now the entire
-// user experience of a misconfigured multi-profile setup.
-test('an ambiguous shared endpoint refuses torrent-add the same way it refuses get and remove', async (t) => {
+// Phase 2 of the ownership cleanup (#67) made the RPC path the only thing that
+// names a profile, which broke every shared-endpoint setup. What survives from
+// it: a client the path cannot name and its own name cannot name either gets no
+// say in where files go, and the refusal has to be actionable, because it is
+// the entire user experience of a genuinely ambiguous setup.
+//
+// Was: "an ambiguous shared endpoint refuses torrent-add the same way it
+// refuses get and remove". It asserted the same refusal for all three methods
+// from a client calling itself Sonarr/5.0 — both halves are now wrong. That
+// client names a profile, and torrent-get never refuses whoever asks.
+test('an unnamed client is refused an add and a remove, but never a listing', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -2881,8 +3016,9 @@ test('an ambiguous shared endpoint refuses torrent-add the same way it refuses g
   // The download-dir names a category that matches a profile exactly. That used
   // to be enough to own the add — while torrent-get and torrent-remove on the
   // same connection refused — so an *arr grabbed releases it could then never
-  // see, import or remove, and re-grabbed them every RSS cycle.
-  const added = await sharedRpcAs(harness, 'Sonarr/5.0', 'torrent-add', {
+  // see, import or remove, and re-grabbed them every RSS cycle. The category
+  // names the staging subfolder and nothing else now.
+  const added = await sharedRpcAs(harness, 'UnknownRR/4.0', 'torrent-add', {
     filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
     'download-dir': path.join(harness.config.targetDir, 'sonarr'),
     labels: ['sonarr'],
@@ -2891,10 +3027,14 @@ test('an ambiguous shared endpoint refuses torrent-add the same way it refuses g
   assert.match(added.result, /ambiguous/);
   assert.equal(harness.store.listActiveDownloads().length, 0);
 
-  for (const method of ['torrent-get', 'torrent-remove']) {
-    const response = await sharedRpcAs(harness, 'Sonarr/5.0', method, { ids: ['abcdef'] });
-    assert.equal(response.result, added.result, method);
-  }
+  // Destructive, so it is refused for the same reason.
+  const removed = await sharedRpcAs(harness, 'UnknownRR/4.0', 'torrent-remove', { ids: ['abcdef'] });
+  assert.equal(removed.result, added.result);
+
+  // The queue poll is not refused: an *arr that cannot list cannot import.
+  const listed = await sharedRpcAs(harness, 'UnknownRR/4.0', 'torrent-get', { fields: ['hashString'] });
+  assert.equal(listed.result, 'success');
+  assert.deepEqual(listed.arguments.torrents, []);
 });
 
 test('the ambiguity refusal names the RPC path each profile should use', async (t) => {
@@ -2905,7 +3045,9 @@ test('the ambiguity refusal names the RPC path each profile should use', async (
   });
   createTwoArrProfiles(harness);
 
-  const refused = await sharedRpcAs(harness, 'Sonarr/5.0', 'torrent-get', {});
+  const refused = await sharedRpcAs(harness, 'UnknownRR/4.0', 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+  });
 
   assert.match(refused.result, /Sonarr/);
   assert.match(refused.result, /\/sonarr\/transmission\/rpc/);

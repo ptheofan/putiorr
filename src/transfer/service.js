@@ -54,6 +54,12 @@ function clampUnit(value) {
   return Math.min(1, Math.max(0, Number(value) || 0));
 }
 
+// Punctuation and case are noise when comparing a client's name to a profile's:
+// "Putiorr Grab", "putiorr-grab" and "putiorrgrab" are one identity.
+function normalizedIdentity(value) {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
 const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
 
 function remoteDeleteErrorMessage(errors) {
@@ -217,6 +223,40 @@ export class TransferService {
       .filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
   }
 
+  // Which *arr is calling, from the name it puts in its own User-Agent:
+  // `Sonarr/4.0.19.2932 (linux x64)` is the Sonarr profile. This is what lets
+  // every *arr share one endpoint with no URL Base change in its advanced
+  // settings, which is the whole convenience the shared path exists for.
+  //
+  // It routes a request and nothing else. It never decides who owns an existing
+  // download — ownership is written once, at creation, and read back from the
+  // row — and a profile addressed on its own RPC path is never overruled by it.
+  //
+  // The vendor token before the slash is the only part that names the app; the
+  // version and platform after it differ per install. `type` is only an identity
+  // for a real preset: every hand-made profile is type `custom`, so counting it
+  // would make one client name match all of them and resolve nothing. A prefix
+  // has to be at least four characters before it may match, so a two-letter slug
+  // does not claim every client whose name happens to start with it, and only a
+  // single match resolves: two profiles answering to one name is exactly the
+  // case the RPC path override exists for.
+  //
+  // Grab profiles are excluded with the rest of listArrProfiles: nothing an
+  // *arr sends may select one, whatever it is called.
+  findProfileByUserAgent(userAgent) {
+    const client = normalizedIdentity(String(userAgent ?? '').split('/')[0]);
+    if (!client) return undefined;
+    const matches = this.listArrProfiles().filter((profile) => {
+      const identities = [profile.slug, profile.name];
+      if (profile.type !== 'custom') identities.push(profile.type);
+      return identities.some((value) => {
+        const identity = normalizedIdentity(value);
+        return identity && (client === identity || (identity.length >= 4 && client.startsWith(identity)));
+      });
+    });
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
   // The one mechanism. An RPC request is owned by the profile whose path it
   // arrived on; the shared path serves exactly one *arr profile, or refuses.
   // Nothing else may select an owner — not the download-dir category, not the
@@ -235,6 +275,18 @@ export class TransferService {
       `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} RR profiles could have meant it.`
       + ` Point this download client at the RPC path of the profile it means — ${this.rpcPathAdvice(profiles)}`,
     );
+  }
+
+  // torrent-get is not only the *arr's Test button: it is the queue poll that
+  // drives completed-download import. Refusing it strands the imports and shows
+  // the client as failed, so it never refuses — a request that resolves to no
+  // one listing every download is what the shared endpoint has always done, and
+  // each row still carries its own owner's downloadDir.
+  resolveListingProfile(profile, clientProfile) {
+    if (profile) return profile;
+    if (clientProfile) return clientProfile;
+    const profiles = this.listArrProfiles();
+    return profiles.length === 1 ? profiles[0] : undefined;
   }
 
   // This message is the whole user experience of a misconfigured multi-profile
@@ -807,13 +859,14 @@ export class TransferService {
     }
   }
 
-  async getTorrents(args = {}, profile) {
-    // Resolved the same way torrent-remove resolves it. Left optional, an
-    // unresolved listing skipped the profile filter entirely and handed the
-    // caller every profile's downloads, each labelled with another profile's
-    // downloadDir — which is both a leak and an invitation for the *arr that
-    // read it to act on a row it does not own.
-    const currentProfile = this.resolveRpcProfile(profile);
+  async getTorrents(args = {}, profile, clientProfile) {
+    // The path, then the calling app's own name, then — deliberately — nobody:
+    // an unresolved listing returns every download rather than an error. This
+    // is the *arr's queue poll, so a refusal here does not read as "address
+    // your own RPC path", it stops completed downloads being imported and
+    // shows the client as failed. Each row is rendered against its own owner,
+    // so the downloadDir of a row from another profile is still that profile's.
+    const currentProfile = this.resolveListingProfile(profile, clientProfile);
     if (this.config.refreshOnRpc) {
       await this.refreshRemoteTransfers();
     }
@@ -824,8 +877,8 @@ export class TransferService {
 
     const fields = Array.isArray(args.fields) ? args.fields : [];
     const rows = requestedIds.length > 0
-      ? requestedIds.map((id) => this.store.findDownload(id, { profileId: currentProfile.id })).filter(Boolean)
-      : this.store.listActiveDownloads({ profileId: currentProfile.id });
+      ? requestedIds.map((id) => this.store.findDownload(id, { profileId: currentProfile?.id })).filter(Boolean)
+      : this.store.listActiveDownloads({ profileId: currentProfile?.id });
 
     const torrents = rows.map((row) => this.toTransmissionTorrent(row, fields));
     return { torrents };
@@ -1122,9 +1175,11 @@ export class TransferService {
   }
 
   toTransmissionTorrent(row, requestedFields = []) {
-    // Rows reach here only from getTorrents, which selects them scoped to a
-    // resolved profile, so an ownerless one is a bug rather than a state to
-    // render around.
+    // downloads.profile_id is NOT NULL REFERENCES profiles(id), so an ownerless
+    // row is a hand-edited database rather than a state to render around — and
+    // the owner is read from the row even when the request resolved to no
+    // profile at all, so an unscoped listing still labels every download with
+    // the folder its own profile stages into.
     const profile = this.requireDownloadOwner(row);
     const stats = this.store.getDownloadFileStats(row.id);
     const progress = calculateTransmissionProgress(row, stats);
