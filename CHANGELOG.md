@@ -9,7 +9,7 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
-## [3.0.0] — unreleased
+## [3.0.0] — 2026-07-26
 
 A major release, because it changes how a download's owning profile is decided
 and rewrites the database to enforce it. Existing setups need attention before
