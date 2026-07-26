@@ -215,7 +215,7 @@ export function defaultRpcPathForType(type) {
 // A preset switch renames the profile only while the name is still the one a
 // preset chose. Otherwise the refusal that tells a user to switch an *arr
 // profile to Putiorr Grab would cost them the name they typed — and with it the
-// slug, the endpoint derived from it, and the category older transfers match.
+// slug, which is how putiorr identifies the profile everywhere else.
 export function presetDisplayName(currentName, previousLabel, nextLabel) {
   const current = String(currentName ?? '').trim();
   return current === '' || current === previousLabel ? nextLabel : current;

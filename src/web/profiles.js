@@ -79,12 +79,12 @@ export const WIZARD_HELP = {
     tips: (profile) => isGrabProfile(profile)
       ? [
         'Auto-remove completed downloads is on by default here: nothing imports a browser grab, so putiorr drops the finished transfer while the files stay on disk.',
-        'The RPC endpoint step is hidden because no download client connects to this profile; putiorr reserves a path for it behind the scenes.',
+        'The RPC endpoint step is hidden because this profile has no Transmission endpoint at all. Nothing connects to it as a download client, and the browser extension reaches it through /api/grab.',
         'Reloading the unpacked extension after a putiorr update keeps its options page in step with the dashboard.',
       ]
       : [
         'Changing the preset rewrites the RPC endpoint path, and the Display name with it while that name is still the one a preset chose. A name you typed yourself is kept.',
-        'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets use separate paths so their requests do not share one category by accident.',
+        'Sonarr, Radarr, Lidarr, Readarr, and Prowlarr presets each get their own path because the request path is what names the profile. The shared /transmission/rpc endpoint serves one RR profile and refuses once there are two.',
       ],
     valueLabel: 'Selected setup',
     value: (profile, settings) => isGrabProfile(profile)
@@ -96,7 +96,7 @@ export const WIZARD_HELP = {
     paragraphs: (profile) => isGrabProfile(profile)
       ? [
         'The display name is shown on the profile card and in the browser extension, both in its profile list and in the right-click menu that sends a link to a specific profile.',
-        'It also names the endpoint putiorr reserves for this profile internally. Nothing outside putiorr uses that path, so the name is yours to choose.',
+        'Nothing outside putiorr addresses this profile by name, so the name is yours to choose. It does have to be unique: putiorr identifies the profile by the slug derived from it.',
       ]
       : [
         'The display name is shown on the profile card and is also converted into the download-client Category.',
@@ -105,7 +105,7 @@ export const WIZARD_HELP = {
     tips: (profile) => isGrabProfile(profile)
       ? [
         'Name grab profiles after what they collect, such as movies or music, because that is what the right-click menu will read.',
-        'Two profiles cannot share a name: the endpoints derived from them would collide and the save is refused.',
+        'Two profiles cannot share a name: the slug derived from it identifies the profile, so the save is refused and names the profile already holding it.',
       ]
       : [
         'If you create two profiles for the same app, use names that make different categories obvious, such as sonarr-4k and sonarr-anime.',
@@ -498,11 +498,10 @@ export function closeProfileWizard() {
   if (el.profileWizard.open) el.profileWizard.open = false;
 }
 
-// New profiles must share the download folder that the shared RPC endpoint
-// advertises (the default profile's folder, returned by session-get). Otherwise
-// a shared-endpoint grab routed here by category lands on a download-dir that is
-// outside this profile's folder and the add is rejected. Fall back to the
-// hardcoded default only before any profile exists.
+// A new profile starts on the folder the first one uses, because the *arr apps
+// share one staging mount and an add whose download-dir falls outside the
+// resolved profile's folder is refused — extractCategory has no subfolder to
+// name. Fall back to the hardcoded default only before any profile exists.
 export function defaultDownloadFolder() {
   const profiles = state.profiles ?? [];
   const base = profiles.find((profile) => profile.slug === 'default') ?? profiles[0];
