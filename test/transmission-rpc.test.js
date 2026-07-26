@@ -2828,6 +2828,44 @@ test('the retired Putiorr Grab RPC path refuses Transmission traffic', async (t)
   assert.equal(harness.store.listActiveDownloads().length, 0);
 });
 
+// The refusal is on the shape of the path because no profile derives it any
+// more — but a user is free to type that shape into an *arr profile's RPC
+// endpoint field, and a static route checked ahead of the profile lookup then
+// takes a live, configured endpoint off them and tells them to use a browser
+// extension. The shape only means "retired" when nothing owns it.
+test('an RR profile that owns a /grab/…/rpc path still answers on it', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const sonarr = harness.store.createProfile({
+    name: 'Sonarr',
+    type: 'sonarr',
+    slug: 'sonarr',
+    putio_folder_name: 'sonarr',
+    downloadAt: harness.config.targetDir,
+    rpc_path: '/grab/sonarr/rpc',
+    enabled: true,
+  });
+
+  const added = await profileRpc(harness, sonarr.rpc_path, 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Example.Release',
+  });
+
+  assert.equal(added.result, 'success');
+  assert.equal(harness.store.findDownloadById(added.arguments['torrent-added'].id).profile_id, sonarr.id);
+
+  // A grab profile holding one is still refused: that is the endpoint phase 3
+  // took away, and a row created through the API can still spell it.
+  const grab = createGrabProfile(harness, { slug: 'movies', rpc_path: '/grab/movies/rpc' });
+  const refused = await profileRpc(harness, '/grab/movies/rpc', 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:beefed&dn=Refused.Release',
+  });
+  assert.match(refused.result, /browser extension/);
+  assert.equal(harness.store.listActiveDownloads({ profileId: grab.id }).length, 0);
+});
+
 // Phase 2 of the ownership cleanup (#67): the RPC path is the only thing that
 // names a profile. The shared endpoint serves exactly one *arr profile or
 // refuses, and the refusal has to be actionable because it is now the entire

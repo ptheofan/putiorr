@@ -1967,7 +1967,8 @@ export class StateStore {
 
   // The quarantined row's files are deliberately not carried over: a reassigned
   // download re-prepares from put.io, which is also what repairs any file list
-  // that drifted while it was parked.
+  // that drifted while it was parked. The *folder* is another matter — see
+  // reassignedStagingFolder.
   assignOrphanedDownload(id, profileId) {
     const row = this.findOrphanedDownloadById(id);
     if (!row) throw new Error('Quarantined download not found');
@@ -2015,8 +2016,31 @@ export class StateStore {
         downloaded_ever: row.downloaded_ever,
       });
       this.deleteOrphanedDownload(id);
-      return created;
+      // Patched rather than inserted: staging_folder is claimed, once, by the
+      // downloader, so the insert path deliberately has no way to set it. This
+      // is the one caller that already knows where the files are.
+      const folder = this.reassignedStagingFolder(row, profile);
+      return folder ? this.updateDownload(created.id, { staging_folder: folder }) : created;
     });
+  }
+
+  // The quarantine records where the old build put the files. The repaired row
+  // would otherwise resolve its folder from its new owner and put.io's *current*
+  // name, and where those disagree with the recorded path the files are stranded
+  // — nothing cleans them up, and the whole release downloads again.
+  //
+  // Carried only when the recorded path really is inside the folder this profile
+  // and category resolve to, and then as the part below it, so a name spelling
+  // nested directories survives intact. A target that stages elsewhere has no
+  // claim on those files: freezing a folder outside its own root is how a
+  // download ends up writing where its owner never said it could.
+  reassignedStagingFolder(row, profile) {
+    const recorded = String(row.legacy_download_dir ?? '');
+    if (!recorded || !profile.download_at) return '';
+    const parent = path.join(profile.download_at, row.category ?? '');
+    const relative = path.relative(parent, recorded);
+    if (!relative || path.isAbsolute(relative) || relative.split(path.sep).includes('..')) return '';
+    return relative;
   }
 
   getDownloadFileStats(downloadId) {

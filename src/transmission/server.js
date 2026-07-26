@@ -459,9 +459,16 @@ export class TransmissionRpcServer {
     // path, which would leave the endpoint falling through to serveWeb — and
     // serveWeb answers any unknown path with index.html and HTTP 200, so an
     // *arr still pointed at it would read "success" and garbage. The guard is
-    // therefore static, on the shape of the path, rather than on a profile
-    // lookup that can no longer match anything.
-    if (GRAB_RPC_PATH_PATTERN.test(requestPath)) {
+    // therefore mostly static, on the shape of the path.
+    //
+    // Only mostly: nothing stops a user typing that shape into an *arr
+    // profile's RPC endpoint field, and refusing ahead of the lookup took a
+    // live, configured endpoint off them with a message about a browser
+    // extension. The shape means "retired" when no *arr profile owns it — a
+    // grab profile owning one is the very state phase 3 removed, so that is
+    // refused like the rest.
+    if (GRAB_RPC_PATH_PATTERN.test(requestPath)
+      && (!pathProfile || pathProfile.type === GRAB_PROFILE_TYPE)) {
       this.refuseGrabRpcPath(req, res);
       return;
     }

@@ -1043,9 +1043,21 @@ test('deleting a quarantined download refuses a folder another download also cla
       () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
       /2 downloads own it/,
     );
+    // The refusal is correct and the files are safe, but it is also a dead end
+    // unless it says what to do: the quarantine entry can be dismissed on its
+    // own, leaving the live download and its files alone.
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /without the local-files option/,
+    );
     assert.equal(await readFile(path.join(target, 'movie.mkv'), 'utf8'), 'irreplaceable');
     assert.equal(harness.store.listOrphanedDownloads().length, 1);
     assert.ok(harness.store.findDownloadById(live.id));
+
+    // And the way out actually works.
+    await harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: false });
+    assert.equal(harness.store.listOrphanedDownloads().length, 0);
+    assert.equal(await readFile(path.join(target, 'movie.mkv'), 'utf8'), 'irreplaceable');
   } finally {
     harness.store.close();
   }

@@ -3,6 +3,11 @@ import path from 'node:path';
 
 const MAX_FOLDER_SEGMENT_BYTES = 255;
 
+// How TransferService.localPathOwners spells a quarantined owner. Shared rather
+// than repeated, because the refusal below has different advice to give when one
+// of the contenders is a row the user can simply dismiss.
+export const QUARANTINED_OWNER_PREFIX = 'quarantined download ';
+
 export function extractCategory(targetDir, downloadDir) {
   if (!downloadDir) return '';
 
@@ -186,7 +191,19 @@ export function assertSoleOwnedDownloadRoot(downloadRoot, { ownersOfPath } = {})
   if (owners.length === 0) {
     throw new Error(`refusing to delete ${resolved}: no download owns it`);
   }
-  throw new Error(`refusing to delete ${resolved}: ${owners.length} downloads own it — ${owners.join('; ')}`);
+  // The commonest way to reach this is the upgrade: a quarantined row records
+  // the folder a surviving download still stages into, so both claim it and
+  // neither can be deleted with its files. That is the right answer and a dead
+  // end without the next sentence — the quarantine entry is dismissable on its
+  // own, and doing that leaves one owner behind.
+  const dismissable = owners.some((owner) => String(owner).startsWith(QUARANTINED_OWNER_PREFIX));
+  throw new Error(
+    `refusing to delete ${resolved}: ${owners.length} downloads own it — ${owners.join('; ')}`
+    + (dismissable
+      ? '. Dismiss the quarantined entry without the local-files option first; the files stay where they are'
+        + ' and the download that is still using them keeps them'
+      : ''),
+  );
 }
 
 async function removeEmptyParents(startDir, stopDir) {

@@ -67,10 +67,11 @@
             <p>
               The shared <code>/transmission/rpc</code> endpoint serves exactly
               one *arr profile, so a single-profile install needs no URL Base
-              change. Add a second and that endpoint refuses every request,
-              naming the RPC path each profile should use instead — including the
-              profile still sitting on the shared path, which needs one of its
-              own.
+              change. Add a second and that endpoint refuses every add, listing
+              and removal, naming the RPC path each profile should use instead —
+              including the profile still sitting on the shared path, which needs
+              one of its own. <code>session-get</code> still answers, because
+              that is the call an *arr uses to test the connection.
             </p>
             <p>
               One put.io transfer belongs to one download. put.io de-duplicates,

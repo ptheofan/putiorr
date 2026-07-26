@@ -86,7 +86,11 @@ that list against the *arr queues: an *arr holding the Transmission id of a
 quarantined download gets an empty `torrent-get` until it is reassigned.
 Reassigning gives the download its original Transmission id back, so the queue
 item recovers — unless something has taken that id in the meantime, in which
-case the *arr re-grabs on its next RSS cycle.
+case the *arr re-grabs on its next RSS cycle. It also keeps the staging folder
+the files are already in, as long as the profile you assign it to downloads
+into the same place. Assign it to one that stages elsewhere and putiorr
+downloads the release again into the new location, leaving the old files where
+they are for you to remove.
 
 **Putiorr Grab profiles lose their `/grab/<slug>/rpc` endpoint.** It existed
 only because `profiles.rpc_path` was `NOT NULL UNIQUE`, and it doubled as a live
@@ -95,7 +99,8 @@ with a refusal. *Fix:* nothing — grab profiles are reached through the browser
 extension.
 
 **A disabled RR profile now refuses instead of disappearing.** Its RPC path
-answers with a refusal naming it rather than the dashboard's HTML; it still
+still resolves to it, and `torrent-add` there answers with a refusal naming it
+rather than the dashboard's HTML; it still
 claims its browser sites, so a grab from one is refused instead of falling
 through to the extension's default profile; and it is still counted when the
 shared endpoint decides whether it is ambiguous, so switching a profile off no
@@ -432,9 +437,10 @@ Nothing else selects an owner. In particular:
 
 The shared `/transmission/rpc` endpoint serves exactly one *arr profile, so a
 single-profile install needs no URL Base change at all. Create a second *arr
-profile and that endpoint refuses every request, naming the RPC path each
-profile should be pointed at instead — including the profile still sitting on
-the shared path, which needs one of its own.
+profile and that endpoint refuses every add, listing and removal, naming the
+RPC path each profile should be pointed at instead — including the profile
+still sitting on the shared path, which needs one of its own. `session-get`
+still answers, because that is the call an *arr uses to test the connection.
 
 One put.io transfer belongs to one download, keyed on put.io's own transfer id.
 put.io de-duplicates, so a second profile grabbing a release the first already

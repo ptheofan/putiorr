@@ -9,6 +9,7 @@ import {
   extractCategory,
   measureDownloadFolder,
   oversizedFolderSegment,
+  QUARANTINED_OWNER_PREFIX,
   stagingFolderName,
 } from '../download/paths.js';
 import { logger } from '../logger.js';
@@ -302,7 +303,7 @@ export class TransferService {
     for (const orphan of this.store.listOrphanedDownloads()) {
       if (!orphan.legacy_download_dir) continue;
       if (path.resolve(orphan.legacy_download_dir) !== target) continue;
-      owners.push(`quarantined download ${orphan.id} (${orphan.name})`);
+      owners.push(`${QUARANTINED_OWNER_PREFIX}${orphan.id} (${orphan.name})`);
     }
     return owners;
   }

@@ -1109,6 +1109,44 @@ test('reassignment restores the Transmission id the *arr apps still hold', async
   }
 });
 
+// The other half of what a repaired download has to keep. The quarantine
+// records the folder the old build staged into; the new row resolves its own
+// from the target profile and put.io's *current* name. Where those two are the
+// same directory, carrying it means the files are found and the download
+// resumes — and not carrying it meant the whole release downloaded again, on
+// top of files nothing would ever clean up.
+test('reassignment keeps the folder the files are actually in, when it is the same one', async () => {
+  for (const [downloadAt, expected] of [['/downloads', 'Example.Release'], ['/elsewhere', '']]) {
+    const dbPath = await tempDbPath();
+    writeLegacyDb(dbPath, {
+      era: 'pre-association',
+      profiles: [
+        profileRow({ id: 1, slug: 'default', name: 'Default', rpc_path: '/transmission/rpc' }),
+        profileRow({ id: 2, slug: 'radarr', name: 'Radarr', rpc_path: '/radarr/transmission/rpc', download_at: downloadAt }),
+      ],
+      transfers: [transferRow({ id: 41, profile_id: null, putio_transfer_id: 1041, lifecycle: 'processed' })],
+    });
+
+    const store = new StateStore(dbPath);
+    try {
+      const [orphan] = store.listOrphanedDownloads();
+      assert.equal(orphan.legacy_download_dir, '/downloads/tv/Example.Release');
+
+      const created = store.assignOrphanedDownload(orphan.id, 2);
+
+      // A target staging somewhere else has no claim on those files: the folder
+      // is left empty so the download stages where its new owner says, rather
+      // than being pointed at a directory outside it.
+      assert.equal(created.staging_folder, expected, downloadAt);
+      // Still re-prepared from put.io either way — that is what repairs a file
+      // list which drifted while the row was parked.
+      assert.equal(created.lifecycle, 'remote', downloadAt);
+    } finally {
+      store.close();
+    }
+  }
+});
+
 test('reassignment falls back to a new id when the old one has been taken', async () => {
   const dbPath = await tempDbPath();
   writeLegacyDb(dbPath, {
