@@ -122,6 +122,11 @@ const PROFILES_DDL = `
     client_port TEXT NOT NULL DEFAULT '9091',
     client_use_ssl INTEGER NOT NULL DEFAULT 0,
     browser_domains TEXT,
+    -- The Putiorr Grab profile that takes a browser grab no profile's
+    -- browser_domains claimed. At most one row may hold it; the store enforces
+    -- that rather than a unique index, because the refusal has to name the
+    -- profile that already holds it and a constraint failure names a column.
+    browser_catch_all INTEGER NOT NULL DEFAULT 0,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -236,6 +241,7 @@ function normalizeProfileRow(row) {
   const downloadAt = row.download_at ?? row.local_path;
   const autoRemoveCompleted = toBool(row.auto_remove_completed);
   const browserDomains = profileBrowserDomains(row);
+  const browserCatchAll = toBool(row.browser_catch_all);
   const {
     local_path: _localPath,
     download_at: _downloadAt,
@@ -246,6 +252,8 @@ function normalizeProfileRow(row) {
     ...rest,
     browser_domains: browserDomains,
     browserDomains,
+    browser_catch_all: browserCatchAll,
+    browserCatchAll,
     download_at: downloadAt,
     downloadAt,
     downloadProfileId: row.download_profile_id,
@@ -310,6 +318,16 @@ function profileDownloadProfileId(input) {
 function profileBrowserDomainsPatch(input) {
   const domains = input.browser_domains ?? input.browserDomains;
   return domains === undefined ? undefined : JSON.stringify(normalizeBrowserDomains(domains).domains);
+}
+
+// Reads the same shapes profileAutoRemoveCompleted does, for the same reason:
+// PUTIORR_PROFILES_JSON writes '1' and 'true' straight in, and the wizard sends
+// a real boolean. `undefined` means "not mentioned", which leaves a stored flag
+// alone on an update.
+function profileBrowserCatchAll(input) {
+  const value = input.browser_catch_all ?? input.browserCatchAll;
+  if (value === undefined) return undefined;
+  return value === true || value === 1 || value === '1' || value === 'true';
 }
 
 // The API lowercases the preset before it reaches the store, but the seed paths
@@ -435,6 +453,7 @@ export class StateStore {
     this.ensureColumn('profiles', 'client_port', "TEXT NOT NULL DEFAULT '9091'");
     this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('profiles', 'browser_domains', 'TEXT');
+    this.ensureColumn('profiles', 'browser_catch_all', 'INTEGER NOT NULL DEFAULT 0');
     // Everything below only exists on a database written by an older putiorr.
     // A fresh database never creates these tables, and PRAGMA table_info on a
     // table that is not there answers with an empty list rather than an error —
@@ -1139,14 +1158,15 @@ export class StateStore {
       INSERT INTO profiles_new (
         id, name, type, slug, download_profile_id, auto_remove_completed,
         putio_folder_name, putio_folder_id, download_at, rpc_path, client_host,
-        client_port, client_use_ssl, browser_domains, enabled, created_at, updated_at
+        client_port, client_use_ssl, browser_domains, browser_catch_all, enabled,
+        created_at, updated_at
       )
       SELECT
         id, name, type, slug, download_profile_id, auto_remove_completed,
         putio_folder_name, putio_folder_id, download_at,
         CASE WHEN lower(type) = 'grab' THEN NULL ELSE rpc_path END,
-        client_host, client_port, client_use_ssl, browser_domains, enabled,
-        created_at, updated_at
+        client_host, client_port, client_use_ssl, browser_domains,
+        browser_catch_all, enabled, created_at, updated_at
       FROM profiles
     `);
     // Never the other order: ALTER TABLE ... RENAME rewrites other tables'
@@ -1389,13 +1409,15 @@ export class StateStore {
       ?? this.findDefaultDownloadProfile()?.id
       ?? this.ensureDefaultDownloadProfile(this.config ?? {}).id;
     const autoRemoveCompleted = profileAutoRemoveCompleted(input) ?? profileDefaultsToAutoRemoveCompleted(input);
+    const browserCatchAll = profileBrowserCatchAll(input) ?? false;
+    this.assertSingleCatchAll(profileTypeValue(input), browserCatchAll);
     const result = this.db.prepare(`
       INSERT INTO profiles (
         name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
-        download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains, enabled,
-        created_at, updated_at
+        download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains,
+        browser_catch_all, enabled, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.name,
       profileTypeValue(input),
@@ -1410,6 +1432,7 @@ export class StateStore {
       profileClientPort(input) ?? '9091',
       profileClientUseSsl(input) ? 1 : 0,
       profileBrowserDomainsPatch(input) ?? null,
+      browserCatchAll ? 1 : 0,
       input.enabled === false ? 0 : 1,
       timestamp,
       timestamp,
@@ -1437,10 +1460,21 @@ export class StateStore {
     if (nextAutoRemoveCompleted !== undefined) normalizedPatch.auto_remove_completed = nextAutoRemoveCompleted;
     const nextBrowserDomains = profileBrowserDomainsPatch(patch);
     if (nextBrowserDomains !== undefined) normalizedPatch.browser_domains = nextBrowserDomains;
+    const nextBrowserCatchAll = profileBrowserCatchAll(patch);
+    if (nextBrowserCatchAll !== undefined) normalizedPatch.browser_catch_all = nextBrowserCatchAll;
     // Both writes land in the same column and every read compares it exactly,
     // so an update normalizes the preset the way createProfile does. A patch
     // that does not mention it leaves the stored one alone.
     if (patch.type !== undefined) normalizedPatch.type = profileTypeValue(patch);
+    // Checked against the row this update would leave behind, not against the
+    // patch: switching a profile that already carries the flag onto the grab
+    // preset is the moment the flag starts to route grabs, and the patch that
+    // does it need not mention the flag at all.
+    this.assertSingleCatchAll(
+      normalizedPatch.type ?? existing.type,
+      nextBrowserCatchAll ?? existing.browser_catch_all,
+      id,
+    );
     const allowed = [
       'name',
       'type',
@@ -1455,6 +1489,7 @@ export class StateStore {
       'client_port',
       'client_use_ssl',
       'browser_domains',
+      'browser_catch_all',
       'enabled',
     ];
     const keys = allowed.filter((key) => Object.hasOwn(normalizedPatch, key));
@@ -1462,6 +1497,7 @@ export class StateStore {
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
     const values = keys.map((key) => (
       key === 'enabled' || key === 'client_use_ssl' || key === 'auto_remove_completed'
+      || key === 'browser_catch_all'
         ? (normalizedPatch[key] ? 1 : 0)
         : normalizedPatch[key]
     ));
@@ -1489,6 +1525,46 @@ export class StateStore {
   findProfileBySlug(slug) {
     const row = this.db.prepare('SELECT * FROM profiles WHERE slug = ?').get(slug);
     return normalizeProfileRow(row);
+  }
+
+  // The Putiorr Grab profile that takes a browser grab no profile's browser
+  // sites claimed. Only the grab preset is considered, because that is the
+  // only set /api/grab resolves within: the flag on an *arr profile claims
+  // nothing, so it must not block the profile that would claim something.
+  //
+  // Enabled is deliberately not a filter, exactly as it is not one for the site
+  // match. A disabled profile still holds the role, and the grab is refused by
+  // name rather than routed into a folder the user never chose.
+  //
+  // Ordered by id and capped at one so a database that somehow holds two —
+  // hand-edited, or written before this rule existed — still answers every grab
+  // the same way instead of by whatever order SQLite felt like.
+  findCatchAllGrabProfile({ exceptId = 0 } = {}) {
+    const row = this.db.prepare(`
+      SELECT * FROM profiles
+      WHERE browser_catch_all = 1 AND lower(type) = ? AND id <> ?
+      ORDER BY id ASC
+      LIMIT 1
+    `).get(GRAB_PROFILE_TYPE, Number(exceptId) || 0);
+    return normalizeProfileRow(row);
+  }
+
+  // Two catch-all grab profiles would make every unclaimed site ambiguous, and
+  // this codebase refuses rather than guessing which folder a download lands in.
+  //
+  // The check is here rather than in the API's normalizeProfileInput because it
+  // has to see the other rows, and because every door that can set the flag
+  // goes through createProfile or updateProfile: the HTTP API, the wizard
+  // behind it, PUTIORR_PROFILES_JSON, and createDefaultProfile alike. Putting
+  // it at the API boundary would leave the seed paths free to write a second one.
+  assertSingleCatchAll(type, catchAll, exceptId = 0) {
+    if (!catchAll || type !== GRAB_PROFILE_TYPE) return;
+    const holder = this.findCatchAllGrabProfile({ exceptId });
+    if (!holder) return;
+    throw new Error(
+      `${holder.name} already takes grabs from any site no other profile claims;`
+      + ' untick it on that profile first',
+    );
   }
 
   // Enabled is deliberately not a filter here. A disabled profile still owns

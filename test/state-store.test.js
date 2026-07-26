@@ -673,6 +673,115 @@ test('magnet-backed transfer hashes migrate to the torrent info hash', async () 
   }
 });
 
+// A grab profile with no site listed on it is unreachable unless something
+// says "and everything else lands here". That used to be the extension's
+// Default profile setting; it is a column on the profile now, so the routing
+// decision sits with the rest of them.
+function seedGrabProfile(store, slug, overrides = {}) {
+  return store.createProfile({
+    name: slug.toUpperCase(),
+    type: 'grab',
+    slug,
+    putio_folder_name: slug,
+    downloadAt: `/downloads/${slug}`,
+    rpc_path: null,
+    ...overrides,
+  });
+}
+
+test('a grab profile can be marked as the one that takes every unclaimed site', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const catchAll = seedGrabProfile(store, 'catch-all', { browser_catch_all: true });
+    assert.equal(catchAll.browser_catch_all, true);
+    assert.equal(catchAll.browserCatchAll, true);
+    assert.equal(store.findProfileById(catchAll.id).browser_catch_all, true);
+
+    // Off unless asked for: a profile that quietly took every site would route
+    // grabs into a folder nobody chose.
+    const plain = seedGrabProfile(store, 'plain');
+    assert.equal(plain.browser_catch_all, false);
+    assert.equal(plain.browserCatchAll, false);
+
+    // Both key styles are accepted, and an unrelated update leaves it alone.
+    assert.equal(store.updateProfile(catchAll.id, { browserCatchAll: false }).browser_catch_all, false);
+    assert.equal(store.updateProfile(catchAll.id, { browser_catch_all: true }).browser_catch_all, true);
+    assert.equal(store.updateProfile(catchAll.id, { name: 'Renamed' }).browser_catch_all, true);
+  } finally {
+    store.close();
+  }
+});
+
+test('the catch-all grab profile is the one every unrouted grab resolves to', () => {
+  const store = new StateStore(':memory:');
+  try {
+    assert.equal(store.findCatchAllGrabProfile(), undefined);
+
+    seedGrabProfile(store, 'plain');
+    const catchAll = seedGrabProfile(store, 'catch-all', { browser_catch_all: true });
+    assert.equal(store.findCatchAllGrabProfile().id, catchAll.id);
+
+    // Switched off is still the profile that holds the role: the grab is
+    // refused by name rather than routed somewhere the user never chose.
+    store.updateProfile(catchAll.id, { enabled: false });
+    assert.equal(store.findCatchAllGrabProfile().id, catchAll.id);
+  } finally {
+    store.close();
+  }
+});
+
+test('a second catch-all is refused by naming the profile that already holds it', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const first = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+
+    // Two would make an unrouted grab ambiguous, and the fix is on a profile
+    // the user has to be able to find — so the refusal names it.
+    assert.throws(
+      () => seedGrabProfile(store, 'music', { browser_catch_all: true }),
+      /MOVIES already takes grabs from any site no other profile claims/,
+    );
+    assert.equal(store.findProfileBySlug('music'), undefined);
+
+    const second = seedGrabProfile(store, 'music');
+    assert.throws(
+      () => store.updateProfile(second.id, { browser_catch_all: true }),
+      /MOVIES already takes grabs/,
+    );
+    assert.equal(store.findProfileById(second.id).browser_catch_all, false);
+
+    // The profile that already holds it may re-save without tripping over
+    // itself, and handing the role over is two saves rather than an error.
+    assert.equal(store.updateProfile(first.id, { browser_catch_all: true }).browser_catch_all, true);
+    store.updateProfile(first.id, { browser_catch_all: false });
+    assert.equal(store.updateProfile(second.id, { browser_catch_all: true }).browser_catch_all, true);
+  } finally {
+    store.close();
+  }
+});
+
+test('only a Putiorr Grab profile can hold the catch-all role', () => {
+  const store = new StateStore(':memory:');
+  try {
+    // /api/grab consults grab profiles and nothing else, so the flag on an
+    // *arr profile claims nothing — and must not block the profile that would.
+    const arr = seedProfile(store, { browser_catch_all: true });
+    assert.equal(store.findCatchAllGrabProfile(), undefined);
+
+    const grab = seedGrabProfile(store, 'movies', { browser_catch_all: true });
+    assert.equal(store.findCatchAllGrabProfile().id, grab.id);
+
+    // Switching that *arr profile to the grab preset is the moment its flag
+    // starts to mean something, so that is where the collision is caught.
+    assert.throws(
+      () => store.updateProfile(arr.id, { type: 'grab' }),
+      /MOVIES already takes grabs/,
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test('profile browser sites round-trip as a JSON array and default to none', () => {
   const store = new StateStore(':memory:');
   try {
