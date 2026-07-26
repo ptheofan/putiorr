@@ -56,14 +56,26 @@
               subfolder under that target.
             </p>
             <p>
-              Every enabled profile keeps a unique RPC endpoint, but existing
-              apps may continue using the shared <code>/transmission/rpc</code>
-              endpoint. On that shared endpoint, the category in
-              <code>download-dir</code> selects the profile for a new transfer;
-              labels are checked when supplied, and the app User-Agent scopes
-              later listing and removal operations. If two profiles request the
-              same put.io transfer, putiorr keeps one remote transfer with
-              separate profile associations and staging copies.
+              A download belongs to exactly one profile, and the owner is decided
+              once — when the download is created — and never re-derived. For an
+              *arr app that is the RPC path the request arrived on. For a browser
+              grab it is the profile that lists the page's site. Nothing else
+              selects an owner: the category names the staging subfolder and
+              never picks or vetoes a profile, and the client's User-Agent
+              selects nothing at all.
+            </p>
+            <p>
+              The shared <code>/transmission/rpc</code> endpoint serves exactly
+              one *arr profile, so a single-profile install needs no URL Base
+              change. Add a second and that endpoint refuses every request,
+              naming the RPC path each profile should use instead — including the
+              profile still sitting on the shared path, which needs one of its
+              own.
+            </p>
+            <p>
+              One put.io transfer belongs to one download. put.io de-duplicates,
+              so a second profile grabbing a release the first already owns is
+              refused by name rather than sharing it.
             </p>
             <div class="doc-table-wrap">
               <table class="doc-table">
@@ -116,6 +128,47 @@
               <code>/downloads</code>, for example
               <code>/volume/downloads:/downloads</code> in both containers, so
               Sonarr does not need custom Remote Path Mapping.
+            </p>
+            <h3>Where the files land</h3>
+            <pre><code>&lt;download folder&gt;/&lt;category&gt;/&lt;the name put.io gave the transfer&gt;</code></pre>
+            <p>
+              The name is put.io's, untouched, because every *arr resolves a
+              completed download as <code>downloadDir + name</code>: a folder
+              spelled any other way is a download that never imports. That folder
+              is frozen the first time the download is staged, so a later rename
+              on put.io does not move it — the name putiorr reports follows the
+              rename, because that is what you see in the dashboard, but the
+              files on disk do not.
+            </p>
+            <h3>Switching a profile off</h3>
+            <p>
+              A disabled profile <strong>accepts no new work</strong>. It is a
+              refusal, never a disappearance: it still holds its RPC path, still
+              claims its browser sites, and is still counted when the shared
+              endpoint decides whether it is ambiguous. Only the doors that
+              create work ask — <code>torrent-add</code>, <code>/api/grab</code>,
+              and the adoption of a put.io transfer putiorr did not create — and
+              each refuses with one sentence naming the profile. The downloads
+              already queued keep downloading and stay listable, importable, and
+              removable.
+            </p>
+            <h3>Deleting a profile</h3>
+            <p>
+              A download cannot be left without an owner, so a profile that still
+              owns downloads is not deleted until you say what happens to them.
+              The dialog states the counts first — how many downloads, how many
+              of them already removed from the list but still on put.io, and how
+              many files and bytes are in their staging folders — then takes one
+              of three answers: move them to another RR profile, remove them from
+              putiorr (optionally cancelling their put.io transfers and deleting
+              their files), or neither, which is refused.
+            </p>
+            <p class="doc-note">
+              The move target is restricted to profiles that download into the
+              same folder. Nothing moves on disk, so a profile that stages
+              elsewhere would be pointed at an empty directory — and a finished
+              download whose files have gone missing is deleted and its put.io
+              transfer cancelled.
             </p>
           </section>
 
@@ -279,7 +332,15 @@ Lidarr URL: http://lidarr:8686</code></pre>
               putiorr resolves every grab itself. A click on a listed site goes
               to the profile that lists it even when the extension points at a
               different default profile, and a grab aimed at a profile that is
-              not a Putiorr Grab profile is refused by name.
+              not a Putiorr Grab profile is refused by name. A grab profile has
+              no Transmission RPC endpoint at all — nothing connects to one as a
+              download client — so <code>/api/grab</code> is the only way in.
+            </p>
+            <p>
+              Switching a grab profile off does not release its sites. It still
+              claims them, and a grab from one is refused by name rather than
+              falling through to the extension's default profile, which would put
+              the transfer in a folder nobody chose.
             </p>
             <p>
               Install the extension from the Chrome Web Store once it is
@@ -294,9 +355,12 @@ Lidarr URL: http://lidarr:8686</code></pre>
             <p class="doc-note">
               The extension only ever lists Putiorr Grab profiles, so create at
               least one before loading profiles there. The preset also enables
-              auto-remove completed: nothing imports a browser grab, so putiorr
-              drops the finished transfer from its list and from put.io once the
-              files are on disk.
+              auto-remove completed — in the wizard, through
+              <code>POST /api/profiles</code>, and in
+              <code>PUTIORR_PROFILES_JSON</code> alike: nothing imports a browser
+              grab, so putiorr drops the finished transfer from its list and from
+              put.io once the files are on disk. Send
+              <code>auto_remove_completed: false</code> to opt out.
             </p>
           </section>
 
