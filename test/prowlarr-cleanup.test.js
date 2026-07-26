@@ -65,7 +65,7 @@ async function createHarness(env = {}, putio = new FakePutio()) {
 // Creates a complete transfer (one fully-downloaded file) attached to `profile`,
 // with the file written to disk so "kept on disk" can be asserted.
 async function seedCompleteTransfer(harness, profile, patch = {}) {
-  const transfer = harness.store.createOrUpdateTransfer({
+  const transfer = harness.store.upsertDownload({
     profile_id: profile.id,
     putio_transfer_id: 10,
     putio_file_id: 20,
@@ -78,8 +78,8 @@ async function seedCompleteTransfer(harness, profile, patch = {}) {
     total_size: 10,
     ...patch,
   });
-  harness.store.upsertTransferFile({
-    transfer_id: transfer.id,
+  harness.store.upsertDownloadFile({
+    download_id: transfer.id,
     putio_file_id: 20,
     relative_path: 'movie.mkv',
     size: 10,
@@ -129,8 +129,8 @@ test('finalize auto-removes a prowlarr transfer from put.io and the list, keepin
     assert.deepEqual(harness.putio.deletedFiles, [20]);
     assert.deepEqual(harness.putio.deletedTransfers, [10]);
     // Removed from the list entirely (hard-deleted, not just tombstoned).
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
-    assert.deepEqual(harness.store.listActiveTransfers(), []);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
+    assert.deepEqual(harness.store.listActiveDownloads(), []);
     // Files left on disk untouched.
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
   } finally {
@@ -168,8 +168,8 @@ test('finalize hides a prowlarr transfer from putiorr when the put.io delete fai
 
     // The local row is tombstoned so it disappears from putiorr and cannot be
     // resurrected by the next remote refresh. Disk files stay untouched.
-    assert.ok(harness.store.findTransferById(transfer.id)?.removed_at);
-    assert.deepEqual(harness.store.listActiveTransfers(), []);
+    assert.ok(harness.store.findDownloadById(transfer.id)?.removed_at);
+    assert.deepEqual(harness.store.listActiveDownloads(), []);
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
   } finally {
     harness.store.close();
@@ -192,11 +192,11 @@ test('processFile removes a completed download for a profile with auto-remove en
     await harness.service.addTorrent({
       magnetLink: 'magnet:?xt=urn:btih:abcdef1234567890&dn=Direct.Integration.Release',
     }, profile);
-    const [transfer] = harness.store.listActiveTransfers({ profileId: profile.id });
+    const [transfer] = harness.store.listActiveDownloads({ profileId: profile.id });
     assert.equal(transfer.profile_id, profile.id);
-    harness.store.updateTransfer(transfer.id, { lifecycle: 'downloading' });
-    const file = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+    harness.store.updateDownload(transfer.id, { lifecycle: 'downloading' });
+    const file = harness.store.upsertDownloadFile({
+      download_id: transfer.id,
       putio_file_id: 30,
       relative_path: 'movie.mkv',
       size: 4,
@@ -214,7 +214,7 @@ test('processFile removes a completed download for a profile with auto-remove en
     await manager.processFile(file);
 
     assert.deepEqual(harness.service.listDownloads(), []);
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
     assert.deepEqual(harness.putio.deletedFiles, [20]);
     assert.deepEqual(harness.putio.deletedTransfers, [10]);
     assert.equal(
@@ -239,7 +239,7 @@ test('poll removes an already processed prowlarr download that still has local f
       enabled: true,
     });
     const { transfer, filePath } = await seedCompleteTransfer(harness, profile);
-    harness.store.updateTransfer(transfer.id, { lifecycle: 'processed' });
+    harness.store.updateDownload(transfer.id, { lifecycle: 'processed' });
 
     const manager = new DownloadManager({
       config: harness.config,
@@ -249,7 +249,7 @@ test('poll removes an already processed prowlarr download that still has local f
 
     await manager.pollOnce();
 
-    assert.ok(harness.store.findTransferById(transfer.id)?.removed_at);
+    assert.ok(harness.store.findDownloadById(transfer.id)?.removed_at);
     assert.deepEqual(harness.service.listDownloads(), []);
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
   } finally {
@@ -257,7 +257,11 @@ test('poll removes an already processed prowlarr download that still has local f
   }
 });
 
-test('processed auto-remove uses the stored RPC profile, not category inference', async () => {
+// Auto-remove is a property of the profile that owns the download, read off
+// `profile_id`. The download's category is the name of a staging subfolder and
+// says nothing about who owns it — a download of Lidarr's staged under
+// `prowlarr/` is still Lidarr's, and Lidarr imports it.
+test('processed auto-remove follows the owning profile flag, not the download category', async () => {
   const harness = await createHarness();
   try {
     const prowlarr = harness.store.createProfile({
@@ -282,7 +286,6 @@ test('processed auto-remove uses the stored RPC profile, not category inference'
     });
     const { transfer, filePath } = await seedCompleteTransfer(harness, lidarr, {
       category: 'prowlarr',
-      download_dir: path.join(harness.config.targetDir, 'prowlarr'),
       lifecycle: 'processed',
     });
 
@@ -294,7 +297,7 @@ test('processed auto-remove uses the stored RPC profile, not category inference'
 
     await manager.removeProcessedAutoRemoveTransfers();
 
-    assert.ok(harness.store.findTransferById(transfer.id));
+    assert.ok(harness.store.findDownloadById(transfer.id));
     assert.deepEqual(harness.putio.deletedFiles, []);
     assert.deepEqual(harness.putio.deletedTransfers, []);
     assert.equal(await readFile(filePath, 'utf8'), 'downloaded!!');
@@ -320,7 +323,7 @@ test('finalize leaves a non-prowlarr transfer in the list as processed', async (
     // No bucket delete: nothing removed from put.io, row retained as processed.
     assert.deepEqual(harness.putio.deletedFiles, []);
     assert.deepEqual(harness.putio.deletedTransfers, []);
-    assert.equal(harness.store.findTransferById(transfer.id)?.lifecycle, 'processed');
+    assert.equal(harness.store.findDownloadById(transfer.id)?.lifecycle, 'processed');
   } finally {
     harness.store.close();
   }

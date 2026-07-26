@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>putiorr grab options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <img class="hero-icon" src="icons/icon128.png" alt="">
+      <div class="topbar-text">
+        <h1>putiorr grab</h1>
+        <p class="subtitle">Send magnet links and .torrent files to putiorr.</p>
+      </div>
+    </header>
+
+    <section id="legacyNotice" class="card callout" hidden>
+      <h2>Old site rules</h2>
+      <p class="hint">Site rules now live in putiorr: set Browser sites on each profile there, then dismiss this.</p>
+      <ul id="legacyRules" class="legacy-list"></ul>
+      <div class="actions">
+        <button id="dismissLegacy" class="button" type="button">Dismiss</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Connection</h2>
+      <div class="field">
+        <label for="baseUrl">putiorr URL</label>
+        <input id="baseUrl" type="url" placeholder="http://nas:9091">
+        <p class="hint">The root URL only — putiorr cannot be served from a subpath.</p>
+      </div>
+      <div class="field-pair">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" type="text" autocomplete="off">
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="off">
+        </div>
+      </div>
+      <div class="actions">
+        <button id="loadProfiles" class="button" type="button">Test connection &amp; load profiles</button>
+        <span id="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Profiles</h2>
+      <p class="hint">Where a grab lands is set in putiorr, on the profile itself: the sites it claims, and — for at most one profile — every site no other profile claims. A site claimed as x.example matches that host alone; claimed as *.x.example it matches every subdomain too.</p>
+      <div id="profileList" class="profile-list"></div>
+    </section>
+
+    <section class="card">
+      <h2>Behavior</h2>
+      <label class="check-row" for="autoCapture">
+        <input id="autoCapture" type="checkbox" checked>
+        <span>Auto-capture magnet and .torrent clicks</span>
+      </label>
+    </section>
+
+    <div class="actions save-row">
+      <button id="save" class="button primary" type="button">Save</button>
+    </div>
+  </main>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

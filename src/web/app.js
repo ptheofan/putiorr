@@ -26,6 +26,9 @@ import {
   createDefaultProfile,
   saveAndTestClientSettings,
   deleteProfileById,
+  closeProfileDeleteDialog,
+  confirmProfileDelete,
+  updateProfileDeleteState,
   setWizardMessage,
   setWizardHelpForField,
   updateWizardPreview,
@@ -58,6 +61,7 @@ import {
   closeDeleteConfirm,
   handleDeleteOptionChange,
   updateDeleteConfirmButtonState,
+  applyDownloadsPayload,
 } from './downloads.js';
 import { initTheme } from './theme.js';
 import { initRouter } from './router.js';
@@ -73,7 +77,7 @@ export async function loadAll() {
   state.settings = settings;
   state.profiles = profiles;
   state.downloadProfiles = downloadProfiles;
-  state.downloads = downloads;
+  applyDownloadsPayload(downloads);
   render();
   if (!consumeOAuthLanding()) promptForMissingPutioConnection();
 }
@@ -259,6 +263,8 @@ for (const input of [
   el.wizardUseSsl,
   el.wizardEnabled,
   el.wizardAutoRemoveCompleted,
+  el.wizardBrowserDomains,
+  el.wizardBrowserCatchAll,
 ]) {
   input.addEventListener('input', updateWizardPreview);
   input.addEventListener('change', updateWizardPreview);
@@ -342,6 +348,28 @@ el.downloadsSelectAll.addEventListener('change', (event) => {
 el.deleteSelectedDownloadsButton.addEventListener('click', openSelectedDownloadsDelete);
 el.deleteFromPutio.addEventListener('change', handleDeleteOptionChange);
 el.deleteLocalFiles.addEventListener('change', handleDeleteOptionChange);
+el.profileDeleteForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  confirmProfileDelete();
+});
+// Every control in this dialog changes which outcome the confirmation
+// describes, so they all recompute it — the sentence and the button state are
+// the whole safeguard on an irreversible action.
+for (const control of [
+  el.profileDeleteMode,
+  el.profileDeleteTarget,
+  el.profileDeleteRemote,
+  el.profileDeleteLocal,
+]) {
+  control.addEventListener('change', updateProfileDeleteState);
+  control.addEventListener('input', updateProfileDeleteState);
+}
+el.profileDeleteClose.addEventListener('click', closeProfileDeleteDialog);
+el.profileDeleteDialog.querySelector('[data-action="cancel-profile-delete"]')
+  .addEventListener('click', closeProfileDeleteDialog);
+el.profileDeleteDialog.addEventListener('click', (event) => {
+  if (event.target === el.profileDeleteDialog) closeProfileDeleteDialog();
+});
 el.deleteConfirmClose.addEventListener('click', closeDeleteConfirm);
 el.deleteConfirmDialog.querySelector('[data-action="cancel-delete"]').addEventListener('click', closeDeleteConfirm);
 el.deleteConfirmDialog.addEventListener('click', (event) => {

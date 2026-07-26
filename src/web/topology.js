@@ -16,6 +16,13 @@ export function topologyDownloadsForProfile(profile) {
   );
 }
 
+// A download with no owning RR profile belongs to no band on this map, so it
+// used to vanish from a view whose whole claim is to show how everything
+// connects — the one place a user would go to work out why a download is stuck.
+export function topologyOwnerlessDownloads() {
+  return (state.downloads ?? []).filter((download) => download.profileId == null);
+}
+
 export function downloadTopologyVariant(download) {
   if (download.error) return 'download-error';
   if (download.lifecycle === 'local' || download.lifecycle === 'completed') return 'download-active';
@@ -338,6 +345,27 @@ export function renderTopology() {
 
   const width = (hasDownloads ? DL.x + DL.w : RR.x + RR.w) + 24;
   updateTopologySvg(canvas, width, totalHeight, `${edges.join('')}${nodes.join('')}`);
+  renderTopologyOrphanNotice(canvas, topologyOwnerlessDownloads());
   traceTopologyKey(canvas, canvas.dataset.topologyTraceKey);
   bindTopologyTracing(canvas);
+}
+
+// Rendered outside the SVG: these downloads connect to nothing, which is
+// precisely what has to be said about them.
+export function renderTopologyOrphanNotice(canvas, orphans) {
+  let notice = canvas.querySelector('.topo-orphans');
+  if (orphans.length === 0) {
+    if (notice) notice.remove();
+    return;
+  }
+  if (!notice) {
+    notice = document.createElement('div');
+    notice.className = 'topo-orphans';
+    canvas.append(notice);
+  }
+  const names = orphans.map((download) => download.name).join(', ');
+  const text = `${orphans.length} download${orphans.length === 1 ? '' : 's'} `
+    + `${orphans.length === 1 ? 'has' : 'have'} no owning RR profile and connect to nothing on this map: ${names}. `
+    + 'Delete them from the Downloads view.';
+  if (notice.textContent !== text) notice.textContent = text;
 }

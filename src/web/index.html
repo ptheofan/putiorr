@@ -148,6 +148,32 @@
           </div>
 
           <div id="downloadsList" class="downloads-list"></div>
+
+          <div id="schemaMigrationNotice" class="schema-migration-notice" data-testid="schema-migration-notice" hidden>
+            <p id="schemaMigrationSummary" data-testid="schema-migration-summary"></p>
+            <p id="schemaMigrationWarning" class="schema-migration-warning" data-testid="schema-migration-warning" hidden></p>
+          </div>
+
+          <div id="adoptionNotice" class="schema-migration-notice" data-testid="adoption-notice" hidden>
+            <p id="adoptionNoticeText" data-testid="adoption-notice-text"></p>
+          </div>
+
+          <div id="stagingCollisionNotice" class="schema-migration-notice" data-testid="staging-collision-notice" hidden>
+            <p id="stagingCollisionText" data-testid="staging-collision-text"></p>
+          </div>
+
+          <div id="orphanedDownloads" class="orphaned-downloads" data-testid="orphaned-downloads" hidden>
+            <div class="section-head">
+              <div class="section-title-row">
+                <h3>Needs attention</h3>
+              </div>
+              <p>
+                Downloads the schema upgrade could not attach to a profile. Their files are
+                untouched on disk. Assign each one to a profile, or delete it.
+              </p>
+            </div>
+            <div id="orphanedDownloadsList" class="downloads-list"></div>
+          </div>
         </section>
 
         <section id="topology" class="panel topo-panel" data-route-view="topology" hidden>
@@ -384,9 +410,14 @@
         <input id="wizardProfileId" type="hidden">
 
         <div class="wizard-layout">
-          <div class="wizard-questions">
-            <section class="wizard-step">
-              <div class="step-label">1. App</div>
+          <!-- The RPC endpoint and Browser grabs steps exclude each other: the
+               *arr presets show the first, Putiorr Grab the second. The numbers
+               below are the *arr sequence; applyProfileTypeLayout() renumbers
+               whatever is visible whenever the wizard opens or the preset
+               changes. -->
+          <div class="wizard-questions" id="profileWizardSteps">
+            <section class="wizard-step" id="wizardAppStep">
+              <div class="step-label" data-step-title="App">1. App</div>
               <div class="field-pair">
                 <wa-select id="wizardProfileType" label="App preset" value="sonarr">
                   <wa-option value="sonarr">Sonarr</wa-option>
@@ -394,25 +425,26 @@
                   <wa-option value="lidarr">Lidarr</wa-option>
                   <wa-option value="readarr">Readarr</wa-option>
                   <wa-option value="prowlarr">Prowlarr</wa-option>
+                  <wa-option value="grab">Putiorr Grab</wa-option>
                   <wa-option value="custom">Custom</wa-option>
                 </wa-select>
                 <wa-input id="wizardProfileName" label="Display name" type="text" autocomplete="off" placeholder="Sonarr"></wa-input>
               </div>
-              <p class="field-help">The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.</p>
+              <p class="field-help" id="wizardAppStepHelp">The preset fills sensible defaults and adjusts the download funnel for the requirements of this type of *rr app.</p>
             </section>
 
-            <section class="wizard-step">
-              <div class="step-label">2. Storage</div>
+            <section class="wizard-step" id="wizardStorageStep">
+              <div class="step-label" data-step-title="Storage">2. Storage</div>
               <div class="field-pair">
                 <wa-input id="wizardPutioFolder" label="Put.io destination folder" type="text" autocomplete="off" placeholder="putiorr"></wa-input>
                 <wa-input id="wizardDownloadAt" label="Shared download folder" type="text" autocomplete="off" placeholder="/putiorr"></wa-input>
               </div>
-              <p class="field-help">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
+              <p class="field-help" id="wizardStorageStepHelp">This path must also be mounted in the app container. The category creates the final app-specific folder inside it.</p>
               <wa-select id="wizardDownloadProfile" label="Download profile"></wa-select>
             </section>
 
-            <section class="wizard-step">
-              <div class="step-label">3. RPC endpoint</div>
+            <section class="wizard-step" id="wizardRpcStep">
+              <div class="step-label" data-step-title="RPC endpoint">3. RPC endpoint</div>
               <wa-input id="wizardRpcPath" label="RPC endpoint path" type="text" autocomplete="off" placeholder="/sonarr/transmission/rpc"></wa-input>
               <div class="field-pair compact">
                 <wa-input id="wizardClientHost" label="Host from the *arr container" type="text" autocomplete="off" placeholder="putiorr"></wa-input>
@@ -420,6 +452,21 @@
               </div>
               <div class="check-grid">
                 <wa-checkbox id="wizardUseSsl">Use SSL for the download client</wa-checkbox>
+              </div>
+            </section>
+
+            <section class="wizard-step" id="wizardBrowserStep" hidden>
+              <div class="step-label" data-step-title="Browser grabs">3. Browser grabs</div>
+              <wa-input id="wizardBrowserDomains" label="Browser sites" type="text" autocomplete="off" placeholder="x.example, *.z.example" data-testid="profile-browser-domains"></wa-input>
+              <p class="field-help">Browser grabs from these sites use this profile. x.example matches that host alone; *.x.example matches it and every subdomain. Leave empty for none.</p>
+              <div class="check-grid">
+                <wa-checkbox id="wizardBrowserCatchAll" data-testid="profile-browser-catch-all">Take grabs from any site no other profile claims</wa-checkbox>
+              </div>
+            </section>
+
+            <section class="wizard-step" id="wizardOptionsStep">
+              <div class="step-label" data-step-title="Options">4. Options</div>
+              <div class="check-grid">
                 <wa-checkbox id="wizardEnabled">Enable this profile</wa-checkbox>
                 <wa-checkbox id="wizardAutoRemoveCompleted" data-testid="profile-auto-remove-completed">App will not signal import completion; remove from putiorr once files download locally</wa-checkbox>
               </div>
@@ -618,6 +665,45 @@
           <div class="button-row">
             <wa-button variant="neutral" appearance="outlined" data-action="cancel-delete">Cancel</wa-button>
             <wa-button id="deleteConfirmButton" variant="danger" appearance="accent" type="submit" data-testid="delete-confirm-submit">Delete</wa-button>
+          </div>
+        </div>
+      </form>
+    </wa-dialog>
+
+    <wa-dialog id="profileDeleteDialog" class="modal compact-modal" data-testid="profile-delete-dialog" style="--width: 660px">
+      <form id="profileDeleteForm" class="confirm-form">
+        <div class="modal-head">
+          <div>
+            <h2 id="profileDeleteTitle" data-testid="profile-delete-title">Delete RR profile</h2>
+            <p id="profileDeleteSummary" data-testid="profile-delete-summary"></p>
+          </div>
+          <button id="profileDeleteClose" class="icon-button" type="button" aria-label="Close profile delete confirmation">×</button>
+        </div>
+
+        <div class="modal-body confirm-body">
+          <wa-radio-group id="profileDeleteMode" name="profileDeleteMode" label="What happens to its downloads" data-testid="profile-delete-mode">
+            <wa-radio id="profileDeleteModeMove" value="move" data-testid="profile-delete-mode-move">Move them to another RR profile</wa-radio>
+            <wa-radio value="delete" data-testid="profile-delete-mode-delete">Remove them from putiorr</wa-radio>
+          </wa-radio-group>
+          <wa-select id="profileDeleteTarget" label="Takes these downloads over" data-testid="profile-delete-target" hidden></wa-select>
+          <p id="profileDeleteTargetEmpty" class="field-help" data-testid="profile-delete-target-empty" hidden></p>
+          <div id="profileDeleteOptions" class="confirm-body" data-testid="profile-delete-options" hidden>
+            <wa-checkbox id="profileDeleteRemote" data-testid="profile-delete-remote">Also delete them from put.io</wa-checkbox>
+            <wa-checkbox id="profileDeleteLocal" data-testid="profile-delete-local">Also delete the downloaded files from disk</wa-checkbox>
+          </div>
+          <wa-callout variant="warning" class="warning-copy">
+            <wa-icon slot="icon" name="triangle-exclamation"></wa-icon>
+            <span id="profileDeleteOutcome" data-testid="profile-delete-outcome"></span>
+          </wa-callout>
+        </div>
+
+        <p id="profileDeleteMessage" class="message modal-message" role="status"></p>
+
+        <div class="modal-actions">
+          <span></span>
+          <div class="button-row">
+            <wa-button variant="neutral" appearance="outlined" data-action="cancel-profile-delete">Cancel</wa-button>
+            <wa-button id="profileDeleteButton" variant="danger" appearance="accent" type="submit" data-testid="profile-delete-submit">Delete profile</wa-button>
           </div>
         </div>
       </form>

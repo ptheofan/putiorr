@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { downloadPolicyFromStore, saveDownloadPolicyToStore } from '../download/policy.js';
 import { logger } from '../logger.js';
 import { PutioOAuthClient } from '../putio/oauth.js';
+import { matchProfileByHost, normalizeBrowserDomains } from '../transfer/browser-domains.js';
 import { VersionChecker } from '../version.js';
+// The dashboard writes this preset into the profiles this server then routes
+// on, so the two must spell it identically; constants.js is plain data with no
+// imports of its own, which is why the server can read the same file the
+// browser is served. WEB_DIR below already points at that directory.
+import { CATCH_ALL_CONFLICT_CODE, GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -18,6 +24,12 @@ const PUTIO_SWAGGER_APP_ID = '3270';
 const OAUTH_APP_ID_SETTING = 'putio_oauth_app_id';
 const OAUTH_RELAY_URL_SETTING = 'putio_oauth_relay_url';
 const CLIENT_SETTINGS_TEST_TIMEOUT_MS = 5_000;
+// Both of the profiles table's UNIQUE columns are derived from what the wizard
+// shows, so a collision is reported in terms of the field to change.
+const UNIQUE_PROFILE_COLUMN = /UNIQUE constraint failed: profiles\.(\w+)/;
+// The shape of the endpoint grab profiles used to derive, kept as a static
+// route so an *arr still pointed at it gets a sentence rather than the SPA.
+const GRAB_RPC_PATH_PATTERN = /^\/grab\/[^/]+\/rpc$/;
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -46,6 +58,18 @@ function htmlResponse(res, status, body, sessionId) {
   res.end(body);
 }
 
+// A caller that named a profile is told what was wrong with the name, the way
+// resolveGrabProfile answers a bad profileId. Answering "Profile not found"
+// for 1.5 or "abc" describes a lookup that was never worth making, and an
+// absent value is not a malformed one — it means the caller chose the other
+// answer.
+function normalizeReassignTo(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('reassignTo must be a positive integer');
+  return id;
+}
+
 async function readJsonBody(req) {
   const chunks = [];
   let total = 0;
@@ -58,6 +82,87 @@ async function readJsonBody(req) {
   }
   if (chunks.length === 0) return {};
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+}
+
+function isTorrentMetainfoBase64(value) {
+  const data = Buffer.from(value, 'base64');
+  // Buffer.from ignores invalid base64 characters, so round-trip to reject anything that is not
+  // base64, then require a bencoded dictionary so login pages never reach put.io as a torrent.
+  if (data.toString('base64').replace(/=+$/, '') !== value.replace(/=+$/, '')) return false;
+  return data.length > 0 && data[0] === 0x64;
+}
+
+// A profile the caller named — its explicit pick or its cached default — is
+// refused when it is not a Putiorr Grab profile, and the refusal says which
+// profile and what to change: the pick comes from a right-click menu the user
+// cannot edit. Returns the refusal to send, or undefined when the profile may
+// serve grabs.
+function refuseNonGrabProfile(profile) {
+  if (profile.type === GRAB_PROFILE_TYPE) return undefined;
+  return {
+    ok: false,
+    status: 400,
+    error: `${profile.name} is not a Putiorr Grab profile; set its App preset to Putiorr Grab in putiorr`,
+  };
+}
+
+// The wizard checkbox that fixes an unrouted grab, quoted verbatim: the user
+// has to find it on a page this message cannot open, so an approximation of the
+// label is worse than none.
+const CATCH_ALL_LABEL = 'Take grabs from any site no other profile claims';
+
+// The last refusal before a grab is lost, so it names both halves of what went
+// wrong — the site nothing claimed, and the setting nobody ticked. Anything
+// vaguer leaves the user with a link that failed and no way to find out why.
+//
+// The host is attacker-influenced and unbounded, and this sentence ends up in a
+// Chrome notification, so it is capped at the longest a hostname may legally
+// be. A grab that carried no host had no site to claim in the first place, and
+// says so rather than inventing one.
+function unclaimedGrabRefusal(pageHost) {
+  const suffix = `tick "${CATCH_ALL_LABEL}" on a profile in putiorr`;
+  return pageHost
+    ? `No Putiorr Grab profile claims ${pageHost.slice(0, 253)} and none is set to take`
+      + ` everything else; ${suffix}`
+    : `No Putiorr Grab profile is set to take grabs from a site it does not list; ${suffix}`;
+}
+
+// SQLite answers a duplicate with the column its index is on, which the wizard
+// shows under the form as-is. The *arr presets show the endpoint path, so
+// there the path is what has to change; a grab profile holds no path at all,
+// so the only thing it can collide on is the slug its display name makes.
+// Anything that is not a uniqueness failure is passed through untouched.
+export function profileConflictError(error, input = {}, store) {
+  const column = UNIQUE_PROFILE_COLUMN.exec(error?.message ?? '')?.[1];
+  if (!column) return error;
+  // Named after the profile that actually holds the value, never after the one
+  // being written: "a profile named X already exists" about the name the user
+  // just typed sends them looking for a profile that does not exist. A disabled
+  // profile is named here like any other — it still holds its path, which is
+  // exactly why the save was refused.
+  const owner = column === 'slug'
+    ? store?.findProfileBySlug(input.slug)
+    : store?.findProfileByRpcPath(input.rpc_path);
+  const ownerName = String(owner?.name ?? '').trim();
+  // No type check: a grab profile holds no rpc_path at all now, so a
+  // uniqueness failure on that column can only come from a profile whose
+  // wizard shows the field.
+  if (column === 'rpc_path') {
+    return new Error(ownerName
+      ? `RPC endpoint path ${input.rpc_path} is already used by ${ownerName}; choose a different path`
+      : `RPC endpoint path ${input.rpc_path} is already used by another profile; choose a different path`);
+  }
+  return new Error(ownerName
+    ? `A profile named "${ownerName}" already exists; choose a different display name`
+    : 'Another profile already uses this display name; choose a different one');
+}
+
+function writeProfile(store, input, write) {
+  try {
+    return write();
+  } catch (error) {
+    throw profileConflictError(error, input, store);
+  }
 }
 
 function timingSafeEqualString(a, b) {
@@ -236,6 +341,7 @@ export class TransmissionRpcServer {
     this.webSocketClients = new Set();
     this.webSocketDownloadsBroadcastTimer = undefined;
     this.webSocketRefreshTimer = undefined;
+    this.grabAutoRemoveWarned = new Set();
     this.server = http.createServer((req, res) => {
       this.handle(req, res).catch((error) => {
         logger.error('unhandled rpc error', { error: error.message, stack: error.stack });
@@ -361,21 +467,60 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const profiles = this.service.store.listProfiles();
-    const rpcProfile = requestPath === '/transmission/rpc' && profiles.length > 1
-      ? undefined
-      : this.service.store.findProfileByRpcPath(requestPath);
-    if (rpcProfile || requestPath === '/transmission/rpc') {
+    // Only a profile an *arr download client can reach makes the shared
+    // endpoint ambiguous. A Putiorr Grab profile is never one: nothing connects
+    // to it, which is why the wizard hides its RPC settings. Counting it here
+    // used to unbind this endpoint the moment a user added their first grab
+    // profile, breaking torrent-remove on a setup that had been working.
+    const rpcProfiles = this.service.listArrProfiles();
+    const pathProfile = this.service.store.findProfileByRpcPath(requestPath);
+    // A Putiorr Grab profile used to hold a derived /grab/<slug>/rpc only
+    // because profiles.rpc_path was NOT NULL UNIQUE, and that accident made it
+    // a live Transmission endpoint an *arr could add into. Phase 3 removed the
+    // path, which would leave the endpoint falling through to serveWeb — and
+    // serveWeb answers any unknown path with index.html and HTTP 200, so an
+    // *arr still pointed at it would read "success" and garbage. The guard is
+    // therefore mostly static, on the shape of the path.
+    //
+    // Only mostly: nothing stops a user typing that shape into an *arr
+    // profile's RPC endpoint field, and refusing ahead of the lookup took a
+    // live, configured endpoint off them with a message about a browser
+    // extension. The shape means "retired" when no *arr profile owns it — a
+    // grab profile owning one is the very state phase 3 removed, so that is
+    // refused like the rest.
+    if (GRAB_RPC_PATH_PATTERN.test(requestPath)
+      && (!pathProfile || pathProfile.type === GRAB_PROFILE_TYPE)) {
+      this.refuseGrabRpcPath(req, res);
+      return;
+    }
+    const rpcProfile = requestPath === SHARED_RPC_PATH
+      ? (rpcProfiles.length === 1 ? rpcProfiles[0] : undefined)
+      : pathProfile;
+    if (rpcProfile || requestPath === SHARED_RPC_PATH) {
       await this.handleRpc(req, res, rpcProfile);
       return;
     }
 
     if (requestPath.startsWith('/api/')) {
-      await this.handleApi(req, res, requestPath);
+      await this.handleApi(req, res, requestPath, url.searchParams);
       return;
     }
 
     await this.serveWeb(req, res, requestPath);
+  }
+
+  // Transmission reports failures as a human-readable string in `result` with
+  // HTTP 200, and *arr apps surface that string, so the refusal arrives where
+  // the user is looking instead of as an opaque transport error.
+  refuseGrabRpcPath(req, res) {
+    logger.warn('refused Transmission RPC on a retired Putiorr Grab endpoint', {
+      requestPath: new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`).pathname,
+      requestMethod: req.method,
+    });
+    jsonResponse(res, 200, {
+      result: 'This endpoint belonged to a Putiorr Grab profile and no longer accepts Transmission RPC;'
+        + ' browser grabs reach a grab profile through the browser extension',
+    }, this.sessionId);
   }
 
   async handleRpc(req, res, profile) {
@@ -387,7 +532,18 @@ export class TransmissionRpcServer {
       return;
     }
 
-    const currentProfile = profile ? this.service.requireProfile(profile) : undefined;
+    // The request path names the profile when it can. When it cannot — the
+    // shared endpoint every *arr is pointed at out of the box — the calling
+    // app's own User-Agent does, which is what lets them share one endpoint
+    // with no URL Base change. A profile addressed on its own path is never
+    // overruled by the header, so the client-side override always wins.
+    //
+    // Whether the profile is switched on is not asked here. It used to be, and
+    // it refused every method — so an *arr pointed at a profile the user had
+    // just disabled could not list, import or clean up the downloads already in
+    // its queue, and re-grabbed all of them on its next RSS cycle. Disabled
+    // means "accepts no new work", so torrent-add is the method that asks.
+    const currentProfile = profile;
     const clientProfile = currentProfile
       ? undefined
       : this.service.findProfileByUserAgent(req.headers['user-agent']);
@@ -425,6 +581,9 @@ export class TransmissionRpcServer {
         requestPath,
         requestHeaders: requestHeadersForLog(req.headers),
         requestPayload: rpcRequest,
+        // Whichever named the profile — the path, or the client's own name.
+        // A failure on the shared endpoint is read to find out which profile
+        // answered, and "none" is itself the answer worth recording.
         matchedProfile: (currentProfile ?? clientProfile)
           ? {
               id: (currentProfile ?? clientProfile).id,
@@ -433,11 +592,16 @@ export class TransmissionRpcServer {
               rpcPath: (currentProfile ?? clientProfile).rpc_path,
             }
           : null,
-        enabledProfiles: this.service.store.listProfiles().map((enabledProfile) => ({
-          id: enabledProfile.id,
-          name: enabledProfile.name,
-          slug: enabledProfile.slug,
-          rpcPath: enabledProfile.rpc_path,
+        // Every profile, switched on or off, with which it is. A disabled
+        // profile is one of the likelier reasons a request is being logged
+        // here at all, and the old enabled-only list left it out of the very
+        // record someone reads to find out why.
+        profiles: this.service.store.listProfiles().map((listed) => ({
+          id: listed.id,
+          name: listed.name,
+          slug: listed.slug,
+          rpcPath: listed.rpc_path,
+          enabled: listed.enabled,
         })),
         error: error.message,
       });
@@ -459,7 +623,9 @@ export class TransmissionRpcServer {
     }
   }
 
-  async handleApi(req, res, requestPath) {
+  // The query string is passed alongside the path rather than replacing it:
+  // every branch below matches on the path, and so does the failure log.
+  async handleApi(req, res, requestPath, searchParams = new URLSearchParams()) {
     try {
       const method = req.method ?? 'GET';
 
@@ -573,7 +739,19 @@ export class TransmissionRpcServer {
       }
 
       if (method === 'GET' && requestPath === '/api/profiles') {
-        jsonResponse(res, 200, this.service.store.listProfiles({ includeDisabled: true }), this.sessionId);
+        // The browser extension asks for `?type=grab` so it never has to know
+        // the preset vocabulary. An absent or empty value is a caller with no
+        // filter, not one asking for profiles whose type is the empty string.
+        // Presets are stored lowercase wherever they enter putiorr, so the
+        // filter that reads them back normalizes the same way.
+        const type = (searchParams.get('type') ?? '').trim().toLowerCase();
+        const profiles = this.service.store.listProfiles();
+        jsonResponse(
+          res,
+          200,
+          type ? profiles.filter((profile) => profile.type === type) : profiles,
+          this.sessionId,
+        );
         return;
       }
 
@@ -618,39 +796,106 @@ export class TransmissionRpcServer {
         if (defaultDownloadProfile?.id === id || downloadProfile.slug === 'default') {
           throw new Error('Default download profile cannot be deleted');
         }
-        this.service.store.deleteDownloadProfile(id);
-        if (defaultDownloadProfile) {
-          this.service.store.assignMissingProfileDownloadProfiles(defaultDownloadProfile.id);
-        }
+        // ON DELETE RESTRICT: the RR profiles that use it have to be moved
+        // first, in the same transaction. Deleting and reassigning afterwards
+        // now throws FOREIGN KEY constraint failed for every download profile
+        // anything actually uses.
+        this.service.store.deleteDownloadProfile(id, { reassignTo: defaultDownloadProfile?.id });
         jsonResponse(res, 200, { ok: true }, this.sessionId);
         return;
       }
 
       if (method === 'POST' && requestPath === '/api/profiles') {
-        const profile = this.service.store.createProfile(normalizeProfileInput(await readJsonBody(req)));
-        jsonResponse(res, 201, profile, this.sessionId);
+        const input = normalizeProfileInput(await readJsonBody(req));
+        const profile = writeProfile(this.service.store, input, () => this.service.store.createProfile(input));
+        jsonResponse(res, 201, profileResponse(profile, input), this.sessionId);
         return;
       }
 
       const profileMatch = requestPath.match(/^\/api\/profiles\/(\d+)$/);
       if (profileMatch && method === 'PUT') {
-        const profile = this.service.store.updateProfile(
-          Number(profileMatch[1]),
-          normalizeProfileInput(await readJsonBody(req), { partial: true }),
+        const input = normalizeProfileInput(await readJsonBody(req), { partial: true });
+        const profile = writeProfile(
+          this.service.store,
+          input,
+          () => this.service.store.updateProfile(Number(profileMatch[1]), input),
         );
         if (!profile) throw new Error('Profile not found');
-        jsonResponse(res, 200, profile, this.sessionId);
+        jsonResponse(res, 200, profileResponse(profile, input), this.sessionId);
+        return;
+      }
+
+      // What the confirmation states before anything irreversible is offered.
+      // Read fresh rather than counted off the dashboard's list: tombstoned
+      // downloads are not in it, and they still hold put.io transfers, still
+      // hold files, and still block the delete.
+      const profilePreviewMatch = requestPath.match(/^\/api\/profiles\/(\d+)\/deletion-preview$/);
+      if (profilePreviewMatch && method === 'GET') {
+        jsonResponse(
+          res,
+          200,
+          await this.service.profileDeletionPreview(Number(profilePreviewMatch[1])),
+          this.sessionId,
+        );
+        return;
+      }
+
+      // One site, appended to one profile. The browser toolbar popup claims the
+      // site of the page it is open on, and appending here rather than there is
+      // the whole reason this route exists: a popup that read the list, added
+      // to it and wrote it back would drop another window's site whenever two
+      // were open, under a reply that said the claim had worked.
+      const browserSiteMatch = requestPath.match(/^\/api\/profiles\/(\d+)\/browser-sites$/);
+      if (browserSiteMatch && method === 'POST') {
+        await this.handleClaimBrowserSite(req, res, Number(browserSiteMatch[1]));
         return;
       }
 
       if (profileMatch && method === 'DELETE') {
-        this.service.store.deleteProfile(Number(profileMatch[1]));
-        jsonResponse(res, 200, { ok: true }, this.sessionId);
+        const body = await readJsonBody(req);
+        // Neither delete flag defaults to true (design decision 5), and the
+        // third answer — move these downloads to another profile — is a
+        // different outcome for the same rows, so it is sent on its own.
+        const result = await this.service.deleteProfileWithDownloads(Number(profileMatch[1]), {
+          reassignTo: normalizeReassignTo(body.reassignTo ?? body.reassign_to),
+          deleteDownloads: body.deleteDownloads === true,
+          deleteRemote: body.deleteRemote === true,
+          deleteLocal: body.deleteLocal === true,
+        });
+        this.scheduleWebSocketDownloadsBroadcast('profiles:delete');
+        jsonResponse(res, 200, result, this.sessionId);
         return;
       }
 
       if (method === 'GET' && requestPath === '/api/downloads') {
-        jsonResponse(res, 200, this.service.listDownloads(), this.sessionId);
+        jsonResponse(res, 200, this.downloadsResponse(), this.sessionId);
+        return;
+      }
+
+      // Quarantined legacy rows, kept out of the working list on purpose: the
+      // dashboard renders them as a needs-attention section, not interleaved
+      // with downloads that are actually running.
+      const orphanAssignMatch = requestPath.match(/^\/api\/downloads\/orphaned\/(\d+)\/assign$/);
+      if (orphanAssignMatch && method === 'POST') {
+        const body = await readJsonBody(req);
+        const result = this.service.assignOrphanedDownload(
+          Number(orphanAssignMatch[1]),
+          normalizeOptionalId(body.profileId ?? body.profile_id),
+        );
+        this.scheduleWebSocketDownloadsBroadcast('downloads:orphan-assign');
+        jsonResponse(res, 200, { ...result, ...this.downloadsResponse() }, this.sessionId);
+        return;
+      }
+
+      const orphanDeleteMatch = requestPath.match(/^\/api\/downloads\/orphaned\/(\d+)$/);
+      if (orphanDeleteMatch && method === 'DELETE') {
+        const body = await readJsonBody(req);
+        const result = await this.service.deleteOrphanedDownload(Number(orphanDeleteMatch[1]), {
+          deleteRemote: body.deleteRemote === true,
+          deleteLocal: body.deleteLocal === true,
+        });
+        this.scheduleWebSocketDownloadsBroadcast('downloads:orphan-delete');
+        jsonResponse(res, 200, { ...result, ...this.downloadsResponse() }, this.sessionId);
         return;
       }
 
@@ -661,7 +906,7 @@ export class TransmissionRpcServer {
         this.scheduleWebSocketDownloadsBroadcast('downloads:start');
         jsonResponse(res, 200, {
           ...result,
-          downloads: this.service.listDownloads(),
+          ...this.downloadsResponse(),
         }, this.sessionId);
         return;
       }
@@ -697,10 +942,28 @@ export class TransmissionRpcServer {
         return;
       }
 
+      if (method === 'POST' && requestPath === '/api/grab') {
+        await this.handleGrab(req, res);
+        return;
+      }
+
       jsonResponse(res, 404, { error: 'Not Found' }, this.sessionId);
     } catch (error) {
       logger.warn('api request failed', { path: requestPath, error: error.message });
-      jsonResponse(res, 400, { error: error.message }, this.sessionId);
+      // A delete that stopped part-way through carries what it had already
+      // done. Answering with the message alone would leave the caller to parse
+      // a sentence to find out that the put.io copies are gone.
+      jsonResponse(res, 400, {
+        error: error.message,
+        // A second catch-all is the one refusal with an action behind it, and
+        // the wizard offers that action. The sentence stays exactly what it
+        // was; the code and the holder are what the offer is built from,
+        // because deciding it from the prose would break on the next reword.
+        ...(error.catchAllHolder
+          ? { code: CATCH_ALL_CONFLICT_CODE, catchAllHolder: error.catchAllHolder }
+          : {}),
+        ...(error.downloadsReport ? { downloads: error.downloadsReport } : {}),
+      }, this.sessionId);
     }
   }
 
@@ -731,6 +994,17 @@ export class TransmissionRpcServer {
       },
       defaultDownloadProfileId: defaultDownloadProfile?.id,
       downloadPolicy: downloadPolicyFromStore(this.service.store, this.config),
+      // What the last schema upgrade migrated and quarantined. The dashboard
+      // renders the quarantine itself; this is the record of the run.
+      schemaMigrations: this.service.store.schemaMigrationReports(),
+      // put.io transfers the last poll could not attribute to one RR profile.
+      // The dashboard renders it; without it, a shared put.io folder means
+      // nothing is ever adopted and nothing ever says so.
+      adoptionNotices: this.service.store.adoptionNotices(),
+      // Staging folders two downloads resolve to. Only the older one is
+      // downloaded, so the other is waiting on a decision nobody has been
+      // asked for yet.
+      stagingCollisions: this.service.store.stagingCollisions(),
     };
   }
 
@@ -951,12 +1225,19 @@ export class TransmissionRpcServer {
     }, 100);
   }
 
+  downloadsResponse() {
+    return {
+      downloads: this.service.listDownloads(),
+      orphaned: this.service.listOrphanedDownloads(),
+    };
+  }
+
   webDownloadsState(reason) {
     return {
       type: 'downloads',
       reason,
       sentAt: new Date().toISOString(),
-      downloads: this.service.listDownloads(),
+      ...this.downloadsResponse(),
     };
   }
 
@@ -1020,8 +1301,18 @@ export class TransmissionRpcServer {
     logger.debug('rpc dispatch', { method });
     switch (method) {
       case 'session-get':
-        profile = profile ?? clientProfile;
-        profile = profile ? this.service.requireProfile(profile) : undefined;
+        // session-get only advertises a directory, so an endpoint that names no
+        // profile answers with the server's own target dir rather than guessing
+        // a profile from the client. It is deliberately not a hard refusal:
+        // *arr apps call session-get to test the connection, and a refusal here
+        // reads as "putiorr is down" instead of "address your own RPC path".
+        //
+        // Which is also why it does not ask whether the profile is disabled.
+        // That check belongs on the doors that create work; here it contradicts
+        // the same sentence one line up — Sonarr and Radarr call session-get for
+        // GetStatus() and Test() and to resolve OutputRootFolders, so refusing
+        // it strands exactly the in-flight work torrent-get and torrent-remove
+        // are kept open for.
         return {
           'download-dir': profile?.download_at ?? this.config.targetDir,
           'rpc-version': 15,
@@ -1031,23 +1322,247 @@ export class TransmissionRpcServer {
       case 'torrent-add':
         return this.service.addTorrent(args, profile, clientProfile);
       case 'torrent-get':
-        return this.service.getTorrents(args, profile ?? clientProfile);
+        return this.service.getTorrents(args, profile, clientProfile);
       case 'torrent-set':
       case 'queue-move-top':
         return {};
       case 'torrent-remove':
-        return this.service.removeTorrents(args, profile ?? clientProfile);
+        return this.service.removeTorrents(args, profile, clientProfile);
       default:
         logger.debug('unsupported rpc method', { method });
         return {};
     }
   }
 
+  // A custom header cannot be set by a cross-site simple request, so browsers must preflight
+  // it; the server never answers preflights, which keeps attacker pages out of these endpoints.
+  // Shared by the two routes a web page can reach from the user's own browser:
+  // spending their put.io account, and handing a site to a profile so that a
+  // later grab from it lands there. Answers true when the request was refused.
+  refuseWithoutGrabHeader(req, res, subject) {
+    if (req.headers['x-putiorr-grab']) return false;
+    jsonResponse(res, 403, { error: `${subject} requires the X-Putiorr-Grab header` }, this.sessionId);
+    return true;
+  }
+
+  async handleGrab(req, res) {
+    if (this.refuseWithoutGrabHeader(req, res, 'grab')) return;
+    const body = await readJsonBody(req);
+    const pageHost = String(body.pageHost ?? '').trim();
+    const resolved = this.resolveGrabProfile(body, pageHost);
+    if (!resolved.ok) {
+      jsonResponse(res, resolved.status, { error: resolved.error }, this.sessionId);
+      return;
+    }
+    const { profile } = resolved;
+    const magnet = String(body.magnet ?? '').trim().replace(/^magnet:/i, 'magnet:');
+    const torrentBase64 = String(body.torrentBase64 ?? '').trim();
+    if (!torrentBase64 && !magnet.startsWith('magnet:')) {
+      jsonResponse(res, 400, { error: 'grab requires a magnet link or torrentBase64 metainfo' }, this.sessionId);
+      return;
+    }
+    if (torrentBase64 && !isTorrentMetainfoBase64(torrentBase64)) {
+      jsonResponse(res, 400, { error: 'torrentBase64 is not a valid .torrent file' }, this.sessionId);
+      return;
+    }
+    if (!profile.auto_remove_completed && !this.grabAutoRemoveWarned.has(profile.id)) {
+      this.grabAutoRemoveWarned.add(profile.id);
+      logger.warn('grab profile keeps completed transfers in the list; enable auto-remove on the profile for browser grabs', {
+        profile: profile.slug,
+      });
+    }
+    logger.info('grab from browser', {
+      profile: profile.slug,
+      sourceType: torrentBase64 ? 'torrent' : 'magnet',
+      // The page URL and host are attacker-influenced and unbounded; a log line
+      // is not the place to copy an arbitrarily long one.
+      sourceUrl: String(body.sourceUrl ?? '').slice(0, 500),
+      // Which site a grab came from is what explains which profile it landed in.
+      pageHost: pageHost.slice(0, 253),
+    });
+    const args = torrentBase64
+      // The upload name goes to put.io as sent; coercing it here keeps a client
+      // that posts a number or an object from naming a transfer with one.
+      // addTorrent falls back to "upload.torrent" when the result is empty.
+      ? { metainfo: torrentBase64, filename: String(body.filename ?? '').trim() }
+      : { filename: magnet };
+    const result = await this.service.addTorrent(args, profile);
+    this.scheduleWebSocketDownloadsBroadcast('api:grab');
+    jsonResponse(res, 200, {
+      ok: true,
+      // The caller may not have chosen the profile, so it is told which one
+      // answered rather than left to repeat its own guess back to the user.
+      profile: { id: profile.id, name: profile.name },
+      transfer: {
+        id: result['torrent-added'].id,
+        name: result['torrent-added'].name,
+      },
+    }, this.sessionId);
+  }
+
+  // Claims one site for one Putiorr Grab profile: the toolbar popup's only
+  // write. The site goes through normalizeBrowserDomains, the same path the
+  // profile form uses, so the popup can state what will be stored before the
+  // click and be right about it.
+  //
+  // The entry may be a wildcard: the popup's field is editable, so a user on
+  // dl.x.example can claim "*.x.example" and take the whole domain.
+  //
+  // The very same entry on another profile is refused rather than moved. A move
+  // is two profiles changing at once, from a popup that shows one of them, and
+  // two profiles holding one entry would leave every grab from it decided by
+  // creation order. The refusal names the profile to edit, and the dashboard is
+  // where that edit can be seen whole.
+  //
+  // Coverage that merely overlaps is not refused: an exact entry beats a
+  // wildcard, so claiming dl.x.example while another profile holds
+  // "*.x.example" is the user narrowing one host out of a domain, which is a
+  // thing worth being able to do from here.
+  async handleClaimBrowserSite(req, res, profileId) {
+    if (this.refuseWithoutGrabHeader(req, res, 'claiming a site')) return;
+    const body = await readJsonBody(req);
+
+    const profile = this.service.store.findProfileById(profileId);
+    if (!profile) {
+      jsonResponse(res, 404, { error: 'Profile not found' }, this.sessionId);
+      return;
+    }
+    // Same refusal an explicit grab into the wrong preset gets: only a Putiorr
+    // Grab profile's browser sites are ever consulted, so listing one anywhere
+    // else would be a setting that reads as configuration and routes nothing.
+    const wrongPreset = refuseNonGrabProfile(profile);
+    if (wrongPreset) {
+      jsonResponse(res, wrongPreset.status, { error: wrongPreset.error }, this.sessionId);
+      return;
+    }
+
+    const host = String(body.host ?? '').trim();
+    if (!host) {
+      jsonResponse(res, 400, { error: 'host is required' }, this.sessionId);
+      return;
+    }
+    const { domains, errors, warnings } = normalizeBrowserDomains(host);
+    if (errors.length) {
+      jsonResponse(res, 400, { error: browserDomainError(errors) }, this.sessionId);
+      return;
+    }
+    // The popup is about the page in one tab, and it states the one site it is
+    // about to store. A list would make that sentence wrong the moment it was
+    // sent; editing several at once is the profile form's job.
+    if (domains.length !== 1) {
+      jsonResponse(res, 400, {
+        error: `A claim adds one site at a time; "${host}" is more than one`,
+      }, this.sessionId);
+      return;
+    }
+    const site = domains[0];
+
+    // Read and write in one synchronous stretch, with no await between them:
+    // the store is synchronous, so no second request can interleave here and
+    // append onto the list this one already read.
+    //
+    // Already handled by this profile — the same entry twice, or a host a
+    // wildcard it lists already covers. Storing it again would add a row that
+    // routes nothing, so the answer is the list as it stands and `added: null`.
+    if (alreadyClaimedHere(profile, site)) {
+      jsonResponse(res, 200, claimResponse(profile, null, warnings), this.sessionId);
+      return;
+    }
+    // Disabled profiles are deliberately included, exactly as they are when a
+    // grab resolves: one still holds its entries.
+    const holder = this.service.store.findProfileClaimingBrowserSite(site, { exceptId: profile.id });
+    if (holder) {
+      jsonResponse(res, 409, { error: claimedElsewhereRefusal(holder, site) }, this.sessionId);
+      return;
+    }
+
+    const updated = this.service.store.updateProfile(profile.id, {
+      browser_domains: [...profile.browser_domains, site],
+    });
+    logger.info('browser site claimed', { profile: updated.slug, site });
+    jsonResponse(res, 200, claimResponse(updated, site, warnings), this.sessionId);
+  }
+
+  // Resolution order for a browser grab: the caller's explicit pick, then the
+  // profile that claims the site the grab came from, then the grab profile set
+  // to take everything else. Returns `{ ok: true, profile }` or the refusal to
+  // send as `{ ok: false, status, error }` — tagged so a resolved profile is
+  // never confused with a branch that forgot to answer. Every path ends at a
+  // Putiorr Grab profile: no other preset is configured for browser grabs.
+  //
+  // There is no fourth step. The caller used to send the profile its own
+  // options page had been told to fall back to, which put a routing decision in
+  // the one place that cannot see the profiles it decides between; a
+  // `defaultProfileId` in the body is now read by nothing.
+  //
+  // The refusals follow this file's convention: one that is about a named field
+  // opens with that field spelled exactly as the caller sends it, and one that
+  // is a plain sentence opens capitalized.
+  resolveGrabProfile(body, pageHost) {
+    // '' and null are how a caller spells "I made no pick" — a hand-written
+    // request building the body from an empty field, or a cleared one. Neither
+    // is the caller naming a profile, so both fall through to site matching.
+    const explicitId = body.profileId;
+    if (explicitId !== undefined && explicitId !== null && String(explicitId) !== '') {
+      // An explicit pick is not silently downgraded to site matching: the
+      // caller named a profile, so a value that is not an id is its own error.
+      const profileId = Number(explicitId);
+      if (!Number.isInteger(profileId) || profileId <= 0) {
+        return { ok: false, status: 400, error: 'profileId must be a positive integer' };
+      }
+      // Disabled is deliberately not filtered here — requireProfile refuses it
+      // by name later, which tells the user why their pick did nothing.
+      const profile = this.service.store.findProfileById(profileId);
+      if (!profile) return { ok: false, status: 404, error: 'Profile not found' };
+      return refuseNonGrabProfile(profile) ?? { ok: true, profile };
+    }
+
+    // A disabled profile still claims its sites, and addTorrent then refuses
+    // the grab by name. Filtering it out here instead sent the grab on to the
+    // next candidate — a transfer landing in a folder the user never chose,
+    // from switching a profile off. Only a Putiorr Grab profile claims a site,
+    // so browser_domains left on an *arr profile is not consulted.
+    const matched = pageHost
+      ? matchProfileByHost(
+        this.service.store.listProfiles()
+          .filter((profile) => profile.type === GRAB_PROFILE_TYPE),
+        pageHost,
+      )
+      : undefined;
+    if (matched) return { ok: true, profile: matched.profile };
+
+    // Only once no profile's browser sites matched. The catch-all is a
+    // fallback, not a wildcard: a profile that claims specific sites still wins
+    // for those sites, which is the whole reason the two settings can sit on
+    // the same profile without contradicting each other.
+    //
+    // The store filters it to the grab preset and, deliberately, not by
+    // `enabled` — a disabled catch-all still holds the role, and addTorrent
+    // refuses the grab by name rather than letting it fall through to nothing.
+    const catchAll = this.service.store.findCatchAllGrabProfile();
+    if (catchAll) return { ok: true, profile: catchAll };
+
+    return { ok: false, status: 400, error: unclaimedGrabRefusal(pageHost) };
+  }
+
   async testClientSettings(input) {
     const profile = normalizeProfileInput(input, { partial: true });
-    const rpcPath = profile.rpc_path || normalizeRpcPath(input.rpc_path ?? input.rpcPath ?? '/transmission/rpc');
-    const rpcPathIsActive = rpcPath === '/transmission/rpc' || Boolean(this.service.store.findProfileByRpcPath(rpcPath));
-    const testedPath = rpcPathIsActive ? rpcPath : '/transmission/rpc';
+    // No download client connects to a grab profile, so its host, port, SSL and
+    // endpoint are defaults the wizard never shows. Probing them reports a
+    // failure in terms of every field the same wizard just said does not apply
+    // — and the folder, which is the one thing a browser grab needs, is the
+    // only thing worth checking here.
+    if (profile.type === GRAB_PROFILE_TYPE) {
+      await probeWritableDownloadFolder(profile.download_at);
+      return {
+        ok: true,
+        testedRpcPath: false,
+        message: 'Shared folder write test passed from putiorr. Browser grabs are downloaded straight into that folder.',
+      };
+    }
+    const rpcPath = profile.rpc_path || normalizeRpcPath(input.rpc_path ?? input.rpcPath ?? SHARED_RPC_PATH);
+    const rpcPathIsActive = rpcPath === SHARED_RPC_PATH || Boolean(this.service.store.findProfileByRpcPath(rpcPath));
+    const testedPath = rpcPathIsActive ? rpcPath : SHARED_RPC_PATH;
     const url = clientSettingsUrl({
       host: profile.client_host || 'putiorr',
       port: profile.client_port || '9091',
@@ -1061,7 +1576,10 @@ export class TransmissionRpcServer {
       testedRpcPath: rpcPathIsActive,
       message: rpcPathIsActive
         ? 'Connection and shared folder write tests passed from putiorr. Confirm the *arr container can see the same host and download folder.'
-        : 'Host, port, SSL, and shared folder write tests passed from putiorr. Save and enable this profile before testing its custom RPC path.',
+        // Not "save and enable": a saved profile's path answers whether or not
+        // it is switched on — disabling refuses new adds, it does not retire
+        // the endpoint — so saving is the whole of what is missing here.
+        : 'Host, port, SSL, and shared folder write tests passed from putiorr. Save this profile before testing its custom RPC path.',
     };
   }
 
@@ -1131,6 +1649,60 @@ async function probeWritableDownloadFolder(downloadAt) {
   }
 }
 
+const BROWSER_DOMAIN_ERROR_LIMIT = 5;
+
+// #profileWizardMessage renders with white-space: pre-line, so one refused
+// entry per line. Capped because the request body is bounded by bytes rather
+// than by entry count: a pasted list must not turn into a message no dialog can
+// show.
+function browserDomainError(errors) {
+  const shown = errors.slice(0, BROWSER_DOMAIN_ERROR_LIMIT).join('\n');
+  return errors.length > BROWSER_DOMAIN_ERROR_LIMIT
+    ? `${shown}\n…and ${errors.length - BROWSER_DOMAIN_ERROR_LIMIT} more`
+    : shown;
+}
+
+// What a claim answers with: the profile it was about and the list it now
+// holds, in both key styles the rest of the profile API uses. `added` is the
+// site that was stored, or null when the profile already handled the host —
+// the popup says "claimed" for one and "already claims it" for the other.
+function claimResponse(profile, added, warnings = []) {
+  return {
+    ok: true,
+    profile: { id: profile.id, name: profile.name },
+    browser_domains: profile.browser_domains,
+    browserDomains: profile.browser_domains,
+    added,
+    ...(added && warnings.length ? { browser_domain_warnings: warnings } : {}),
+  };
+}
+
+// Would this claim change anything? The entry itself, or a wildcard on this
+// same profile that already covers the host being claimed. A wildcard entry is
+// a claim about a whole domain rather than a host, so nothing but the identical
+// entry counts as already having it.
+function alreadyClaimedHere(profile, site) {
+  const domains = Array.isArray(profile.browser_domains) ? profile.browser_domains : [];
+  if (domains.includes(site)) return true;
+  if (site.startsWith('*.')) return false;
+  return Boolean(matchProfileByHost([profile], site));
+}
+
+// Names the profile that holds the very entry being claimed. It is the same
+// string on both profiles — overlapping coverage is not refused — so there is
+// nothing to explain beyond which profile to edit.
+function claimedElsewhereRefusal(holder, site) {
+  return `${holder.name} already claims ${site};`
+    + ' remove the site there first if it should belong to another profile';
+}
+
+// Warnings are advice about what was just typed, not profile data: they ride
+// along on the reply that answered for them and are never stored.
+function profileResponse(profile, input) {
+  const warnings = input.browser_domain_warnings;
+  return warnings?.length ? { ...profile, browser_domain_warnings: warnings } : profile;
+}
+
 function normalizeProfileInput(input, { partial = false } = {}) {
   const output = {};
   const name = input.name == null ? undefined : String(input.name).trim();
@@ -1140,10 +1712,16 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const autoRemoveCompleted = input.auto_remove_completed ?? input.autoRemoveCompleted;
   const putioFolderName = input.putio_folder_name ?? input.putioFolderName;
   const downloadAt = input.downloadAt ?? input.download_at ?? input.local_path ?? input.localPath;
-  const rpcPath = input.rpc_path ?? input.rpcPath;
+  // ?? would fold an explicit null into "not mentioned", and null is exactly
+  // what a grab profile sends to clear the path it may have held.
+  const rpcPath = input.rpc_path !== undefined ? input.rpc_path : input.rpcPath;
   const clientHost = input.client_host ?? input.clientHost;
   const clientPort = input.client_port ?? input.clientPort;
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
+  const browserDomains = input.browser_domains ?? input.browserDomains;
+  const browserCatchAll = input.browser_catch_all ?? input.browserCatchAll;
+  const takeOverCatchAll = input.take_over_catch_all ?? input.takeOverCatchAll;
+  const takeOverCatchAllFrom = input.take_over_catch_all_from ?? input.takeOverCatchAllFrom;
 
   if (name !== undefined) output.name = name;
   if (type !== undefined) output.type = type || 'custom';
@@ -1152,18 +1730,63 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   if (autoRemoveCompleted !== undefined) output.auto_remove_completed = normalizeBooleanInput(autoRemoveCompleted);
   if (putioFolderName !== undefined) output.putio_folder_name = String(putioFolderName).trim();
   if (downloadAt !== undefined) output.download_at = path.resolve(String(downloadAt).trim());
-  if (rpcPath !== undefined) output.rpc_path = normalizeRpcPath(rpcPath);
+  // null or '' means "this profile has no Transmission endpoint", which is what
+  // a grab profile is. normalizeRpcPath would turn either into '', and the
+  // column is nullable now, so the distinction has to survive to the store.
+  if (rpcPath !== undefined) {
+    output.rpc_path = rpcPath == null || rpcPath === '' ? null : normalizeRpcPath(rpcPath);
+  }
   if (clientHost !== undefined) output.client_host = String(clientHost).trim() || 'putiorr';
   if (clientPort !== undefined) output.client_port = String(clientPort).trim();
   if (clientUseSsl !== undefined) output.client_use_ssl = Boolean(clientUseSsl);
+  if (browserDomains !== undefined) {
+    // The form sends the raw comma-separated text. An entry no hostname can
+    // ever match is a refusal rather than a silent drop: the profile would
+    // otherwise look configured for a site it can never receive a grab from.
+    const { domains, errors, warnings } = normalizeBrowserDomains(browserDomains);
+    if (errors.length) throw new Error(browserDomainError(errors));
+    output.browser_domains = domains;
+    // Not a column: the store ignores unknown keys, and profileResponse lifts
+    // this back out onto the reply.
+    if (warnings.length) output.browser_domain_warnings = warnings;
+  }
+  // Whether a second profile already holds this is the store's to answer — it
+  // is the only layer that can see the other rows, and the seed paths that
+  // never come through here have to be checked too.
+  if (browserCatchAll !== undefined) {
+    output.browser_catch_all = normalizeBooleanInput(browserCatchAll);
+  }
+  // Not a column, and the store is where it is answered — same reason the flag
+  // itself is: only that layer sees the other rows, and the clear and the
+  // write have to be one transaction. Carried here so the wizard can re-submit
+  // the save it already had refused, edits and all, instead of a bare command
+  // that would drop everything typed since.
+  if (takeOverCatchAll !== undefined) {
+    output.takeOverCatchAll = normalizeBooleanInput(takeOverCatchAll);
+  }
+  if (takeOverCatchAllFrom !== undefined) {
+    // A caller that names the holder it was shown gets its takeover refused
+    // when a different profile holds the role by now. Letting an unreadable id
+    // fall back to null would turn exactly that guard off and clear whichever
+    // profile happens to hold it — the one outcome this field exists to stop.
+    const holderId = normalizeOptionalId(takeOverCatchAllFrom);
+    if (!holderId) throw new Error('takeOverCatchAllFrom must be a profile id');
+    output.takeOverCatchAllFrom = holderId;
+  }
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;
   }
   if (input.enabled !== undefined) output.enabled = Boolean(input.enabled);
 
   if (!partial) {
-    for (const key of ['name', 'slug', 'putio_folder_name', 'download_at', 'rpc_path']) {
+    for (const key of ['name', 'slug', 'putio_folder_name', 'download_at']) {
       if (!output[key]) throw new Error(`${key} is required`);
+    }
+    // Only an *arr ingress needs one. A grab profile is reached exclusively
+    // through the extension, and requiring a path here is what forced the
+    // wizard to derive one it never showed.
+    if (output.type !== GRAB_PROFILE_TYPE && !output.rpc_path) {
+      throw new Error('rpc_path is required');
     }
   }
 

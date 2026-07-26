@@ -79,7 +79,10 @@ export function loadConfig(env = process.env, cwd = process.cwd(), options = {})
     ).replace(/\/+$/, ''),
     putioFolder: (sourceEnv.PUTIORR_PUTIO_FOLDER ?? 'putiorr').toLowerCase(),
     defaultProfileName: sourceEnv.PUTIORR_DEFAULT_PROFILE_NAME ?? 'Custom',
-    defaultProfileType: sourceEnv.PUTIORR_DEFAULT_PROFILE_TYPE ?? 'custom',
+    // Presets are matched exactly — `?type=grab`, and the check that decides
+    // whether a profile may serve browser grabs — so a seed spelled "Grab" or
+    // padded would create a profile that looks set up and is never selected.
+    defaultProfileType: (sourceEnv.PUTIORR_DEFAULT_PROFILE_TYPE ?? 'custom').trim().toLowerCase() || 'custom',
     defaultRpcPath: sourceEnv.PUTIORR_DEFAULT_RPC_PATH ?? '/transmission/rpc',
     seedProfiles: jsonFromEnv(sourceEnv.PUTIORR_PROFILES_JSON, []),
     workers: Math.max(1, intFromEnv(sourceEnv.PUTIORR_WORKERS, 4)),

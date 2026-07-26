@@ -1,3 +1,8 @@
+// `autoRemoveCompleted` here only pre-checks the wizard's box. The default
+// itself is the store's (profileDefaultsToAutoRemoveCompleted): a profile
+// created through POST /api/profiles or seeded from PUTIORR_PROFILES_JSON
+// never opens the wizard, and used to miss the default entirely. The two must
+// agree, or the wizard shows a box the server would have ticked anyway.
 export const PROFILE_TYPES = {
   sonarr: {
     label: 'Sonarr',
@@ -25,6 +30,16 @@ export const PROFILE_TYPES = {
     autoRemoveCompleted: true,
     note: 'Prowlarr usually talks to Sonarr/Radarr/Lidarr instead of putiorr. Use this only if Prowlarr sends grabs directly to a Transmission client.',
   },
+  // Browser grabs, not an *arr download client: the wizard hides the RPC
+  // endpoint step for this preset and derives the path instead. Auto-remove is
+  // on for the same reason prowlarr has it — nothing imports a browser grab, so
+  // the finished transfer leaves putiorr while the files stay on disk.
+  grab: {
+    label: 'Putiorr Grab',
+    root: '',
+    autoRemoveCompleted: true,
+    note: 'Browser grabs come from the putiorr grab extension, not from an *arr app. List the sites this profile should claim, then point the extension at putiorr.',
+  },
   custom: {
     label: 'Custom',
     root: '',
@@ -33,6 +48,19 @@ export const PROFILE_TYPES = {
 };
 
 export const DEFAULT_PROFILE_TYPE = 'sonarr';
+// Mirrors the server's GRAB_PROFILE_TYPE: the only preset the browser
+// extension may send grabs to.
+export const GRAB_PROFILE_TYPE = 'grab';
+// What a refused profile save says when another grab profile already takes the
+// grabs no site claims. It rides on `code` in the error body, next to the
+// sentence and the holder, so the wizard can offer the takeover without
+// matching prose — a boundary this codebase has been bitten across before.
+// Imported by the server as well as the wizard: one string, one definition.
+export const CATCH_ALL_CONFLICT_CODE = 'catch_all_conflict';
+// The endpoint every Transmission client reaches by default. It belongs to one
+// *arr profile or to none; it is never a Putiorr Grab profile's path, and the
+// server refuses it outright once more than one *arr profile could have meant it.
+export const SHARED_RPC_PATH = '/transmission/rpc';
 export const DEFAULT_PUTIO_FOLDER = 'putiorr';
 export const DEFAULT_DOWNLOAD_FOLDER = '/putiorr';
 export const DEFAULT_CLIENT_HOST = 'putiorr';

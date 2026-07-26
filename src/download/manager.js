@@ -4,10 +4,18 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { logger } from '../logger.js';
 import { downloadPolicyForContext, isSlowSpeedResetEnabled } from './policy.js';
-import { fileExistsWithSize, normalizeRelativePath, resolveInside } from './paths.js';
+import {
+  downloadLocalRoot,
+  fileExistsWithSize,
+  normalizeRelativePath,
+  resolveInside,
+} from './paths.js';
 
 const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
 const SLOW_RESET_PAUSE_MS = 500;
+// How many times a file is fetched before it is left alone. It bounds both
+// ends of the retry: what counts as spent, and what the queue stops offering.
+const MAX_FILE_ATTEMPTS = 3;
 
 class SlowSpeedResetError extends Error {
   constructor(message) {
@@ -90,8 +98,12 @@ export class DownloadManager {
   }
 
   async pollOnce() {
+    // Before anything reads or writes a staging folder: two downloads put.io
+    // named the same thing resolve to one, and the poll is where that becomes
+    // visible instead of one of them simply never progressing.
+    this.service.recordStagingCollisions();
     await this.pruneProcessedTransfersMissingLocalData();
-    const purgedFiles = this.store.purgeDeletedFilesForProcessedTransfers();
+    const purgedFiles = this.store.purgeDeletedFilesForProcessedDownloads();
     if (purgedFiles > 0) {
       logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
     }
@@ -124,7 +136,7 @@ export class DownloadManager {
         if (this.service.getPutioToken()) {
           await this.service.removeRemoteTransfer(row);
         }
-        this.store.markTransferRemoved(row.id);
+        this.store.markDownloadRemoved(row.id);
         logger.warn('transfer files missing on put.io; removed bucket, kept downloaded files', {
           transferId: row.id,
           name: row.name,
@@ -137,7 +149,7 @@ export class DownloadManager {
   }
 
   async startTransferDownload(transferId) {
-    let transfer = this.store.findTransferById(transferId);
+    let transfer = this.store.findDownloadById(transferId);
     if (!transfer || transfer.removed_at) throw new Error('Download not found');
 
     try {
@@ -147,7 +159,7 @@ export class DownloadManager {
 
       if (!READY_REMOTE_STATUSES.has(transfer.putio_status) || !transfer.putio_file_id) {
         await this.service.refreshRemoteTransfers();
-        transfer = this.store.findTransferById(transferId);
+        transfer = this.store.findDownloadById(transferId);
       }
 
       if (!transfer || transfer.removed_at) throw new Error('Download not found');
@@ -156,7 +168,7 @@ export class DownloadManager {
       }
 
       await this.prepareTransfer(transfer);
-      const files = this.store.listFilesForTransfer(transfer.id);
+      const files = this.store.listFilesForDownload(transfer.id);
       logger.info('manual download start requested', {
         transferId: transfer.id,
         name: transfer.name,
@@ -175,7 +187,7 @@ export class DownloadManager {
 
   recordTransferStartFailure(transfer, error, message) {
     if (transfer?.id) {
-      this.store.updateTransfer(transfer.id, {
+      this.store.updateDownload(transfer.id, {
         error: true,
         error_string: error.message,
         download_speed: 0,
@@ -198,33 +210,39 @@ export class DownloadManager {
       throw new Error('ready transfer has no put.io file id');
     }
 
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-    if (!profile) throw new Error('No RR profile is available for download');
+    // No owner means no folder to stage into. This used to borrow whichever
+    // profile sorted first and write another profile's files into its folder.
+    const profile = this.service.requireDownloadOwner(transfer);
     const remoteFiles = await this.service.getPutio().listTransferFiles(transfer.putio_file_id);
     if (remoteFiles.length === 0) {
       throw new Error('ready transfer has no downloadable files on put.io');
     }
 
-    const updated = this.store.updateTransfer(transfer.id, {
+    // Claimed before the row is moved on, because claiming is the step that can
+    // refuse — a staging collision, or a put.io name too long to be a folder.
+    // Flipping lifecycle first left a refused download sitting at 'downloading'
+    // with no staging folder, which is exactly the shape the upgrade backfill
+    // was written to freeze: the next boot recorded the folder as the very name
+    // the refusal had just told the user to change, and both remedies stopped
+    // working for good.
+    const downloadRoot = this.service.claimStagingRoot(profile, transfer);
+    const updated = this.store.updateDownload(transfer.id, {
       lifecycle: 'downloading',
       error: false,
       error_string: '',
     });
+    const remoteFileIds = [];
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
+      remoteFileIds.push(remoteFile.id);
       const relativePath = normalizeRelativePath(remoteFile.relativePath ?? remoteFile.name);
       const size = Number(remoteFile.size ?? 0);
       totalSize += size;
-      const targetPath = resolveInside(
-        profile.download_at,
-        updated.category ?? '',
-        updated.name,
-        relativePath,
-      );
+      const targetPath = resolveInside(downloadRoot, relativePath);
       const exists = await fileExistsWithSize(targetPath, size);
       const partSize = exists ? size : Math.min(await sizeOf(`${targetPath}.part`), size);
-      this.store.upsertTransferFile({
-        transfer_id: updated.id,
+      this.store.upsertDownloadFile({
+        download_id: updated.id,
         putio_file_id: remoteFile.id,
         relative_path: relativePath,
         size,
@@ -233,17 +251,32 @@ export class DownloadManager {
       });
     }
 
-    this.store.updateTransfer(updated.id, { total_size: totalSize });
+    // What put.io lists is the whole truth about this download's files. Rows
+    // for files it no longer has were never removed, so they stayed pending
+    // against a file id that 404s and kept the download from ever completing.
+    const reaped = this.store.deleteDownloadFilesNotIn(updated.id, remoteFileIds);
+    if (reaped > 0) {
+      logger.info('forgot download files put.io no longer lists', {
+        transferId: updated.id,
+        name: updated.name,
+        count: reaped,
+      });
+    }
+
+    this.store.updateDownload(updated.id, { total_size: totalSize });
     await this.finalizeTransferIfComplete(updated.id);
   }
 
   async pruneProcessedTransfersMissingLocalData() {
-    const transfers = this.store.listActiveTransfers()
+    const transfers = this.store.listActiveDownloads()
       .filter((transfer) => transfer.lifecycle === 'processed');
 
     for (const transfer of transfers) {
-      const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
-      if (!profile) continue;
+      const profile = this.service.findDownloadOwner(transfer);
+      if (!profile) {
+        this.warnOwnerlessDownload(transfer, 'cannot check for local data');
+        continue;
+      }
 
       let hasLocalData;
       try {
@@ -259,51 +292,90 @@ export class DownloadManager {
 
       if (hasLocalData) continue;
 
-      if (this.service.getPutioToken()) {
-        await this.service.deleteDownloadBucket(transfer.id, {
-          deleteRemote: true,
-          deleteLocal: false,
+      // This used to propagate out of pollOnce and abort the whole cycle, so one
+      // dead row froze every download until a restart.
+      let remoteMissing = false;
+      try {
+        if (this.service.getPutioToken()) {
+          // A 404 says put.io no longer has it either, which is the outcome
+          // this sweep wanted. That used to be caught here, because the delete
+          // threw on it and would otherwise leave the row failing the same way
+          // on every tick forever; removeRemoteTransfer now answers it where
+          // put.io is actually asked, and reports it rather than raising it.
+          const result = await this.service.deleteDownloadBucket(transfer.id, {
+            deleteRemote: true,
+            deleteLocal: false,
+          });
+          remoteMissing = Boolean(result?.remoteAlreadyGone);
+        } else {
+          this.store.deleteDownload(transfer.id);
+        }
+      } catch (error) {
+        // Only a genuinely transient error reaches this now, and it is worth
+        // leaving for the next tick.
+        logger.warn('failed to prune processed transfer with missing local data', {
+          transferId: transfer.id,
+          putioTransferId: transfer.putio_transfer_id,
+          putioFileId: transfer.putio_file_id,
+          name: transfer.name,
+          error: error.message,
+          stack: error.stack,
         });
-      } else {
-        this.store.deleteTransfer(transfer.id);
-        this.store.deleteRemoteTransferIfOrphaned(transfer.remote_id);
+        continue;
       }
       logger.info('processed transfer pruned after local data disappeared', {
         transferId: transfer.id,
         name: transfer.name,
+        remoteMissing,
       });
     }
   }
 
   async removeProcessedAutoRemoveTransfers() {
-    const transfers = this.store.listActiveTransfers()
+    const transfers = this.store.listActiveDownloads()
       .filter((transfer) => transfer.lifecycle === 'processed');
 
     for (const transfer of transfers) {
       const profile = this.autoRemoveProfileForTransfer(transfer);
+      if (!profile) {
+        this.warnOwnerlessDownload(transfer, 'cannot tell whether it should be auto-removed');
+        continue;
+      }
       if (!profileAutoRemovesCompleted(profile)) continue;
       await this.removeCompletedAutoRemoveTransfer(transfer);
     }
   }
 
   autoRemoveProfileForTransfer(transfer) {
-    return this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    return this.service.findDownloadOwner(transfer);
   }
 
+  // downloads.profile_id is NOT NULL REFERENCES profiles(id) ON DELETE RESTRICT,
+  // so a download reaching a sweep without an owner means the database was
+  // edited by hand — the legacy rows the schema upgrade could not attach to a
+  // profile live in orphaned_downloads, not here. It is still a state the user
+  // has to be able to see and fix, so every sweep that steps over one says so
+  // rather than skipping in silence.
+  warnOwnerlessDownload(transfer, consequence) {
+    logger.warn('skipped download with no owning RR profile', {
+      transferId: transfer.id,
+      putioTransferId: transfer.putio_transfer_id,
+      name: transfer.name,
+      consequence,
+    });
+  }
+
+  // Answering "no" deletes the download and cancels its put.io transfer, so a
+  // download whose folder cannot even be resolved is reported as still having
+  // its data rather than as data that disappeared.
   async hasLocalTransferData(profile, transfer) {
-    const files = this.store.listFilesForTransfer(transfer.id);
-    if (files.length === 0) {
-      return this.pathExists(resolveInside(profile.download_at, transfer.category ?? '', transfer.name));
-    }
+    const root = downloadLocalRoot(profile, transfer);
+    if (!root) return true;
+    const files = this.store.listFilesForDownload(transfer.id);
+    if (files.length === 0) return this.pathExists(root);
 
     for (const file of files) {
-      const targetPath = resolveInside(
-        profile.download_at,
-        transfer.category ?? '',
-        transfer.name,
-        file.relative_path,
-      );
-      if (await this.pathExists(targetPath)) return true;
+      if (await this.pathExists(resolveInside(root, file.relative_path))) return true;
     }
     return false;
   }
@@ -332,61 +404,69 @@ export class DownloadManager {
         await this.processFile(job);
       } catch (error) {
         if (signal.aborted || !this.running) {
-          this.store.updateTransferFile(job.id, {
+          this.store.updateDownloadFile(job.id, {
             status: 'pending',
             download_speed: 0,
             error_string: '',
           });
           continue;
         }
-        const attempts = Number(job.attempts ?? 0) + 1;
-        this.store.updateTransferFile(job.id, {
-          status: attempts >= 3 ? 'failed' : 'pending',
-          attempts,
-          download_speed: 0,
-          error_string: error.message,
-        });
-        const transfer = this.store.findTransferById(job.transfer_id);
-        logger.warn('file download failed', {
-          worker: index,
-          transferId: job.transfer_id,
-          name: transfer?.name ?? job.transfer_name,
-          fileId: job.id,
-          putioFileId: job.putio_file_id,
-          attempts,
-          error: error.message,
-          stack: error.stack,
-        });
+        this.recordFileFailure(job, error, index);
       } finally {
         this.activeFileRates.delete(job.id);
-        this.refreshTransferLocalMetrics(job.transfer_id);
+        this.refreshTransferLocalMetrics(job.download_id);
         this.activeFileIds.delete(job.id);
       }
     }
   }
 
+  // The attempt is already counted: nextPendingFile counts it when it claims
+  // the file. Counting it again here spent three allowed attempts in one and a
+  // half, so a file that hit two transient errors was marked failed and never
+  // retried.
+  recordFileFailure(job, error, worker) {
+    const attempts = Number(job.attempts ?? 0);
+    this.store.updateDownloadFile(job.id, {
+      status: attempts >= MAX_FILE_ATTEMPTS ? 'failed' : 'pending',
+      attempts,
+      download_speed: 0,
+      error_string: error.message,
+    });
+    const transfer = this.store.findDownloadById(job.download_id);
+    logger.warn('file download failed', {
+      worker,
+      transferId: job.download_id,
+      name: transfer?.name ?? job.download_name,
+      fileId: job.id,
+      putioFileId: job.putio_file_id,
+      attempts,
+      error: error.message,
+      stack: error.stack,
+    });
+  }
+
   nextPendingFile() {
-    const candidates = this.store.listPendingFiles(this.config.workers * 4);
+    const candidates = this.store.listPendingFiles(this.config.workers * 4, {
+      maxAttempts: MAX_FILE_ATTEMPTS,
+    });
     const job = candidates.find((candidate) => !this.activeFileIds.has(candidate.id));
     if (!job) return undefined;
-    this.store.updateTransferFile(job.id, {
+    this.store.updateDownloadFile(job.id, {
       status: 'downloading',
       attempts: Number(job.attempts ?? 0) + 1,
       download_speed: 0,
       error_string: '',
     });
-    return this.store.findTransferFileById(job.id);
+    return this.store.findDownloadFileById(job.id);
   }
 
   async processFile(file) {
-    const transfer = this.store.findTransferById(file.transfer_id);
+    const transfer = this.store.findDownloadById(file.download_id);
     if (!transfer || transfer.removed_at) return;
-    const profile = this.store.findProfileById(transfer.profile_id) ?? this.service.getDefaultProfile();
+    const profile = this.service.requireDownloadOwner(transfer);
 
     const targetPath = resolveInside(
-      profile.download_at,
-      transfer.category ?? '',
-      transfer.name,
+      this.service.requireExclusiveStagingRoot(profile, transfer),
       file.relative_path,
     );
     await mkdir(path.dirname(targetPath), { recursive: true });
@@ -397,7 +477,7 @@ export class DownloadManager {
     }
 
     if (await fileExistsWithSize(targetPath, Number(file.size))) {
-      const updated = this.store.updateTransferFile(file.id, {
+      const updated = this.store.updateDownloadFile(file.id, {
         status: 'complete',
         downloaded_bytes: Number(file.size),
         download_speed: 0,
@@ -419,7 +499,7 @@ export class DownloadManager {
       return;
     }
 
-    this.store.updateTransferFile(file.id, {
+    this.store.updateDownloadFile(file.id, {
       status: 'complete',
       downloaded_bytes: Number(file.size),
       download_speed: 0,
@@ -429,9 +509,9 @@ export class DownloadManager {
   }
 
   isFileDeletedOrTransferRemoved(file) {
-    const transfer = this.store.findTransferById(file.transfer_id);
+    const transfer = this.store.findDownloadById(file.download_id);
     if (!transfer || transfer.removed_at) return true;
-    return this.store.findTransferFileById(file.id)?.status === 'deleted';
+    return this.store.findDownloadFileById(file.id)?.status === 'deleted';
   }
 
   async discardLocalFile(targetPath) {
@@ -472,7 +552,7 @@ export class DownloadManager {
 
     const actualSize = await sizeOf(partPath);
     if (expectedSize > 0 && actualSize !== expectedSize) {
-      this.store.updateTransferFile(file.id, {
+      this.store.updateDownloadFile(file.id, {
         downloaded_bytes: actualSize,
         download_speed: 0,
         status: 'pending',
@@ -519,7 +599,7 @@ export class DownloadManager {
         throw new Error(`download failed with HTTP ${response.status}`);
       }
 
-      this.store.updateTransferFile(file.id, {
+      this.store.updateDownloadFile(file.id, {
         status: 'downloading',
         download_speed: 0,
         error_string: '',
@@ -649,14 +729,17 @@ export class DownloadManager {
   }
 
   downloadPolicyForFile(file) {
-    const transfer = this.store.findTransferById(file.transfer_id);
-    const profile = transfer ? this.store.findProfileById(transfer.profile_id) : undefined;
+    const transfer = this.store.findDownloadById(file.download_id);
+    // Through the one resolver. profile_id is NOT NULL now, so a missing owner
+    // means the row was edited by hand; it falls back to the server-wide policy
+    // rather than to another profile's.
+    const profile = this.service.findDownloadOwner(transfer);
     return downloadPolicyForContext(this.store, this.config, { profile });
   }
 
   async updateAfterSlowReset(file, partPath, message, resetCount) {
     const downloadedBytes = await sizeOf(partPath);
-    const updated = this.store.updateTransferFile(file.id, {
+    const updated = this.store.updateDownloadFile(file.id, {
       downloaded_bytes: downloadedBytes,
       download_speed: 0,
       status: 'downloading',
@@ -667,10 +750,10 @@ export class DownloadManager {
       return;
     }
     this.activeFileRates.set(file.id, {
-      transferId: file.transfer_id,
+      transferId: file.download_id,
       bytesPerSecond: 0,
     });
-    this.refreshTransferLocalMetrics(file.transfer_id);
+    this.refreshTransferLocalMetrics(file.download_id);
     logger.warn('slow file download reset', {
       fileId: file.id,
       putioFileId: file.putio_file_id,
@@ -683,7 +766,7 @@ export class DownloadManager {
   updateLocalProgressMetrics(file, downloadedBytes, bytesPerSecond) {
     const size = Number(file.size ?? 0);
     const downloaded = Math.max(0, Math.min(Number(downloadedBytes ?? 0), size > 0 ? size : Number.MAX_SAFE_INTEGER));
-    const updated = this.store.updateTransferFile(file.id, {
+    const updated = this.store.updateDownloadFile(file.id, {
       downloaded_bytes: downloaded,
       download_speed: Math.max(0, Math.round(Number(bytesPerSecond ?? 0))),
       status: 'downloading',
@@ -693,17 +776,17 @@ export class DownloadManager {
       return;
     }
     this.activeFileRates.set(file.id, {
-      transferId: file.transfer_id,
+      transferId: file.download_id,
       bytesPerSecond: Math.max(0, Math.round(Number(bytesPerSecond ?? 0))),
     });
-    this.refreshTransferLocalMetrics(file.transfer_id);
+    this.refreshTransferLocalMetrics(file.download_id);
   }
 
   refreshTransferLocalMetrics(transferId) {
-    const transfer = this.store.findTransferById(transferId);
+    const transfer = this.store.findDownloadById(transferId);
     if (!transfer || transfer.lifecycle === 'remote') return;
 
-    const stats = this.store.getTransferFileStats(transferId);
+    const stats = this.store.getDownloadFileStats(transferId);
     const activeSpeed = Array.from(this.activeFileRates.values())
       .filter((rate) => rate.transferId === transferId)
       .reduce((total, rate) => total + rate.bytesPerSecond, 0);
@@ -711,7 +794,7 @@ export class DownloadManager {
     const downloadedSize = Number(stats.downloaded_size ?? 0);
     const remainingBytes = Math.max(0, totalSize - downloadedSize);
 
-    this.store.updateTransfer(transferId, {
+    this.store.updateDownload(transferId, {
       downloaded_ever: downloadedSize,
       total_size: totalSize || Number(transfer.total_size ?? 0),
       download_speed: activeSpeed,
@@ -722,14 +805,14 @@ export class DownloadManager {
   }
 
   async finalizeTransferIfComplete(transferId) {
-    const transfer = this.store.findTransferById(transferId);
+    const transfer = this.store.findDownloadById(transferId);
     if (!transfer || transfer.lifecycle === 'processed') return;
 
-    const stats = this.store.getTransferFileStats(transferId);
+    const stats = this.store.getDownloadFileStats(transferId);
     if (Number(stats.total_files) === 0) return;
     if (Number(stats.completed_files) !== Number(stats.total_files)) return;
 
-    this.store.updateTransfer(transferId, {
+    this.store.updateDownload(transferId, {
       lifecycle: 'processed',
       percent_done: 100,
       downloaded_ever: Number(stats.downloaded_size ?? 0),
@@ -744,11 +827,10 @@ export class DownloadManager {
       return;
     }
 
-    if (
-      this.config.cleanupRemoteFiles
-      && transfer.putio_file_id
-      && this.store.allActiveAssociationsProcessed(transfer.remote_id)
-    ) {
+    // The third predicate this used to carry — "every active association of the
+    // remote transfer is processed" — is structurally always true now that one
+    // put.io transfer has exactly one download.
+    if (this.config.cleanupRemoteFiles && transfer.putio_file_id) {
       try {
         await this.service.getPutio().deleteFile(transfer.putio_file_id);
       } catch (error) {

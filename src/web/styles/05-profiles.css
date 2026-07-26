@@ -5,6 +5,7 @@
 }
 
 .profile-card {
+  position: relative;
   display: grid;
   grid-template-rows: auto 1fr auto;
   gap: 0;
@@ -16,13 +17,14 @@
   box-shadow: 0 1px 2px rgba(23, 35, 38, 0.04);
 }
 
+/* The status badge is pinned to the card's top-right rather than sharing the
+   header's layout: as a flex sibling it took width from the name and summary,
+   and a long badge shrank them on every card in the row. The right padding is
+   the badge's lane — text wraps before it instead of running under it. */
 .profile-card-main {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
   min-width: 0;
   padding: 14px 14px 10px;
+  padding-right: 92px;
 }
 
 .profile-eyebrow,
@@ -107,7 +109,9 @@
 }
 
 .profile-card .status {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 12px;
+  right: 12px;
   min-height: 20px;
   padding: 2px 8px;
   font-size: 11px;

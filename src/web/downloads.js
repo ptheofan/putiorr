@@ -20,22 +20,160 @@ import {
   setDataValue,
   setHidden,
   placeChildAt,
+  adoptionNoticeSummary,
+  schemaMigrationSummary,
+  stagingCollisionSummary,
+  remoteAlreadyGoneNotice,
+  schemaMigrationWarning,
+  setCheckboxChecked,
+  isCheckboxChecked,
+  setDisabled,
 } from './util.js';
 import { renderTopology } from './topology.js';
 
 export async function refreshDownloads() {
-  state.downloads = await api('/api/downloads');
+  applyDownloadsPayload(await api('/api/downloads'));
   renderDownloads();
   renderTopology();
 }
 
+// The quarantine arrives as its own array rather than interleaved with the
+// working downloads: a row that needs a decision from the user is not a row
+// that is making progress, and mixing them buries it.
+export function applyDownloadsPayload(payload) {
+  if (Array.isArray(payload?.downloads)) state.downloads = payload.downloads;
+  if (Array.isArray(payload?.orphaned)) state.orphanedDownloads = payload.orphaned;
+}
+
 export function applyDownloadsUpdate(message) {
-  if (Array.isArray(message.downloads)) state.downloads = message.downloads;
+  applyDownloadsPayload(message);
+  renderDownloads();
+  renderTopology();
+}
+
+const ORPHAN_REASON_LABELS = {
+  'no owner': 'No owning RR profile',
+  'extra association': 'Its put.io transfer already belongs to another profile',
+  'no put.io transfer id': 'No put.io transfer id',
+};
+
+export function renderSchemaMigrations() {
+  const migrations = state.settings?.schemaMigrations;
+  const summary = schemaMigrationSummary(migrations);
+  const warning = schemaMigrationWarning(migrations);
+  setHidden(el.schemaMigrationNotice, !summary && !warning);
+  setText(el.schemaMigrationSummary, summary);
+  setHidden(el.schemaMigrationSummary, !summary);
+  setText(el.schemaMigrationWarning, warning);
+  setHidden(el.schemaMigrationWarning, !warning);
+}
+
+// put.io transfers the last poll could not attribute to one RR profile. The
+// dashboard is the only place a user would notice that nothing is being
+// adopted; the poll's own answer was to move on without a word.
+export function renderAdoptionNotices() {
+  const summary = adoptionNoticeSummary(state.settings?.adoptionNotices);
+  setHidden(el.adoptionNotice, !summary);
+  setText(el.adoptionNoticeText, summary);
+}
+
+// Two downloads put.io named the same thing: only the older one stages, and
+// the other would otherwise look like a download that just stopped.
+export function renderStagingCollisions() {
+  const summary = stagingCollisionSummary(state.settings?.stagingCollisions);
+  setHidden(el.stagingCollisionNotice, !summary);
+  setText(el.stagingCollisionText, summary);
+}
+
+export function renderOrphanedDownloads() {
+  const orphans = Array.isArray(state.orphanedDownloads) ? state.orphanedDownloads : [];
+  setHidden(el.orphanedDownloads, orphans.length === 0);
+  el.orphanedDownloadsList.replaceChildren();
+  if (orphans.length === 0) return;
+
+  for (const orphan of orphans) {
+    const card = document.createElement('article');
+    card.className = 'download-card orphaned-download';
+    card.setAttribute('data-testid', 'orphaned-download');
+    card.dataset.orphanId = String(orphan.id);
+    card.innerHTML = `
+      <div class="download-head">
+        <span class="download-name" data-role="name"></span>
+        <span class="download-status" data-role="reason"></span>
+      </div>
+      <div class="download-facts">
+        <span data-role="local-path"></span>
+      </div>
+      <div class="download-actions">
+        <select data-role="profile" data-testid="orphaned-download-profile"></select>
+        <button data-action="assign" class="button compact-button" type="button" data-testid="orphaned-download-assign">Assign</button>
+        <button data-action="delete" class="button danger compact-button" type="button" data-testid="orphaned-download-delete">Delete</button>
+      </div>
+    `;
+    setText(card.querySelector('[data-role="name"]'), orphan.name || '(unnamed)');
+    setText(card.querySelector('[data-role="reason"]'), ORPHAN_REASON_LABELS[orphan.reason] ?? orphan.reason);
+    setText(card.querySelector('[data-role="local-path"]'), orphan.localPath || 'Local path unknown');
+
+    const select = card.querySelector('[data-role="profile"]');
+    const profiles = state.profiles ?? [];
+    for (const profile of profiles) {
+      const option = document.createElement('option');
+      option.value = String(profile.id);
+      option.textContent = profile.name;
+      select.appendChild(option);
+    }
+    // Rule 3: no put.io transfer id means no identity to reattach, so the only
+    // thing on offer is delete. An empty picker is the other way Assign cannot
+    // work — a profile has to exist before anything can be assigned to it.
+    const assignable = orphan.assignable && profiles.length > 0;
+    select.disabled = !assignable;
+    const assign = card.querySelector('[data-action="assign"]');
+    assign.disabled = !assignable;
+    assign.addEventListener('click', () => {
+      runOrphanAction(card, () => assignOrphanedDownload(orphan.id, Number(select.value)));
+    });
+    card.querySelector('[data-action="delete"]').addEventListener('click', () => {
+      runOrphanAction(card, () => deleteOrphanedDownload(orphan.id, { deleteRemote: false, deleteLocal: false }));
+    });
+    el.orphanedDownloadsList.appendChild(card);
+  }
+}
+
+// The refusals here are the whole point of the section — "put.io transfer N
+// already belongs to RR profile X" is the answer the user needs — so a failure
+// is written onto the card rather than swallowed.
+async function runOrphanAction(card, action) {
+  try {
+    await action();
+    requestStateRefresh();
+  } catch (error) {
+    setText(card.querySelector('[data-role="reason"]'), error.message);
+  }
+}
+
+export async function assignOrphanedDownload(orphanId, profileId) {
+  applyDownloadsPayload(await api(`/api/downloads/orphaned/${orphanId}/assign`, {
+    method: 'POST',
+    body: JSON.stringify({ profileId }),
+  }));
+  renderDownloads();
+  renderTopology();
+}
+
+export async function deleteOrphanedDownload(orphanId, { deleteRemote = false, deleteLocal = false } = {}) {
+  applyDownloadsPayload(await api(`/api/downloads/orphaned/${orphanId}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ deleteRemote, deleteLocal }),
+  }));
   renderDownloads();
   renderTopology();
 }
 
 export function renderDownloads() {
+  renderSchemaMigrations();
+  renderAdoptionNotices();
+  renderStagingCollisions();
+  renderOrphanedDownloads();
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();
   pruneDownloadUiState();
@@ -573,9 +711,12 @@ export function closeDeleteConfirm() {
   if (el.deleteConfirmDialog.open) el.deleteConfirmDialog.open = false;
 }
 
+// `!state.pendingDelete` covers the one case the checkboxes cannot: a delete
+// that has already run and left the dialog open to report what put.io answered.
+// Nothing is pending then, and the button must not offer to do it again.
 export function updateDeleteConfirmButtonState() {
   const anyChecked = isCheckboxChecked(el.deleteFromPutio) || isCheckboxChecked(el.deleteLocalFiles);
-  setButtonDisabled(el.deleteConfirmButton, !anyChecked);
+  setDisabled(el.deleteConfirmButton, !anyChecked || !state.pendingDelete);
 }
 
 export function handleDeleteOptionChange(event) {
@@ -588,42 +729,43 @@ export function setDeleteConfirmMessage(message, tone = 'neutral') {
   el.deleteConfirmMessage.style.color = tone === 'error' ? '#b42318' : tone === 'ok' ? '#16803f' : '#647275';
 }
 
-export function setCheckboxChecked(checkbox, checked) {
-  checkbox.checked = checked;
-  checkbox.toggleAttribute('checked', checked);
-}
-
-export function isCheckboxChecked(checkbox) {
-  return Boolean(checkbox.checked || checkbox.hasAttribute('checked'));
-}
-
-export function setButtonDisabled(button, disabled) {
-  button.disabled = disabled;
-  button.toggleAttribute('disabled', disabled);
+// The delete is done either way; what differs is whether it has anything left
+// to say. A delete put.io had already lost the copy of is not the delete the
+// user asked for, so the dialog stays open holding that sentence rather than
+// closing on a silence that reads as "deleted from put.io".
+function finishDelete(results) {
+  const notice = remoteAlreadyGoneNotice(results);
+  if (!notice) {
+    closeDeleteConfirm();
+    return;
+  }
+  state.pendingDelete = undefined;
+  setDeleteConfirmMessage(notice, 'ok');
 }
 
 export async function confirmPendingDelete() {
   const pendingDelete = state.pendingDelete;
   if (!pendingDelete) return;
 
-  setButtonDisabled(el.deleteConfirmButton, true);
+  setDisabled(el.deleteConfirmButton, true);
   setDeleteConfirmMessage('Deleting...', 'neutral');
   const deleteRemote = isCheckboxChecked(el.deleteFromPutio);
   const deleteLocal = isCheckboxChecked(el.deleteLocalFiles);
 
   try {
     if (pendingDelete.type === 'buckets') {
+      const results = [];
       for (const downloadId of pendingDelete.downloadIds) {
-        await api(`/api/downloads/${downloadId}/delete`, {
+        results.push(await api(`/api/downloads/${downloadId}/delete`, {
           method: 'POST',
           body: JSON.stringify({ deleteRemote, deleteLocal }),
-        });
+        }));
         state.selectedDownloadIds.delete(String(downloadId));
         state.selectedFilesByDownload.delete(String(downloadId));
         state.expandedDownloads.delete(String(downloadId));
         state.fileListScrollTops.delete(String(downloadId));
       }
-      closeDeleteConfirm();
+      finishDelete(results);
       await refreshDownloads();
       requestStateRefresh();
       return;
@@ -654,7 +796,7 @@ export async function confirmPendingDelete() {
       if (selected.size === 0) state.selectedFilesByDownload.delete(String(pendingDelete.downloadId));
     }
 
-    closeDeleteConfirm();
+    finishDelete([result]);
     await refreshDownloads();
     requestStateRefresh();
   } catch (error) {

@@ -9,7 +9,7 @@ async function main() {
   const config = loadConfig();
   ensureRuntimeDirs(config);
 
-  const store = new StateStore(config.statePath);
+  const store = new StateStore(config.statePath, { config });
   store.seedFromConfig(config);
 
   const service = new TransferService({
@@ -36,7 +36,7 @@ async function main() {
     endpoint: `http://${config.listenHost}:${config.listenPort}/transmission/rpc`,
     targetDir: config.targetDir,
     statePath: config.statePath,
-    profiles: store.listProfiles({ includeDisabled: true }).length,
+    profiles: store.listProfiles().length,
     putioConnected: Boolean(service.getPutioToken()),
   });
 

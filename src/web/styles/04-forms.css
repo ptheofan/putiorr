@@ -319,6 +319,30 @@ select.input-control-addon {
   color: #6f4600;
 }
 
+/* An action offered inside a message, written as a link because that is what it
+   reads as. It is a <button> so the wizard form is not submitted by it, so
+   everything a button brings of its own is taken back off. */
+.message-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.message-link:hover {
+  text-decoration-thickness: 2px;
+}
+
+.message-link:focus-visible {
+  outline: 2px solid currentcolor;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
 .oauth-panel {
   display: flex;
   justify-content: space-between;

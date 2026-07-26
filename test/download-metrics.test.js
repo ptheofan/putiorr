@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdir, mkdtemp, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DownloadManager } from '../src/download/manager.js';
@@ -52,7 +52,7 @@ async function createHarness(remoteTransfers = []) {
 
 function createDownloadingTransfer(store) {
   const profile = store.findProfileBySlug('default');
-  const transfer = store.createOrUpdateTransfer({
+  const transfer = store.upsertDownload({
     profile_id: profile.id,
     putio_transfer_id: 7,
     putio_file_id: 8,
@@ -66,8 +66,8 @@ function createDownloadingTransfer(store) {
     download_speed: 0,
     eta: -1,
   });
-  const file = store.upsertTransferFile({
-    transfer_id: transfer.id,
+  const file = store.upsertDownloadFile({
+    download_id: transfer.id,
     putio_file_id: 81,
     relative_path: 'movie.mkv',
     size: 1_000,
@@ -89,7 +89,7 @@ test('local download progress updates dashboard speed and ETA metrics', async ()
 
     manager.updateLocalProgressMetrics(file, 400, 300);
 
-    const updated = harness.store.findTransferById(transfer.id);
+    const updated = harness.store.findDownloadById(transfer.id);
     assert.equal(updated.download_speed, 300);
     assert.equal(updated.eta, 2);
     assert.equal(updated.downloaded_ever, 400);
@@ -143,7 +143,7 @@ test('dashboard reports multi-file progress details', async () => {
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 22,
       putio_file_id: 23,
@@ -159,8 +159,8 @@ test('dashboard reports multi-file progress details', async () => {
     });
 
     for (let index = 1; index <= 15; index += 1) {
-      harness.store.upsertTransferFile({
-        transfer_id: transfer.id,
+      harness.store.upsertDownloadFile({
+        download_id: transfer.id,
         putio_file_id: 1_000 + index,
         relative_path: `Feature/file-${String(index).padStart(2, '0')}.mkv`,
         size: 600,
@@ -170,8 +170,8 @@ test('dashboard reports multi-file progress details', async () => {
     }
 
     for (let index = 1; index <= 6; index += 1) {
-      harness.store.upsertTransferFile({
-        transfer_id: transfer.id,
+      harness.store.upsertDownloadFile({
+        download_id: transfer.id,
         putio_file_id: 2_000 + index,
         relative_path: `Extras/extra-${String(index).padStart(2, '0')}.mkv`,
         size: 500,
@@ -180,8 +180,8 @@ test('dashboard reports multi-file progress details', async () => {
       });
     }
 
-    const activeFile = harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+    const activeFile = harness.store.upsertDownloadFile({
+      download_id: transfer.id,
       putio_file_id: 3_001,
       relative_path: 'Feature/currently-copying.mkv',
       size: 1_700,
@@ -235,14 +235,14 @@ test('put.io refresh preserves local speed and ETA while staged files are downlo
   const harness = await createHarness(remoteTransfers);
   try {
     const { transfer } = createDownloadingTransfer(harness.store);
-    harness.store.updateTransfer(transfer.id, {
+    harness.store.updateDownload(transfer.id, {
       download_speed: 300,
       eta: 2,
     });
 
     await harness.service.refreshRemoteTransfers();
 
-    const updated = harness.store.findTransferById(transfer.id);
+    const updated = harness.store.findDownloadById(transfer.id);
     assert.equal(updated.lifecycle, 'downloading');
     assert.equal(updated.download_speed, 300);
     assert.equal(updated.eta, 2);
@@ -255,7 +255,7 @@ test('poll prunes processed transfers after local staging data disappears', asyn
   const harness = await createHarness();
   try {
     const profile = harness.store.findProfileBySlug('default');
-    const transfer = harness.store.createOrUpdateTransfer({
+    const transfer = harness.store.upsertDownload({
       profile_id: profile.id,
       putio_transfer_id: 22,
       putio_file_id: 23,
@@ -263,15 +263,14 @@ test('poll prunes processed transfers after local staging data disappears', asyn
       hash: 'prunemissinglocalhash',
       name: 'Prune.Missing.Local.Release',
       category: 'radarr',
-      download_dir: path.join(harness.config.targetDir, 'radarr'),
       lifecycle: 'processed',
       putio_status: 'COMPLETED',
       percent_done: 100,
       total_size: 5,
       downloaded_ever: 5,
     });
-    harness.store.upsertTransferFile({
-      transfer_id: transfer.id,
+    harness.store.upsertDownloadFile({
+      download_id: transfer.id,
       putio_file_id: 24,
       relative_path: 'movie.mkv',
       size: 5,
@@ -295,15 +294,867 @@ test('poll prunes processed transfers after local staging data disappears', asyn
     });
 
     await manager.pollOnce();
-    assert.equal(harness.store.findTransferById(transfer.id).id, transfer.id);
+    assert.equal(harness.store.findDownloadById(transfer.id).id, transfer.id);
 
     await unlink(stagedFile);
     await manager.pollOnce();
 
-    assert.equal(harness.store.findTransferById(transfer.id), undefined);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
     assert.deepEqual(harness.putio.deletedFiles, [23]);
     assert.deepEqual(harness.putio.deletedTransfers, [22]);
     assert.deepEqual(harness.service.listDownloads(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 4 of the ownership cleanup (#67), audit finding 9: adoption of a
+// transfer putiorr did not create maps the put.io folder to a profile, and is
+// skipped unless exactly one profile owns that folder. Every profile defaults
+// to the same `putiorr` folder, which the README recommends — so in the
+// documented setup nothing is ever adopted, and it used to say nothing at all.
+test('put.io transfers a shared folder cannot attribute are reported, not skipped in silence', async () => {
+  const harness = await createHarness();
+  try {
+    harness.store.createProfile({
+      name: 'Radarr',
+      type: 'radarr',
+      slug: 'radarr',
+      putio_folder_name: 'putiorr',
+      downloadAt: harness.config.targetDir,
+      rpc_path: '/radarr/transmission/rpc',
+      enabled: true,
+    });
+
+    harness.putio.remoteTransfers = [
+      { id: 80, fileId: 81, saveParentId: 42, hash: 'sharedfolderhash', name: 'Shared.Folder.Release', status: 'COMPLETED', percentDone: 100 },
+      { id: 82, fileId: 83, saveParentId: 99, hash: 'unwatchedhash', name: 'Unwatched.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await harness.service.refreshRemoteTransfers();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.deepEqual(harness.store.listActiveDownloads(), []);
+    const notices = harness.store.adoptionNotices();
+    const shared = notices.find((notice) => notice.putioFolderId === 42);
+    assert.deepEqual(shared.profiles, ['Custom', 'Radarr']);
+    assert.equal(shared.transferCount, 1);
+    assert.deepEqual(shared.transfers, [{ id: 80, name: 'Shared.Folder.Release' }]);
+    const unwatched = notices.find((notice) => notice.putioFolderId === 99);
+    assert.deepEqual(unwatched.profiles, []);
+    assert.equal(unwatched.transferCount, 1);
+
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'put.io transfers cannot be attributed to one RR profile');
+    assert.equal(logged.meta.folders.length, 2);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the adoption notice clears once nothing is left unattributed', async () => {
+  const harness = await createHarness();
+  try {
+    harness.store.saveAdoptionNotices([{
+      putioFolderId: 42, folderName: 'putiorr', profiles: [], transfers: [], transferCount: 3,
+    }]);
+
+    harness.putio.remoteTransfers = [
+      { id: 84, fileId: 85, saveParentId: 42, hash: 'adoptablehash', name: 'Adoptable.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+    await harness.service.refreshRemoteTransfers();
+
+    // One profile owns folder 42, so the transfer is adopted and the notice
+    // has nothing left to report.
+    assert.equal(harness.store.findDownloadByPutioTransferId(84).name, 'Adoptable.Release');
+    assert.deepEqual(harness.store.adoptionNotices(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 1 of the ownership cleanup (#67): the poll is the only thing that moves
+// downloads forward, so anything that throws inside it stops every download on
+// the box. Both sweeps below used to propagate out of pollOnce on their first
+// bad row and take the whole cycle with them, every tick, forever.
+test('one put.io transfer that fails to refresh does not stop the poll', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    // The reproducible case used to be a hash colliding with another row's
+    // put.io id. Phase 3 removed UNIQUE(hash) and resolves rows by put.io id
+    // alone, so that particular collision is gone — but the poll is still the
+    // only thing that advances every download on the box, and any row that
+    // throws must stay one row's problem.
+    const upsert = harness.store.upsertDownload.bind(harness.store);
+    harness.store.upsertDownload = (input) => {
+      if (input.putio_transfer_id === 6) throw new Error('UNIQUE constraint failed: downloads.putio_transfer_id');
+      return upsert(input);
+    };
+
+    harness.putio.remoteTransfers = [
+      { id: 6, fileId: 61, saveParentId: 42, hash: 'collidinghash', name: 'Colliding.Release', status: 'COMPLETED', percentDone: 100 },
+      { id: 7, fileId: 71, saveParentId: 42, hash: 'healthyhash', name: 'Healthy.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    let rows;
+    try {
+      rows = await harness.service.refreshRemoteTransfers();
+    } finally {
+      console.log = originalLog;
+      harness.store.upsertDownload = upsert;
+    }
+
+    // The healthy transfer behind the bad one still gets processed.
+    assert.ok(rows.some((row) => row.hash === 'healthyhash'));
+    assert.ok(harness.store.findDownloadByHash('healthyhash'));
+    assert.equal(harness.store.findDownloadByPutioTransferId(6), undefined);
+    assert.equal(profile.id > 0, true);
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'skipped put.io transfer that failed to refresh');
+    assert.equal(logged.meta.putioTransferId, 6);
+    assert.match(logged.meta.error, /UNIQUE constraint failed/);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a processed transfer put.io no longer has is pruned, not retried every tick', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 22,
+      putio_file_id: 23,
+      save_parent_id: 42,
+      hash: 'prunefailurehash',
+      name: 'Prune.Failure.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+    // Its local data is already gone, so the sweep tries to delete it on put.io
+    // and put.io answers 404 because the files are gone there too. Nothing about
+    // that can ever succeed on a later tick, so the row has to go now.
+    harness.putio.deleteFile = async () => {
+      const error = new Error('put.io file 23 not found');
+      error.status = 404;
+      throw error;
+    };
+    harness.putio.remoteTransfers = [
+      { id: 31, fileId: 32, saveParentId: 42, hash: 'stillpollinghash', name: 'Still.Polling.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    // The rest of the cycle ran: the new put.io transfer was picked up.
+    assert.ok(harness.store.findDownloadByHash('stillpollinghash'));
+    // And the dead row is gone rather than queued up to fail again forever.
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
+    const pruned = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'processed transfer pruned after local data disappeared');
+    assert.equal(pruned.meta.transferId, transfer.id);
+    assert.equal(pruned.meta.remoteMissing, true);
+
+    // A second tick has nothing left to say about it.
+    const secondLogs = [];
+    console.log = (line) => secondLogs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+    assert.equal(
+      secondLogs.map((line) => JSON.parse(line))
+        .filter((entry) => String(entry.message).includes('processed transfer')).length,
+      0,
+    );
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a transient prune failure is left for the next tick and does not abort the poll', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const transfer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 42,
+      putio_file_id: 43,
+      save_parent_id: 42,
+      hash: 'transientprunehash',
+      name: 'Transient.Prune.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+    // put.io is having a bad day rather than having lost the transfer, so the
+    // row must survive to be retried.
+    harness.putio.deleteFile = async () => {
+      const error = new Error('put.io is unavailable');
+      error.status = 503;
+      throw error;
+    };
+    harness.putio.remoteTransfers = [
+      { id: 31, fileId: 32, saveParentId: 42, hash: 'stillpollinghash', name: 'Still.Polling.Release', status: 'COMPLETED', percentDone: 100 },
+    ];
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.ok(harness.store.findDownloadByHash('stillpollinghash'));
+    assert.ok(harness.store.findDownloadById(transfer.id));
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
+    assert.equal(logged.meta.transferId, transfer.id);
+    assert.match(logged.meta.stack, /Error/);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 2 of the ownership cleanup (#67): an owner is never guessed. Every path
+// below used to fall back to `getDefaultProfile()` — slug 'default', else
+// whichever profile sorted first — which is not type-filtered, so a Putiorr
+// Grab profile could become the fallback owner of an *arr download and stage
+// its files into a folder no *arr imports from, with no error and no log line.
+//
+// Phase 3 makes downloads.profile_id NOT NULL REFERENCES profiles(id) ON DELETE
+// RESTRICT, so this state is no longer reachable through the store's API — the
+// upsert refuses it and the profile delete is refused while it exists. It is
+// still reachable by hand-editing the database, which is what the checks below
+// are now defending against, so the fixture reaches for the same back door a
+// user with sqlite3 would.
+function createOwnerlessTransfer(store, patch = {}) {
+  const owner = store.findProfileBySlug('default');
+  const row = store.upsertDownload({
+    profile_id: owner.id,
+    putio_transfer_id: 55,
+    putio_file_id: 56,
+    save_parent_id: 42,
+    hash: 'ownerlesshash',
+    name: 'Ownerless.Release',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    ...patch,
+  });
+  store.db.exec('PRAGMA foreign_keys = OFF');
+  store.db.prepare('UPDATE downloads SET profile_id = 999999 WHERE id = ?').run(row.id);
+  store.db.exec('PRAGMA foreign_keys = ON');
+  return store.findDownloadById(row.id);
+}
+
+test('preparing a download with no owning profile fails loudly instead of borrowing one', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createOwnerlessTransfer(harness.store);
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await assert.rejects(
+      () => manager.prepareTransfer(harness.store.findDownloadById(transfer.id)),
+      /no owning RR profile/i,
+    );
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the dashboard shows an ownerless download as broken rather than under someone else', async () => {
+  const harness = await createHarness();
+  try {
+    const owned = harness.store.upsertDownload({
+      profile_id: harness.store.findProfileBySlug('default').id,
+      putio_transfer_id: 60,
+      hash: 'ownedhash',
+      name: 'Owned.Release',
+      lifecycle: 'downloading',
+    });
+    const orphan = createOwnerlessTransfer(harness.store);
+
+    // One bad row must not take the whole list down with it.
+    const downloads = harness.service.listDownloads();
+    assert.equal(downloads.length, 2);
+
+    const shown = downloads.find((download) => download.id === orphan.id);
+    assert.equal(shown.profileId, null);
+    assert.equal(shown.profileName, 'No RR profile');
+    assert.equal(shown.downloadAt, '');
+    assert.match(shown.error, /no owning RR profile/i);
+    assert.equal(downloads.find((download) => download.id === owned.id).profileName, 'Custom');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the sweeps skip an ownerless download loudly instead of resolving its path', async () => {
+  const harness = await createHarness();
+  try {
+    const transfer = createOwnerlessTransfer(harness.store, { lifecycle: 'processed' });
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pruneProcessedTransfersMissingLocalData();
+      await manager.removeProcessedAutoRemoveTransfers();
+    } finally {
+      console.log = originalLog;
+    }
+
+    // Nothing was deleted on the strength of a borrowed profile's folder.
+    assert.ok(harness.store.findDownloadById(transfer.id));
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    const warned = logs.map((line) => JSON.parse(line))
+      .filter((entry) => entry.message === 'skipped download with no owning RR profile');
+    assert.equal(warned.length, 2);
+    assert.equal(warned[0].meta.transferId, transfer.id);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('an ownerless download can still be deleted from the dashboard', async () => {
+  // The error the dashboard shows tells the user to reassign or delete it, so
+  // deleting it has to work. Only the local-files half needs an owner, because
+  // only that half needs a folder.
+  const harness = await createHarness();
+  try {
+    const transfer = createOwnerlessTransfer(harness.store);
+
+    const result = await harness.service.deleteDownloadBucket(transfer.id, {
+      deleteRemote: true,
+      deleteLocal: false,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
+    assert.deepEqual(harness.putio.deletedTransfers, [55]);
+
+    // Asking to delete files there is no folder for is the one refusal — and it
+    // has to happen before anything irreversible. Deleting the put.io transfer
+    // first and only then discovering there is no local folder would leave a row
+    // that can never be removed again: put.io 404s and the local half throws.
+    const second = createOwnerlessTransfer(harness.store, { putio_transfer_id: 57, putio_file_id: 58, hash: 'ownerlesstwo' });
+    await assert.rejects(
+      () => harness.service.deleteDownloadBucket(second.id, { deleteRemote: true, deleteLocal: true }),
+      /no owning RR profile/i,
+    );
+    assert.ok(harness.store.findDownloadById(second.id));
+    // Nothing of the second download reached put.io: 55/56 are the first one.
+    assert.deepEqual(harness.putio.deletedTransfers, [55]);
+    assert.deepEqual(harness.putio.deletedFiles, [56]);
+
+    // Still removable afterwards, which is the promise the refusal has to keep.
+    const cleaned = await harness.service.deleteDownloadBucket(second.id, {
+      deleteRemote: true,
+      deleteLocal: false,
+    });
+    assert.equal(cleaned.ok, true);
+    assert.equal(harness.store.findDownloadById(second.id), undefined);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('a mixed-status put.io failure is not read as "the remote is gone"', async () => {
+  // Only a unanimous 404 means the transfer is gone. A 404 on the file and a
+  // 500 on the transfer means put.io is half-broken, and deleting the local row
+  // on the strength of that would throw away a download that still exists.
+  const harness = await createHarness();
+  try {
+    const transfer = harness.store.upsertDownload({
+      profile_id: harness.store.findProfileBySlug('default').id,
+      putio_transfer_id: 70,
+      putio_file_id: 71,
+      save_parent_id: 42,
+      hash: 'mixedstatushash',
+      name: 'Mixed.Status.Release',
+      category: 'radarr',
+      lifecycle: 'processed',
+      putio_status: 'COMPLETED',
+      percent_done: 100,
+    });
+    harness.putio.deleteFile = async () => {
+      const error = new Error('put.io file 71 not found');
+      error.status = 404;
+      throw error;
+    };
+    harness.putio.deleteTransfer = async () => {
+      const error = new Error('put.io is unavailable');
+      error.status = 503;
+      throw error;
+    };
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    const logs = [];
+    const originalLog = console.log;
+    console.log = (line) => logs.push(line);
+    try {
+      await manager.pollOnce();
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.ok(harness.store.findDownloadById(transfer.id));
+    const logged = logs.map((line) => JSON.parse(line))
+      .find((entry) => entry.message === 'failed to prune processed transfer with missing local data');
+    assert.equal(logged.meta.transferId, transfer.id);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 3 review, critical finding: legacyLocalPath used to fall through to a
+// bare row.name when a quarantined row had neither an owner nor a stored
+// download_dir — the shape a poll-adopted transfer leaves behind, since nothing
+// ever asked it for a download-dir. deleteLocalData then resolved that name
+// against process.cwd(), which satisfies resolveInside's containment check
+// trivially, and rm(recursive, force) ran on <cwd>/<name>.
+// Phase 4 re-review, RC1: a put.io name may spell a nested path — a magnet
+// with no `dn` used to store the whole magnet URI as the name, and a `dn`
+// containing a slash nests directly — so one download's staging folder can sit
+// inside another's. Deleting the outer one takes the inner one's files with
+// it, while the inner one's row stays in the *arr's queue.
+test('deleting a download refuses a folder holding another download', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const outer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 60,
+      putio_file_id: 61,
+      hash: 'outerhash',
+      name: 'Show.S01',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    const inner = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 62,
+      putio_file_id: 63,
+      hash: 'innerhash',
+      name: 'Show.S01/Extras',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+
+    const outerRoot = path.join(harness.config.targetDir, 'tv', 'Show.S01');
+    const innerRoot = path.join(outerRoot, 'Extras');
+    await mkdir(innerRoot, { recursive: true });
+    await writeFile(path.join(outerRoot, 'episode.mkv'), 'episode');
+    await writeFile(path.join(innerRoot, 'behind.mkv'), 'behind');
+
+    await assert.rejects(
+      () => harness.service.deleteDownloadBucket(outer.id, { deleteRemote: false, deleteLocal: true }),
+      /2 downloads own it/,
+    );
+
+    assert.equal(await readFile(path.join(innerRoot, 'behind.mkv'), 'utf8'), 'behind');
+    assert.equal(await readFile(path.join(outerRoot, 'episode.mkv'), 'utf8'), 'episode');
+    assert.ok(harness.store.findDownloadById(inner.id));
+
+    // The inner one is still deletable on its own: nothing else lives in it.
+    await harness.service.deleteDownloadBucket(inner.id, { deleteRemote: false, deleteLocal: true });
+    await assert.rejects(() => stat(innerRoot), { code: 'ENOENT' });
+    assert.equal(await readFile(path.join(outerRoot, 'episode.mkv'), 'utf8'), 'episode');
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Re-review RI1: the refusal has to come before put.io is touched. Resolving
+// the path early is not the same as asking who owns it early — the assertion
+// lived inside deleteLocalData, which runs after the remote delete, so a
+// refused deletion still cancelled the transfer and left a row with no put.io
+// backing behind it.
+test('a refused local delete never cancels the put.io transfer first', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const outer = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 64,
+      putio_file_id: 65,
+      hash: 'outerremotehash',
+      name: 'Nested.Show',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 66,
+      putio_file_id: 67,
+      hash: 'innerremotehash',
+      name: 'Nested.Show/Extras',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    await mkdir(path.join(harness.config.targetDir, 'tv', 'Nested.Show', 'Extras'), { recursive: true });
+
+    await assert.rejects(
+      () => harness.service.deleteDownloadBucket(outer.id, { deleteRemote: true, deleteLocal: true }),
+      /2 downloads own it/,
+    );
+
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.ok(harness.store.findDownloadById(outer.id));
+  } finally {
+    harness.store.close();
+  }
+});
+
+// The two refusals that stand between a delete and a directory nobody meant to
+// remove. Both are branches nothing else in the suite reaches, and a refusal
+// that has never been executed is a refusal nobody has checked the wording of.
+test('the staging root and an unusable name are refused by name', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+
+    assert.throws(
+      () => harness.service.localPathOwners(profile.download_at),
+      new RegExp(`RR profile ${profile.name}'s download folder`),
+    );
+    assert.throws(
+      () => harness.service.localPathOwners(path.dirname(profile.download_at)),
+      /download folder or holds it/,
+    );
+
+    // A name that spells no folder at all: nothing to write into, and nothing
+    // that could be deleted later without taking the category directory.
+    assert.throws(
+      () => harness.service.requireStagingRoot(profile, { id: 7, name: '.', category: 'tv' }),
+      /no usable put\.io name/,
+    );
+  } finally {
+    harness.store.close();
+  }
+});
+
+function quarantineRow(store, overrides = {}) {
+  const row = {
+    putio_transfer_id: 4242,
+    hash: 'quarantinedhash',
+    name: 'Quarantined.Release',
+    source: '',
+    source_type: 'magnet',
+    category: '',
+    lifecycle: 'remote',
+    total_size: 0,
+    downloaded_ever: 0,
+    putio_file_id: null,
+    save_parent_id: null,
+    legacy_download_id: null,
+    legacy_download_dir: '',
+    quarantined_at: 'now',
+    reason: 'no owner',
+    ...overrides,
+  };
+  const keys = Object.keys(row);
+  const result = store.db.prepare(
+    `INSERT INTO orphaned_downloads (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`,
+  ).run(...keys.map((key) => row[key]));
+  return Number(result.lastInsertRowid);
+}
+
+test('deleting a quarantined download never resolves its files against the working directory', async () => {
+  const harness = await createHarness();
+  const cwd = process.cwd();
+  const sandbox = await mkdtemp(path.join(tmpdir(), 'putiorr-cwd-'));
+  try {
+    // The exact reproduction: a relative path, and a directory of that name
+    // sitting in whatever the process happens to have as its cwd.
+    process.chdir(sandbox);
+    const victim = path.join(sandbox, 'Quarantined.Release');
+    await mkdir(victim, { recursive: true });
+    await writeFile(path.join(victim, 'movie.mkv'), 'irreplaceable');
+
+    const orphanId = quarantineRow(harness.store, { legacy_download_dir: 'Quarantined.Release' });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /cannot tell which files belong to/,
+    );
+
+    // Nothing was touched, and the entry is still there to be dealt with.
+    await stat(path.join(victim, 'movie.mkv'));
+    assert.equal(harness.store.listOrphanedDownloads().length, 1);
+  } finally {
+    process.chdir(cwd);
+    harness.store.close();
+  }
+});
+
+test('deleting a quarantined download removes the files at its recorded absolute path', async () => {
+  const harness = await createHarness();
+  try {
+    const target = path.join(harness.config.targetDir, 'tv', 'Quarantined.Release');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, 'movie.mkv'), 'movie');
+
+    const orphanId = quarantineRow(harness.store, { legacy_download_dir: target });
+    const result = await harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true });
+
+    assert.equal(result.ok, true);
+    await assert.rejects(() => stat(target), { code: 'ENOENT' });
+    assert.deepEqual(harness.store.listOrphanedDownloads(), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
+// Phase 4 review, C2, reproduced end to end: the quarantine's recorded path
+// went to rm(recursive) after only two checks — absolute, and claimed by
+// exactly one thing — and a quarantine row claims itself. With no live
+// download to contest it, which is exactly the install the quarantine exists
+// for, every one of these deleted for real. The recorded path is built from
+// the row's own name, and put.io transfer names come from torrent metadata.
+test('a quarantined download can never delete a folder that is not its own', async () => {
+  const harness = await createHarness();
+  const outside = await mkdtemp(path.join(tmpdir(), 'putiorr-outside-'));
+  try {
+    const root = harness.config.targetDir;
+    const categoryDir = path.join(root, 'tv');
+    await mkdir(categoryDir, { recursive: true });
+    await writeFile(path.join(categoryDir, 'other.mkv'), 'other');
+    await writeFile(path.join(outside, 'unrelated.mkv'), 'unrelated');
+
+    const cases = [
+      // A legacy row with no name recorded the category directory itself.
+      { name: '', category: 'tv', legacy_download_dir: categoryDir, target: categoryDir },
+      // No name and no category recorded the profile's whole staging root.
+      { name: '', category: '', legacy_download_dir: root, target: root },
+      // A put.io name of '..' walked out of the staging root entirely.
+      { name: '..', category: '', legacy_download_dir: path.dirname(root), target: path.dirname(root) },
+      // Anything putiorr never staged into is not putiorr's to delete.
+      { name: path.basename(outside), category: '', legacy_download_dir: outside, target: outside },
+    ];
+
+    for (const [index, testCase] of cases.entries()) {
+      const orphanId = quarantineRow(harness.store, {
+        putio_transfer_id: 5000 + index,
+        name: testCase.name,
+        category: testCase.category,
+        legacy_download_dir: testCase.legacy_download_dir,
+      });
+      await assert.rejects(
+        () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+        (error) => {
+          assert.match(error.message, /cannot|refusing/i);
+          return true;
+        },
+        `case ${index} deleted ${testCase.target}`,
+      );
+      // Still there to be dealt with, and so are the files.
+      assert.ok(harness.store.findOrphanedDownloadById(orphanId));
+    }
+
+    assert.equal(await readFile(path.join(categoryDir, 'other.mkv'), 'utf8'), 'other');
+    assert.equal(await readFile(path.join(outside, 'unrelated.mkv'), 'utf8'), 'unrelated');
+    await stat(root);
+    await stat(path.dirname(root));
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('deleting a quarantined download refuses a folder another download also claims', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    // The old layout put a download in `<category>/<put.io name>`, so a
+    // quarantined row's recorded path can be the very folder a live download
+    // still stages into. rm -rf there takes the live download's files.
+    const live = harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 44,
+      hash: 'sharedfolderhash',
+      name: 'Shared.Name',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    const target = path.join(harness.config.targetDir, 'tv', 'Shared.Name');
+    await mkdir(target, { recursive: true });
+    await writeFile(path.join(target, 'movie.mkv'), 'irreplaceable');
+
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: 45,
+      name: 'Shared.Name',
+      category: 'tv',
+      legacy_download_dir: target,
+    });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /2 downloads own it/,
+    );
+    // The refusal is correct and the files are safe, but it is also a dead end
+    // unless it says what to do: the quarantine entry can be dismissed on its
+    // own, leaving the live download and its files alone.
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      /without the local-files option/,
+    );
+    assert.equal(await readFile(path.join(target, 'movie.mkv'), 'utf8'), 'irreplaceable');
+    assert.equal(harness.store.listOrphanedDownloads().length, 1);
+    assert.ok(harness.store.findDownloadById(live.id));
+
+    // And the way out actually works.
+    await harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: false });
+    assert.equal(harness.store.listOrphanedDownloads().length, 0);
+    assert.equal(await readFile(path.join(target, 'movie.mkv'), 'utf8'), 'irreplaceable');
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('deleting a quarantined download refuses a whole category folder', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    // A legacy row with no name left its recorded path pointing at the
+    // category directory itself, which holds every download that profile
+    // stages. rm -rf there is the profile's whole staging folder.
+    harness.store.upsertDownload({
+      profile_id: profile.id,
+      putio_transfer_id: 46,
+      hash: 'categoryneighbourhash',
+      name: 'Neighbour.Release',
+      category: 'tv',
+      lifecycle: 'processed',
+    });
+    const categoryDir = path.join(harness.config.targetDir, 'tv');
+    await mkdir(categoryDir, { recursive: true });
+    await writeFile(path.join(categoryDir, 'keep.mkv'), 'keep');
+
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: 47,
+      name: '',
+      category: 'tv',
+      legacy_download_dir: categoryDir,
+    });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteLocal: true }),
+      // Refused before the ownership count is even consulted: the recorded
+      // path is not the folder this row's own name spells.
+      /cannot tell which files belong to/,
+    );
+    assert.equal(await readFile(path.join(categoryDir, 'keep.mkv'), 'utf8'), 'keep');
+  } finally {
+    harness.store.close();
+  }
+});
+
+// FI1: the other three delete paths ask who owns the files before touching
+// put.io; this one did not. It is the worst place for it — a quarantined row
+// has no live download, so the put.io copy is the only recoverable one, and
+// the local half then refuses anyway.
+test('a quarantined download refused locally never loses its put.io copy first', async () => {
+  const harness = await createHarness();
+  try {
+    const profile = harness.store.findProfileBySlug('default');
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: 999,
+      putio_file_id: 9990,
+      // A path putiorr never staged into, so the local half refuses.
+      name: 'Somewhere.Else',
+      legacy_download_dir: path.join(await mkdtemp(path.join(tmpdir(), 'putiorr-elsewhere-')), 'Somewhere.Else'),
+    });
+    assert.ok(profile);
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteRemote: true, deleteLocal: true }),
+      /cannot tell which files belong to/,
+    );
+
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.ok(harness.store.findOrphanedDownloadById(orphanId));
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('deleting a quarantined download from put.io needs put.io ids to delete', async () => {
+  const harness = await createHarness();
+  try {
+    // The rows quarantined as 'no put.io transfer id' are exactly the ones
+    // with nothing to delete remotely. Reporting success for zero API calls
+    // tells the user the remote copy is gone when nothing was even asked.
+    const orphanId = quarantineRow(harness.store, {
+      putio_transfer_id: null,
+      putio_file_id: null,
+      reason: 'no put.io transfer id',
+    });
+
+    await assert.rejects(
+      () => harness.service.deleteOrphanedDownload(orphanId, { deleteRemote: true }),
+      /has no put\.io ids .* cannot delete it from put\.io/,
+    );
+    assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.deepEqual(harness.putio.deletedFiles, []);
+    assert.equal(harness.store.listOrphanedDownloads().length, 1);
+
+    // Without the put.io option it is still removable, which is the promise
+    // the refusal has to keep.
+    assert.deepEqual(await harness.service.deleteOrphanedDownload(orphanId), { ok: true });
+    assert.deepEqual(harness.store.listOrphanedDownloads(), []);
   } finally {
     harness.store.close();
   }

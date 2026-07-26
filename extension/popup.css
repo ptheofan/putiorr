@@ -1,0 +1,125 @@
+/* ==========================================================================
+   putiorr grab — toolbar popup layout.
+
+   The token set and the shared controls come from options.css, which
+   popup.html links first: tokens, both themes, .card, .button, .hint and the
+   #status tones are all defined there and used here. Only what the popup adds
+   is in this file, so the extension carries one copy of the dashboard's tokens
+   rather than a second one free to drift from the first.
+
+   A popup is not a page: Chrome sizes it to its content, so the width is fixed
+   here and everything inside has to survive a hostname long enough to need
+   wrapping.
+   ========================================================================== */
+
+body {
+  width: 22rem;
+}
+
+.popup-shell {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.popup-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.popup-icon {
+  display: block;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--accent-quiet);
+}
+
+.popup-head-text {
+  min-width: 0;
+}
+
+.popup-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The host is what the whole popup is about, and it is the string the claim
+   will store, so it is shown whole rather than trimmed to fit. */
+.popup-host {
+  margin: 2px 0 0;
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.popup-routing {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.popup-card {
+  gap: 10px;
+  padding: 14px;
+}
+
+.choice-list {
+  display: grid;
+  gap: 6px;
+}
+
+.choice-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--field);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.choice-row:hover {
+  border-color: var(--accent);
+}
+
+.choice-row input {
+  width: 16px;
+  min-height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.choice-name {
+  min-width: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.popup-actions {
+  justify-content: flex-end;
+}
