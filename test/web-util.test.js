@@ -502,13 +502,17 @@ test('the schema migration warning covers both ways downloads go missing', () =>
   );
 
   // Rows an older putiorr wrote after the upgrade, which is the downgrade
-  // path: zero rows in a table nobody reads is a legal answer, so silence here
-  // is indistinguishable from a healthy install.
+  // path: they are invisible to this version, so the count is what makes them
+  // worth saying anything about.
   assert.match(
     schemaMigrationWarning({ legacyTablesPresent: 1 }),
     /An older putiorr has written 1 download into storage this version cannot read/,
   );
-  assert.match(schemaMigrationWarning({ legacyTablesPresent: 0 }), /pre-downloads-\*\.bak/);
+  // Presence is not evidence: an older putiorr recreates these tables just by
+  // starting, and empty ones cost nothing. Warning here told a user with a
+  // healthy install that 0 downloads were unreadable and to restore a
+  // pre-upgrade backup, which would have discarded everything since.
+  assert.equal(schemaMigrationWarning({ legacyTablesPresent: 0 }), '');
 });
 
 // Audit finding 9: in the configuration the README recommends, every profile

@@ -582,6 +582,12 @@ export function schemaMigrationWarning(migrations) {
   }
   const legacyRows = migrations?.legacyTablesPresent;
   if (legacyRows === undefined) return '';
+  // An older putiorr recreates these tables just by starting, so their presence
+  // is not evidence of anything. Empty, they cost the user nothing and the
+  // server drops them on the next boot — telling anyone that 0 downloads are
+  // unreadable, and to restore a pre-upgrade backup over it, was worse than
+  // silence: the restore discards every download made since the upgrade.
+  if (!legacyRows) return '';
   return `An older putiorr has written ${pluralize(legacyRows, 'download')} into storage this version`
     + ' cannot read. Restore the .pre-downloads-*.bak taken before the upgrade, or re-add them.';
 }

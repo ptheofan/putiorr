@@ -138,6 +138,10 @@ const PROFILES_RPC_PATH_INDEX_DDL = `
     ON profiles(rpc_path) WHERE rpc_path IS NOT NULL;
 `;
 
+// The tables the downloads collapse replaced, in the order they are dropped:
+// children first, because dropping a parent cascades into them.
+const LEGACY_DOWNLOAD_TABLES = ['association_files', 'transfer_associations', 'transfer_files', 'transfers'];
+
 // Created by the one-shot transfers -> transfer_associations migration rather
 // than by migrate(), because a database that has never seen them must never
 // gain them: they exist only as the middle hop of the chain
@@ -529,6 +533,8 @@ export class StateStore {
     this.migrateProfilesSchema();
     this.absolutizeProfileDownloadFolders();
     this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
+    // Before the warning, so an empty set is reclaimed rather than reported.
+    this.reclaimEmptyLegacyTables();
     this.warnAboutDowngradedWrites();
   }
 
@@ -585,18 +591,60 @@ export class StateStore {
     }
   }
 
+  // The tables the collapse dropped, back again because an older putiorr ran
+  // against this database and recreated them as part of its own schema setup.
+  // Starting one is enough to do it — a stale `:latest` that resolves to 2.0.x
+  // recreates them and writes nothing — so their mere presence says nothing
+  // about whether anything was written.
+  //
+  // Empty, they hold no data anyone could lose, and the state the migration
+  // meant to leave is the one without them. Dropping them is what makes the
+  // alarm below impossible to raise over nothing: it fired on presence alone,
+  // told the user 0 downloads were unreadable, and sent them to restore a
+  // pre-upgrade backup that would have cost them every download since.
+  //
+  // All four have to be empty. `transfers` alone being empty is not "nothing
+  // was written" while a child still holds rows, and dropping a parent performs
+  // an implicit DELETE FROM that cascades.
+  reclaimEmptyLegacyTables() {
+    if (this.getSetting('downloads_schema_v1') !== '1') return false;
+    const present = LEGACY_DOWNLOAD_TABLES.filter((name) => this.hasTable(name));
+    if (present.length === 0) return false;
+    if (present.some((name) => this.countRows(name) > 0)) return false;
+    // Dependency order, as in the collapse.
+    this.db.exec(`
+      DROP TABLE IF EXISTS association_files;
+      DROP TABLE IF EXISTS transfer_associations;
+      DROP TABLE IF EXISTS transfer_files;
+      DROP TABLE IF EXISTS transfers;
+    `);
+    logger.info('dropped empty legacy transfer tables an older putiorr recreated', {
+      tables: present,
+      note: 'they held no rows, so nothing was written and nothing was lost',
+    });
+    return true;
+  }
+
   // The migration is one-way. A user who rolls back to 2.0.x runs an older
   // putiorr that recreates `transfers` and writes into it, and the rows it adds
-  // are invisible to every later version — silently, because zero rows in a
-  // table nobody reads is a legal answer. Say so loudly; the fix is to restore
-  // the .pre-downloads-*.bak the collapse wrote.
+  // are invisible to every later version — silently, because a table nobody
+  // reads raises nothing by itself. Say so loudly, but only once there is
+  // something to say: the empty case is reclaimed above, so reaching this means
+  // rows really are stranded.
   warnAboutDowngradedWrites() {
     if (this.getSetting('downloads_schema_v1') !== '1') return;
     if (!this.hasTable('transfers')) return;
+    const stranded = this.legacyRowsAfterMigration();
+    if (!stranded) return;
     logger.warn('legacy transfer tables reappeared after the downloads schema migration', {
+      strandedLegacyRows: stranded,
       consequence: 'an older putiorr has written downloads this version cannot see',
       fix: 'restore the .pre-downloads-*.bak written before the migration, or delete the legacy tables',
     });
+  }
+
+  countRows(name) {
+    return Number(this.db.prepare(`SELECT COUNT(*) AS total FROM ${name}`).get().total);
   }
 
   // The machine-readable record of what each schema migration did, so the
