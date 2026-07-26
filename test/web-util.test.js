@@ -96,9 +96,26 @@ test('field readers survive the empty values Web Awesome inputs report', () => {
   assert.equal(fieldValue({}), '');
 
   assert.equal(fieldChecked(fakeInput({ checked: true })), true);
-  assert.equal(fieldChecked(fakeInput({ attributes: new Map([['checked', '']]) })), true);
   assert.equal(fieldChecked(fakeInput()), false);
   assert.equal(fieldChecked(undefined), false);
+
+  // A custom element that has not upgraded yet has no `checked` property, so
+  // the attribute is all there is to read.
+  const notUpgraded = fakeInput({ attributes: new Map([['checked', '']]) });
+  delete notUpgraded.checked;
+  assert.equal(fieldChecked(notUpgraded), true);
+});
+
+test('unchecking a box the wizard pre-checked is what the payload sees', () => {
+  // wa-checkbox flips its property on click and leaves the `checked` attribute
+  // set by setWizardChecked in place. Reading the two with `||` made the stale
+  // attribute outvote the user, so a pre-checked box could never be cleared —
+  // reproduced on a grab profile whose fallback checkbox would not turn off.
+  const uncheckedByUser = fakeInput({
+    checked: false,
+    attributes: new Map([['checked', '']]),
+  });
+  assert.equal(fieldChecked(uncheckedByUser), false);
 });
 
 test('numeric field readers reject everything that is not a positive number', () => {

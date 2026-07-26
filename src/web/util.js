@@ -7,8 +7,16 @@ export function fieldValue(input) {
   return String(input?.value ?? input?.getAttribute?.('value') ?? '');
 }
 
+// The property is the live state; the attribute is only the state the markup
+// or a setWizardChecked call started it in. A wa-checkbox flips the property
+// when the user clicks it and leaves the attribute alone, so reading the two
+// with `||` made every box the wizard pre-checked impossible to uncheck — the
+// stale attribute outvoted the user. Fall back to the attribute only for an
+// element that has no property yet, i.e. a custom element still upgrading.
 export function fieldChecked(input) {
-  return Boolean(input?.checked || input?.hasAttribute?.('checked'));
+  if (!input) return false;
+  if (typeof input.checked === 'boolean') return input.checked;
+  return Boolean(input.hasAttribute?.('checked'));
 }
 
 export function numericSelectValue(value) {
