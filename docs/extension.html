@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="Install the putiorr grab browser extension: get the files onto the machine running Chrome, load it unpacked, point it at putiorr, and keep it updated.">
+    <title>putiorr browser extension guide</title>
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="doc-hero section">
+        <p class="doc-kicker">Browser extension guide</p>
+        <h1>Install the grab extension on the machine you browse from.</h1>
+        <p>
+          The extension captures the magnet links and <code>.torrent</code>
+          downloads you click and hands them to putiorr. It is distributed from
+          the putiorr repository and loaded unpacked, so the first job is getting
+          a copy of the files onto the computer running Chrome — not onto the NAS
+          running putiorr.
+        </p>
+      </section>
+
+      <section class="doc-layout section">
+        <aside class="doc-toc" aria-label="Extension sections">
+          <strong>On this page</strong>
+          <a href="#before">Before you start</a>
+          <a href="#get-files">Get the files</a>
+          <a href="#where">Where to keep the folder</a>
+          <a href="#load">Load it in Chrome</a>
+          <a href="#connect">Point it at putiorr</a>
+          <a href="#updating">Updating</a>
+          <a href="#limits">What it does not do</a>
+        </aside>
+
+        <div class="doc-content">
+          <section id="before" class="doc-section">
+            <h2>Before you start</h2>
+            <p>
+              Create at least one <strong>Putiorr Grab</strong> profile in the
+              putiorr dashboard first. That preset is the only one the extension
+              lists, and a grab aimed at any other preset is refused, so an
+              install against a putiorr full of *arr profiles loads an empty
+              profile list and cannot grab anything. The
+              <a href="configuration.html#browser-grabs">browser grabs section of
+              the configuration guide</a> covers creating one and listing the
+              sites that route to it.
+            </p>
+            <p>
+              Everything about <em>where</em> a grab lands is configured in
+              putiorr, on the profile. The extension holds a connection and a
+              capture toggle, and shows putiorr's routing read-only.
+            </p>
+            <p class="doc-note">
+              putiorr normally runs in a container on a NAS, and Chrome runs on
+              your laptop or desktop. Chrome reads an unpacked extension from a
+              folder on its own disk; it cannot load one over the network or out
+              of the putiorr container. The steps below all happen on the machine
+              with the browser.
+            </p>
+          </section>
+
+          <section id="get-files" class="doc-section">
+            <h2>Get the files</h2>
+            <p>
+              No packaged extension is published. A release ships the container
+              image and GitHub's own source archives; there is no
+              <code>.crx</code> and no separate extension download, so the copy
+              you load is a copy of the repository's <code>extension/</code>
+              folder. Two ways to get one:
+            </p>
+            <h3>Clone the repository</h3>
+            <p>
+              Best when you already use git on that machine, because updating is
+              then one command.
+            </p>
+            <pre><code>git clone https://github.com/ptheofan/putiorr.git
+# the folder to load is putiorr/extension</code></pre>
+            <h3>Download a source archive</h3>
+            <p>
+              Best when the browser machine has no git. Every tag has a source
+              archive at a fixed URL — tags are named <code>vX.Y.Z</code>, and
+              <code>.tar.gz</code> works in place of <code>.zip</code>:
+            </p>
+            <pre><code>https://github.com/ptheofan/putiorr/archive/refs/tags/&lt;tag&gt;.zip
+
+# for example
+https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
+            <p>
+              The same archives are linked from each release on the
+              <a href="https://github.com/ptheofan/putiorr/releases">releases
+              page</a>, under <strong>Source code</strong>. The archive unpacks
+              to a folder named after the tag without its leading <code>v</code>
+              — <code>putiorr-2.0.3/</code> — and the folder to load is
+              <code>putiorr-2.0.3/extension</code>.
+            </p>
+            <p class="doc-note">
+              Take the extension from the same version of putiorr you run. An
+              extension older than putiorr's browser-site routing sends a profile
+              id putiorr no longer wants; a putiorr older than the extension
+              answers an auto-captured click with
+              <code>profileId is required</code>, leaving only the right-click
+              menu working.
+            </p>
+          </section>
+
+          <section id="where" class="doc-section">
+            <h2>Where to keep the folder</h2>
+            <p>
+              Chrome does not copy an unpacked extension anywhere. It records the
+              path you pick and reads the files from that path every time it
+              starts, so the folder has to stay where it is, under the name it
+              has, for as long as you use the extension. Unpacking an archive
+              into a temporary folder or the Downloads folder you periodically
+              empty is the way to arrive at an extension that stopped working and
+              no obvious reason why.
+            </p>
+            <p>
+              The path is also the extension's identity. An unpacked extension
+              carries no signing key, so Chrome derives its id from a hash of the
+              folder's absolute path. Move or rename the folder — or a folder
+              above it — and Chrome sees a different extension: a fresh install
+              with empty options, alongside a broken entry pointing at the old
+              path.
+            </p>
+            <p class="doc-note">
+              Pick somewhere permanent before you load it, such as
+              <code>~/chrome-extensions/putiorr</code> or a clone you keep
+              anyway. Getting this right once costs nothing; getting it wrong
+              costs the options and the site claims stored against the old id.
+            </p>
+          </section>
+
+          <section id="load" class="doc-section">
+            <h2>Load it in Chrome</h2>
+            <ol>
+              <li>Open <code>chrome://extensions</code>.</li>
+              <li>Turn on <strong>Developer mode</strong> with the toggle at the top right, and leave it on. From Chrome 134 an unpacked extension is disabled whenever Developer mode is off, so this is a permanent setting rather than an install step.</li>
+              <li>Click <strong>Load unpacked</strong> and select the <code>extension/</code> folder itself — the one that contains <code>manifest.json</code> — not the repository root above it.</li>
+              <li>Reload any tabs that were already open. Pages loaded before the extension have no content script, so clicks on them are not captured and the right-click menu answers "Reload the page, then try again" for <code>.torrent</code> links.</li>
+            </ol>
+            <p>
+              The card that appears is named <strong>putiorr grab</strong>. Pin it
+              to the toolbar if you want the popup that says which profile a grab
+              from the current site would land in.
+            </p>
+          </section>
+
+          <section id="connect" class="doc-section">
+            <h2>Point it at putiorr</h2>
+            <p>
+              Open the extension options — on <code>chrome://extensions</code>,
+              <strong>Details</strong> → <strong>Extension options</strong> — and
+              fill in the connection:
+            </p>
+            <ol>
+              <li>Enter the <strong>putiorr URL</strong>, such as <code>http://nas:9091</code>. It must be the root URL of the host, with no path, query, or fragment; putiorr cannot be served from a subpath, so a URL with one is refused rather than silently trimmed.</li>
+              <li>If putiorr sits behind Basic auth, fill in <strong>Username</strong> and <strong>Password</strong>. They are kept in local extension storage, not in the Google-account-synced storage that holds the rest of the settings.</li>
+              <li>Click <strong>Test connection &amp; load profiles</strong>. putiorr answers with its Putiorr Grab profiles only, and the card lists what each one takes, including which one takes the sites no profile claims.</li>
+              <li>Press <strong>Save</strong>. Loading only fills the page; nothing is stored until you save.</li>
+              <li>Leave <strong>Auto-capture magnet and .torrent clicks</strong> on, or switch it off to grab exclusively through the right-click menu.</li>
+            </ol>
+            <p>
+              Then confirm it end to end: click a <code>magnet:</code> link on a
+              site one of your grab profiles claims. A
+              <strong>Downloading with putiorr…</strong> item appears at the top
+              right of the page, becomes
+              <strong>Downloading with putiorr using <code>&lt;profile&gt;</code>
+              profile</strong>, a matching Chrome notification arrives, and the
+              transfer shows up in the putiorr dashboard.
+            </p>
+            <p class="doc-note">
+              If the load returns nothing, the status says which of three things
+              it was rather than guessing: no Putiorr Grab profiles exist, they
+              all exist but are switched off, or the URL answered with something
+              this page could not read — which is what another server's JSON at
+              that address looks like from here.
+            </p>
+          </section>
+
+          <section id="updating" class="doc-section">
+            <h2>Updating</h2>
+            <p>
+              Chrome never updates an unpacked extension for you, and it does not
+              notice the folder changing while it runs. Updating is therefore two
+              steps, and the second is the one that is easy to forget:
+            </p>
+            <ol>
+              <li>Refresh the files in place — <code>git pull</code> in the clone, or unpack the new archive over the same path so the path does not change.</li>
+              <li>Open <code>chrome://extensions</code> and click the reload icon on the <strong>putiorr grab</strong> card. The manifest, the service worker, and the content scripts are only re-read then.</li>
+              <li>Reload any tabs you had open, for the same reason as on a fresh install: their content script is the old one.</li>
+            </ol>
+            <p>
+              <strong>The options survive the reload.</strong> Keeping the same
+              path keeps the same extension id, and the storage is keyed to that
+              id, so the putiorr URL, the credentials, and the capture toggle are
+              all still there afterwards. Run <strong>Test connection &amp; load
+              profiles</strong> again if profiles were added, renamed, or
+              re-pointed in putiorr — the right-click menu is built from that
+              cached list, while routing for ordinary clicks is resolved by
+              putiorr on every grab and is correct immediately.
+            </p>
+            <p class="doc-note">
+              Unpacking a new version to a <em>new</em> path is not an update. It
+              is a second extension with its own id and empty options, running
+              beside the first. Remove the old card first if you have to move,
+              and expect to set the options again.
+            </p>
+          </section>
+
+          <section id="limits" class="doc-section">
+            <h2>What it does not do</h2>
+            <ul>
+              <li><strong>Chrome only.</strong> It is a Manifest V3 extension written against the <code>chrome.*</code> APIs and has not been adapted or tested for other browsers.</li>
+              <li><strong>Click capture recognises a path ending in <code>.torrent</code>, or a link with a magnet in it.</strong> Trackers whose download URLs look like <code>download.php?id=…</code> are grabbed with right-click → <strong>Send to putiorr</strong>, which also overrides the profile for that one grab.</li>
+              <li><strong>Links inside iframes are not captured.</strong> An embedded frame behaves as if the extension were not installed.</li>
+              <li><strong>Modifier clicks are never captured.</strong> Alt+click stays "download to disk", and is the escape hatch when you want the raw <code>.torrent</code> file.</li>
+              <li><strong>A cross-origin <code>.torrent</code> is fetched by the page,</strong> so private-tracker session cookies apply — and so does the page's CORS policy. A host that refuses the page's origin fails the fetch, and the click falls back to a normal browser download.</li>
+            </ul>
+            <p>
+              The extension's own <a href="https://github.com/ptheofan/putiorr/blob/main/extension/README.md">README</a>
+              carries the full behaviour: what counts as a wrapped magnet, what
+              every failure message means, and the endpoints it calls.
+            </p>
+            <div class="doc-actions">
+              <a class="button primary" href="configuration.html#browser-grabs">Configure browser grabs</a>
+              <a class="button secondary" href="documentation.html">Back to docs</a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="documentation.html">Docs</a>
+        <a href="setup.html">Setup</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="agent-setup.html">Agent guide</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+  </body>
+</html>
