@@ -972,8 +972,9 @@ export class TransferService {
       : undefined;
 
     const remoteDeleted = deleteRemote;
+    let remoteAlreadyGone = false;
     if (remoteDeleted) {
-      await this.removeRemoteFiles(files, { throwOnError: true });
+      ({ alreadyGone: remoteAlreadyGone } = await this.removeRemoteFiles(files, { throwOnError: true }));
     }
 
     // Mirror the bucket logic at file granularity: a file removed from put.io is
@@ -1010,6 +1011,10 @@ export class TransferService {
       bucketDeleted: false,
       transferId: transfer.id,
       filesDeleted: files.length,
+      // Reported the same way the bucket delete reports it: put.io answered 404
+      // rather than deleting anything, so there is no remote copy left to
+      // re-fetch and the dashboard says so instead of "deleted".
+      remoteAlreadyGone,
     };
   }
 
@@ -1036,15 +1041,25 @@ export class TransferService {
     return this.store.updateDownload(transferId, patch);
   }
 
+  // Reads a 404 the way removeRemoteTransfer does: put.io agreeing, not put.io
+  // failing. Treated as an error it made a per-file delete unretryable — the
+  // call threw before the rows were touched, so the file stayed in the list and
+  // every later attempt got the same 404 for a file nobody has.
+  //
+  // Returns `{ errors, alreadyGone }`, the same shape and for the same reason:
+  // "put.io had already lost it" is a different event from "putiorr deleted
+  // it", and the caller reports which one happened.
   async removeRemoteFiles(files, { throwOnError = false } = {}) {
     const errors = [];
+    let alreadyGone = false;
     const putio = this.getPutio();
     for (const file of files) {
       try {
         await putio.deleteFile(file.putio_file_id);
       } catch (error) {
-        errors.push(error);
-        logger.warn('failed to delete put.io file', {
+        if (error?.status === 404) alreadyGone = true;
+        else errors.push(error);
+        logger.warn(error?.status === 404 ? 'put.io no longer has the file' : 'failed to delete put.io file', {
           transferFileId: file.id,
           putioFileId: file.putio_file_id,
           error: error.message,
@@ -1054,7 +1069,7 @@ export class TransferService {
     if (errors.length > 0 && throwOnError) {
       throw remoteDeleteError(errors);
     }
-    return errors;
+    return { errors, alreadyGone };
   }
 
   // A 404 is put.io agreeing, not put.io failing: the caller asked for the

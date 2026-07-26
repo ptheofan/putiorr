@@ -558,6 +558,74 @@ test('dashboard file delete removes one file locally and optionally from put.io'
   );
 });
 
+// A 404 is put.io agreeing, not put.io failing — the answer removeRemoteTransfer
+// already treats as success. Counted as a failure here, the per-file delete was
+// unretryable: it threw before the rows were touched, so every later attempt got
+// the same 404 for a file nobody has and the row never left the list.
+test('a per-file delete finishes when put.io has already lost the file', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const transfer = harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'lostfilehash',
+    name: 'Lost.File',
+    category: 'sonarr',
+    lifecycle: 'downloading',
+    putio_status: 'COMPLETED',
+    percent_done: 100,
+    total_size: 11,
+  });
+  const firstFile = harness.store.upsertDownloadFile({
+    download_id: transfer.id,
+    putio_file_id: 200,
+    relative_path: 'Episode.One.mkv',
+    size: 5,
+    downloaded_bytes: 5,
+    status: 'complete',
+  });
+  harness.store.upsertDownloadFile({
+    download_id: transfer.id,
+    putio_file_id: 201,
+    relative_path: 'Episode.Two.mkv',
+    size: 6,
+    downloaded_bytes: 6,
+    status: 'complete',
+  });
+  const stagedPath = path.join(profile.download_at, 'sonarr', 'Lost.File');
+  await mkdir(stagedPath, { recursive: true });
+  await writeFile(path.join(stagedPath, 'Episode.One.mkv'), 'one');
+  await writeFile(path.join(stagedPath, 'Episode.Two.mkv'), 'two');
+  harness.putio.deleteFile = async () => {
+    const error = new Error('put.io file 200 not found');
+    error.status = 404;
+    throw error;
+  };
+
+  const response = await fetch(harness.url.replace('/transmission/rpc', `/api/downloads/${transfer.id}/files/delete`), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileIds: [firstFile.id], deleteRemote: true, deleteLocal: true }),
+  });
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.filesDeleted, 1);
+  // "put.io had already lost it" is a different event from "putiorr deleted
+  // it", and the dashboard says which one happened.
+  assert.equal(body.remoteAlreadyGone, true);
+  assert.equal(harness.store.findDownloadFileById(firstFile.id), undefined);
+  await assert.rejects(() => stat(path.join(stagedPath, 'Episode.One.mkv')), { code: 'ENOENT' });
+  await stat(path.join(stagedPath, 'Episode.Two.mkv'));
+});
+
 test('dashboard deleting all selected files deletes the whole bucket', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
