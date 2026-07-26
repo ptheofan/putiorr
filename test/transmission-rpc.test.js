@@ -3607,3 +3607,23 @@ test('a download adopted while the delete runs is reported, not answered with th
   assert.equal(retried.status, 200);
   assert.equal(harness.store.findProfileById(profile.id), undefined);
 });
+
+test('a malformed reassignTo names what was wrong with it', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { profile, download } = stageProfileWithDownload(harness);
+
+  // A caller that sent something it believed was an id is told what was wrong
+  // with it, the way /api/grab answers a bad profileId. "Profile not found"
+  // describes a lookup that was never worth making.
+  for (const reassignTo of ['abc', 1.5, -3]) {
+    const refused = await deleteProfile(harness, profile.id, { reassignTo });
+    assert.equal(refused.status, 400);
+    assert.match(refused.body.error, /reassignTo must be a positive integer/);
+  }
+  assert.equal(harness.store.findDownloadById(download.id).profile_id, profile.id);
+  assert.ok(harness.store.findProfileById(profile.id));
+});

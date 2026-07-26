@@ -363,12 +363,15 @@ export function profileDeletionOutcome(preview, choice = {}) {
   const name = preview?.profile?.name ?? 'this RR profile';
   const total = Number(preview?.downloads?.total ?? 0);
   const downloads = pluralize(total, 'download');
+  // "these 1 download" is the sort of thing a user reads as a bug in the count
+  // rather than as English, on the one dialog that has to be believed.
+  const theseDownloads = total === 1 ? 'this download' : `these ${downloads}`;
   if (total === 0) return `Deletes RR profile ${name}.`;
 
   if (choice.mode === 'move') {
     const target = (preview?.reassignTargets ?? [])
       .find((candidate) => String(candidate.id) === String(choice.reassignTo));
-    if (!target) return `Choose the RR profile that takes these ${downloads} over.`;
+    if (!target) return `Choose the RR profile that takes ${theseDownloads} over.`;
     // Not about the preset — a Prowlarr profile and a hand-toggled one behave
     // the same way — so the flag itself is what is reported. A target that
     // auto-removes takes every one of these out of putiorr the moment it
@@ -383,11 +386,11 @@ export function profileDeletionOutcome(preview, choice = {}) {
       + autoRemoves;
   }
 
-  if (choice.mode !== 'delete') return `Choose what happens to these ${downloads}.`;
+  if (choice.mode !== 'delete') return `Choose what happens to ${theseDownloads}.`;
 
   const remote = choice.deleteRemote
     ? `cancels ${total === 1 ? 'its' : 'their'} ${total === 1 ? 'put.io transfer' : `${total} put.io transfers`}`
-    : 'leaves them on put.io';
+    : `leaves ${total === 1 ? 'it' : 'them'} on put.io`;
   // Named as the folders, not as the downloaded files: deleting is rm on the
   // whole staging folder, so it takes the `.part` of anything still running and
   // whatever else is in there — none of which putiorr has a row for. A count of
@@ -405,7 +408,8 @@ export function profileDeletionOutcome(preview, choice = {}) {
   // first, while the choice is still the user's.
   const stranded = choice.deleteRemote
     ? ''
-    : ' The transfers left on put.io are listed as unattributed until an RR profile downloads into that folder.';
+    : ` The ${total === 1 ? 'transfer' : 'transfers'} left on put.io ${total === 1 ? 'is' : 'are'} listed`
+      + ' as unattributed until an RR profile downloads into that folder.';
   return `Removes ${downloads} from putiorr, ${remote}, ${local}, then deletes RR profile ${name}.${stranded}`;
 }
 

@@ -58,6 +58,18 @@ function htmlResponse(res, status, body, sessionId) {
   res.end(body);
 }
 
+// A caller that named a profile is told what was wrong with the name, the way
+// resolveGrabProfile answers a bad profileId. Answering "Profile not found"
+// for 1.5 or "abc" describes a lookup that was never worth making, and an
+// absent value is not a malformed one — it means the caller chose the other
+// answer.
+function normalizeReassignTo(value) {
+  if (value === undefined || value === null || String(value).trim() === '') return null;
+  const id = Number(value);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('reassignTo must be a positive integer');
+  return id;
+}
+
 async function readJsonBody(req) {
   const chunks = [];
   let total = 0;
@@ -549,7 +561,7 @@ export class TransmissionRpcServer {
         // profile is one of the likelier reasons a request is being logged
         // here at all, and the old enabled-only list left it out of the very
         // record someone reads to find out why.
-        profiles: this.service.store.listProfiles({ includeDisabled: true }).map((listed) => ({
+        profiles: this.service.store.listProfiles().map((listed) => ({
           id: listed.id,
           name: listed.name,
           slug: listed.slug,
@@ -698,7 +710,7 @@ export class TransmissionRpcServer {
         // Presets are stored lowercase wherever they enter putiorr, so the
         // filter that reads them back normalizes the same way.
         const type = (searchParams.get('type') ?? '').trim().toLowerCase();
-        const profiles = this.service.store.listProfiles({ includeDisabled: true });
+        const profiles = this.service.store.listProfiles();
         jsonResponse(
           res,
           200,
@@ -799,7 +811,7 @@ export class TransmissionRpcServer {
         // third answer — move these downloads to another profile — is a
         // different outcome for the same rows, so it is sent on its own.
         const result = await this.service.deleteProfileWithDownloads(Number(profileMatch[1]), {
-          reassignTo: normalizeOptionalId(body.reassignTo ?? body.reassign_to),
+          reassignTo: normalizeReassignTo(body.reassignTo ?? body.reassign_to),
           deleteDownloads: body.deleteDownloads === true,
           deleteRemote: body.deleteRemote === true,
           deleteLocal: body.deleteLocal === true,
@@ -1364,7 +1376,7 @@ export class TransmissionRpcServer {
     // site, so browser_domains left on an *arr profile is not consulted.
     const matched = pageHost
       ? matchProfileByHost(
-        this.service.store.listProfiles({ includeDisabled: true })
+        this.service.store.listProfiles()
           .filter((profile) => profile.type === GRAB_PROFILE_TYPE),
         pageHost,
       )

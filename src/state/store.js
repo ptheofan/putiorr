@@ -1233,7 +1233,7 @@ export class StateStore {
       this.setSetting('putio_token', config.putioToken);
     }
     const defaultDownloadProfile = this.ensureDefaultDownloadProfile(config);
-    if (this.listProfiles({ includeDisabled: true }).length === 0) {
+    if (this.listProfiles().length === 0) {
       const seedProfiles = Array.isArray(config.seedProfiles) && config.seedProfiles.length > 0
         ? config.seedProfiles
         : [{
@@ -1492,11 +1492,16 @@ export class StateStore {
     return normalizeProfileRow(row);
   }
 
-  listProfiles({ includeDisabled = false } = {}) {
-    const sql = includeDisabled
-      ? 'SELECT * FROM profiles ORDER BY id ASC'
-      : 'SELECT * FROM profiles WHERE enabled = 1 ORDER BY id ASC';
-    return this.db.prepare(sql).all().map(normalizeProfileRow);
+  // Every profile, always. The enabled-only default this used to carry is what
+  // gave `enabled = 0` four meanings: each caller that forgot to opt out got a
+  // profile that had silently ceased to exist, and the shared endpoint, the
+  // site match and adoption each drew a different conclusion from that. A
+  // profile that accepts no new work is still a profile, and the one door that
+  // cares asks requireProfile.
+  listProfiles() {
+    return this.db.prepare('SELECT * FROM profiles ORDER BY id ASC')
+      .all()
+      .map(normalizeProfileRow);
   }
 
   transaction(fn) {

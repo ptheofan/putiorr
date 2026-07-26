@@ -212,7 +212,7 @@ export class TransferService {
   // owns the shared endpoint, an add that was refused as ambiguous yesterday
   // lands silently in the surviving profile's folder today.
   listArrProfiles() {
-    return this.store.listProfiles({ includeDisabled: true })
+    return this.store.listProfiles()
       .filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
   }
 
@@ -314,7 +314,7 @@ export class TransferService {
   // check. Thrown rather than reported as contested, because the reason is
   // different and the user needs to read it.
   assertNotAStagingRoot(target) {
-    for (const profile of this.store.listProfiles({ includeDisabled: true })) {
+    for (const profile of this.store.listProfiles()) {
       const root = profile.download_at ? path.resolve(profile.download_at) : '';
       if (!root) continue;
       if (target === root || root.startsWith(`${target}${path.sep}`)) {
@@ -604,7 +604,7 @@ export class TransferService {
   async refreshRemoteTransfers() {
     const putio = this.getPutio();
     const profiles = [];
-    for (const profile of this.store.listProfiles({ includeDisabled: true })) {
+    for (const profile of this.store.listProfiles()) {
       // Creating a put.io folder is work, so a disabled profile does not get
       // one made for it. The folder it already has is still its own, though,
       // and it stays on the map: adoption has to refuse a transfer that lands
@@ -1257,7 +1257,7 @@ export class TransferService {
   // about a change of owner.
   reassignTargetsFor(profile) {
     const from = path.resolve(String(profile.download_at ?? ''));
-    return this.store.listProfiles({ includeDisabled: true }).filter((candidate) => (
+    return this.store.listProfiles().filter((candidate) => (
       candidate.id !== profile.id
       && candidate.download_at
       && path.resolve(candidate.download_at) === from
@@ -1319,7 +1319,9 @@ export class TransferService {
           + ` not ${profile.download_at || '(nothing)'}, so moving these downloads to it would leave`
           + ' their files where they are and point putiorr somewhere else — a finished download whose'
           + ' files are missing is deleted and cancelled on put.io. Move the files first, or pick a'
-          + ` profile that downloads into ${profile.download_at || '(nothing)'}`,
+          + ` profile that downloads into ${profile.download_at || '(nothing)'}.`
+          + ' The two folders are compared as they are written, so a symlink or a bind mount naming'
+          + ' the same directory counts as a different one',
         );
       }
       report.reassigned = this.store.reassignDownloads(profile.id, target.id);
@@ -1453,7 +1455,7 @@ export class TransferService {
     if (!path.isAbsolute(recorded)) throw new Error(refusal);
 
     const target = path.resolve(recorded);
-    const staged = this.store.listProfiles({ includeDisabled: true }).some((profile) => (
+    const staged = this.store.listProfiles().some((profile) => (
       profile.download_at && target.startsWith(`${path.resolve(profile.download_at)}${path.sep}`)
     ));
     if (!staged) throw new Error(refusal);

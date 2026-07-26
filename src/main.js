@@ -36,7 +36,7 @@ async function main() {
     endpoint: `http://${config.listenHost}:${config.listenPort}/transmission/rpc`,
     targetDir: config.targetDir,
     statePath: config.statePath,
-    profiles: store.listProfiles({ includeDisabled: true }).length,
+    profiles: store.listProfiles().length,
     putioConnected: Boolean(service.getPutioToken()),
   });
 

@@ -743,7 +743,10 @@ export function renderProfileDeleteTargets(preview) {
     option.textContent = `${target.name} (${profileType(target.type).label})`;
     el.profileDeleteTarget.appendChild(option);
   }
-  el.profileDeleteTarget.value = targets.length > 0 ? String(targets[0].id) : '';
+  // Nothing preselected, here as well as on the radios: a dialog that arrives
+  // with an answer already filled in is one the user can commit without ever
+  // having chosen anything.
+  el.profileDeleteTarget.value = '';
   const empty = targets.length === 0 && preview.downloads.total > 0;
   setText(el.profileDeleteTargetEmpty, empty
     ? `No other RR profile downloads into ${preview.profile.downloadAt || '(nothing)'},`

@@ -209,7 +209,11 @@ says so before the user commits.
 `GET /api/profiles/:id/deletion-preview` serves the counts the confirmation
 states. It reads the database rather than the dashboard's list: tombstoned
 downloads are not in that list and hold put.io transfers, hold files, and
-block the delete like any other row.
+block the delete like any other row. The local counts are measured off the
+disk, not off the file rows: `deleteLocal` is `rm(recursive)` on the whole
+staging folder, so it takes the `.part` of anything still running and whatever
+else is in there, none of which putiorr has a row for. A folder it cannot read
+is reported rather than dropped from the total.
 
 ## Disabled profiles
 
@@ -334,7 +338,14 @@ stops working on upgrade, so each needs the fix spelled out.
 - **`DELETE /api/profiles/:id` no longer deletes a profile that owns
   downloads without being told what happens to them.** Send `reassignTo`, or
   `deleteDownloads: true` with the optional `deleteRemote` / `deleteLocal`
-  flags. A profile that owns nothing still deletes with no body at all.
+  flags. A profile that owns nothing still deletes with no body at all. A
+  delete that stops part-way through answers 400 with the same `downloads`
+  counts a success carries, naming what it had already cancelled on put.io and
+  removed from disk.
+- **The `rpc request failed` log names `profiles` where it named
+  `enabledProfiles`,** and each entry carries `enabled`. Anything scraping that
+  log line needs the new key; a disabled profile is one of the likelier reasons
+  a request is in there at all, and the old shape left it out.
 - **Profiles created through `POST /api/profiles` or `PUTIORR_PROFILES_JSON`
   with the Putiorr Grab preset now default to auto-removing completed
   downloads**, as the wizard and four documents already said they did. Send

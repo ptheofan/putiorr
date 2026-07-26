@@ -609,6 +609,22 @@ test('the profile deletion prompt states what each answer would do, in counts', 
     'Choose the RR profile that takes these 4 downloads over.',
   );
 
+  // One download is not "these 1 download", and it is not "them" either.
+  const single = { ...preview, downloads: { ...preview.downloads, total: 1, active: 1, removed: 0 } };
+  assert.equal(profileDeletionOutcome(single, {}), 'Choose what happens to this download.');
+  assert.equal(
+    profileDeletionOutcome(single, { mode: 'move' }),
+    'Choose the RR profile that takes this download over.',
+  );
+  assert.match(
+    profileDeletionOutcome(single, { mode: 'delete' }),
+    /Removes 1 download from putiorr, leaves it on put\.io/,
+  );
+  assert.match(
+    profileDeletionOutcome(single, { mode: 'delete', deleteRemote: true }),
+    /cancels its put\.io transfer/,
+  );
+
   const kept = profileDeletionOutcome(preview, { mode: 'delete' });
   assert.match(kept, /Removes 4 downloads from putiorr, leaves them on put\.io/);
   assert.match(kept, /leaves the downloaded files on disk, then deletes RR profile Radarr\./);
