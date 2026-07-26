@@ -1045,3 +1045,55 @@ test('a grab profile has no endpoint to collide with', async (t) => {
   assert.equal(second.status, 201);
   assert.equal(second.body.rpc_path, null);
 });
+
+test('the catch-all is a field the profile API actually accepts', async (t) => {
+  // normalizeProfileInput copies an allow-list of keys, so a column the store
+  // understands is still invisible to every HTTP caller until it is listed
+  // there — and the wizard is an HTTP caller.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const created = await postProfile(harness, {
+    name: 'Everything',
+    slug: 'everything',
+    type: 'grab',
+    rpc_path: null,
+    browserCatchAll: true,
+  });
+
+  assert.equal(created.status, 201);
+  assert.equal(created.body.browser_catch_all, true);
+  assert.equal(harness.store.findCatchAllGrabProfile()?.id, created.body.id);
+
+  // And it can be cleared: false is an answer, not an omission.
+  const response = await fetch(`${harness.base}/api/profiles/${created.body.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ browserCatchAll: false }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).browser_catch_all, false);
+  assert.equal(harness.store.findCatchAllGrabProfile(), undefined);
+});
+
+test('a second catch-all is refused through the API, naming the profile that holds it', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+
+  const first = await postProfile(harness, {
+    name: 'Everything', slug: 'everything', type: 'grab', rpc_path: null, browserCatchAll: true,
+  });
+  assert.equal(first.status, 201);
+
+  const second = await postProfile(harness, {
+    name: 'Also Everything', slug: 'also-everything', type: 'grab', rpc_path: null, browserCatchAll: true,
+  });
+
+  assert.equal(second.status, 400);
+  assert.equal(
+    second.body.error,
+    'Everything already takes grabs from any site no other profile claims; untick it on that profile first',
+  );
+  // The refusal is a refusal, not a partial save.
+  assert.equal(harness.store.findProfileBySlug('also-everything'), undefined);
+});

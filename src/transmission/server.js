@@ -1577,6 +1577,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const clientPort = input.client_port ?? input.clientPort;
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
   const browserDomains = input.browser_domains ?? input.browserDomains;
+  const browserCatchAll = input.browser_catch_all ?? input.browserCatchAll;
 
   if (name !== undefined) output.name = name;
   if (type !== undefined) output.type = type || 'custom';
@@ -1604,6 +1605,12 @@ function normalizeProfileInput(input, { partial = false } = {}) {
     // Not a column: the store ignores unknown keys, and profileResponse lifts
     // this back out onto the reply.
     if (warnings.length) output.browser_domain_warnings = warnings;
+  }
+  // Whether a second profile already holds this is the store's to answer — it
+  // is the only layer that can see the other rows, and the seed paths that
+  // never come through here have to be checked too.
+  if (browserCatchAll !== undefined) {
+    output.browser_catch_all = normalizeBooleanInput(browserCatchAll);
   }
   if (input.putio_folder_id !== undefined || input.putioFolderId !== undefined) {
     output.putio_folder_id = Number(input.putio_folder_id ?? input.putioFolderId) || null;
