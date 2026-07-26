@@ -1,5 +1,13 @@
 # Prowlarr Profile Auto-Cleanup
 
+**Superseded in part by `2026-07-25-ownership-cleanup-design.md` (issue #67).**
+The trigger is the profile's own `auto_remove_completed` flag, which the
+`prowlarr` and Putiorr Grab presets default to on — not `profile.type ===
+'prowlarr'`. And the owning profile is `store.findProfileById(profile_id)` with
+no fallback: `getDefaultProfile()` is deleted, `downloads.profile_id` is
+`NOT NULL`, and a download whose owner cannot be resolved is surfaced for repair
+rather than handed to whichever profile sorted first.
+
 ## Summary
 
 When a transfer belonging to a `prowlarr`-type profile finishes downloading,

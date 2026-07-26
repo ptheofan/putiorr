@@ -108,7 +108,9 @@ merely default it to on (`src/state/store.js:131-139`). Therefore:
 
 - Profiles used as browser-grab targets (the default profile and site-rule
   targets) are expected to be dedicated profiles with
-  `auto_remove_completed` enabled.
+  `auto_remove_completed` enabled. (Superseded by #67 phase 5: the Putiorr Grab
+  preset defaults the flag to on in the store, so the wizard, `POST
+  /api/profiles` and `PUTIORR_PROFILES_JSON` all get it.)
 - Documentation (README section and `extension/README.md`) instructs the user
   to create browser profiles with this flag on.
 - If `/api/grab` targets a profile without the flag, the grab still succeeds;

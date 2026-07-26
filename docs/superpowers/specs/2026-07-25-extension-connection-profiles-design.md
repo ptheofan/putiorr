@@ -4,6 +4,12 @@ Follow-up to the browser grab extension
 (`2026-07-25-browser-grab-extension-design.md`, issue #59 / PR #60). Builds on
 branch `feat/browser-grab-extension`.
 
+**Superseded in part by `2026-07-25-ownership-cleanup-design.md` (issue #67).**
+The site match runs over every Putiorr Grab profile, switched on or off — a
+disabled profile still claims its sites and the grab is refused by name, rather
+than falling through to the caller's default profile. Read "first enabled
+profile whose `browser_domains` suffix-match" below as "first such profile".
+
 ## Goal
 
 The sites-to-profile mapping is configured **in putiorr**, on the putiorr

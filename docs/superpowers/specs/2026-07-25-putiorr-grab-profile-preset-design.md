@@ -3,6 +3,14 @@
 Follow-up to browser sites per profile (issue #62 / PR #63), which is stacked
 on the browser grab extension (#59 / PR #60).
 
+**Superseded in part by `2026-07-25-ownership-cleanup-design.md` (issue #67).**
+Phase 3 of that design made `profiles.rpc_path` nullable with a partial unique
+index, so a Putiorr Grab profile no longer carries a derived `/grab/<slug>/rpc`
+— it has no Transmission RPC endpoint at all, and the path answers every
+request with a refusal. Phase 5 moved the preset's auto-remove default from the
+browser to the store, so `POST /api/profiles` and `PUTIORR_PROFILES_JSON` get it
+too. Everything else below still holds.
+
 ## Goal
 
 Browser grabs get their own first-class profile preset instead of borrowing
@@ -40,11 +48,12 @@ Selecting "Putiorr Grab" changes which steps render:
   noise. The "Copy settings" action and the *arr download-client note are
   hidden too.
 - **Step numbering** renumbers so the visible steps read 1..N.
-- `rpc_path` is still required and unique in the store, so the wizard
+- ~~`rpc_path` is still required and unique in the store, so the wizard
   generates a hidden, stable one for grab profiles: `/grab/<slug>/rpc`, kept
   in sync with the display name the way the *arr presets keep theirs aligned.
   Uniqueness is already enforced server-side; a collision surfaces as the
-  existing save error.
+  existing save error.~~ Superseded by #67 phase 3: `rpc_path` is nullable and a
+  grab profile holds none. A duplicate display name collides on `slug`.
 - Switching a grab profile to an *arr preset (or back) rewrites the derived
   fields exactly as preset switching does today.
 
