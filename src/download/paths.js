@@ -54,11 +54,20 @@ export function resolveInside(root, ...parts) {
 // would be the category directory, which holds every other download the
 // profile has, and every caller of this either writes into it or deletes it.
 export function downloadLocalRoot(profile, download) {
-  const name = downloadFolderSegments(download?.name);
+  const name = downloadFolderSegments(stagingFolderName(download));
   if (!name) return undefined;
   const parent = downloadCategoryDir(profile, download);
   const resolved = resolveInside(parent, name);
   return resolved === parent ? undefined : resolved;
+}
+
+// The name the download's folder is spelled with: the one frozen when it was
+// first staged, and until then the one put.io currently reports. put.io renames
+// transfers, and a rename must not move where putiorr looks for files it has
+// already written — that is read as the user having deleted them, and the sweep
+// deletes the download and cancels the put.io transfer over it.
+export function stagingFolderName(download) {
+  return download?.staging_folder || download?.name;
 }
 
 export function downloadCategoryDir(profile, download) {

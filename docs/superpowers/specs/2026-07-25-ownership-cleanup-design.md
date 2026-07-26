@@ -135,7 +135,21 @@ The name is the one put.io reports, untouched, and `torrent-get` reports that
 same name. The two are one decision, not two: every *arr resolves a completed
 download as `downloadDir + name` (Sonarr's `TransmissionBase.GetOutputPath`,
 which Radarr and Lidarr share), so a folder spelled differently from the
-reported name is a download that never imports.
+reported name is a download that never imports. Nothing rewrites the name on
+the way to the path: only `/` separates, nothing is trimmed, and a name whose
+segment does not fit in a filesystem's 255 bytes is refused on the download
+rather than truncated into a folder the *arr cannot compute.
+
+**The folder is frozen the first time the download is staged**, and recorded on
+the row. This is the other half of audit finding 8: put.io renames transfers,
+`name` follows the rename because that is what the user sees, and without a
+frozen folder the next sweep looks for the files under the new name, finds
+nothing, and reads that as the user having deleted them — deleting the download
+and cancelling its put.io transfer, with the files left orphaned at the old
+path and no remote copy to re-fetch. Freezing needs no id, moves nothing on
+disk, and is the same rule ownership already follows: resolved once, at the
+moment it first matters, and never re-derived. It is still "exactly as it was
+downloaded" — the name at the time it was downloaded.
 
 The collision this section once existed to prevent — two profiles staging one
 release into one directory — is unrepresentable after phase 3: one put.io
@@ -146,8 +160,17 @@ interleaved: the second one to reach the downloader is refused, logged, and
 surfaced in the dashboard, so no two downloads ever write the same `.part`.
 
 `deleteLocalData` asserts the resolved path belongs to exactly one download
-before removing anything, and refuses any path at or above a profile's staging
-root or a category directory whatever the answer.
+before removing anything — where a download claims its own folder, any folder
+holding it (put.io names can spell nested paths) and any directory above it —
+and refuses any path at or above a profile's staging root whatever the answer.
+The assertion runs before the first irreversible step of a delete, not at the
+last one, so a refusal never leaves a cancelled put.io transfer behind it.
+
+One residual case is inherent rather than fixed: a quarantined row whose put.io
+name happens to match a directory a user created inside a staging folder can
+still have that directory deleted, because nothing distinguishes it from the
+folder the row's own files went into. Quarantined rows are the only deletion
+target putiorr did not compute itself, and the user is the one asking.
 
 ## Profile deletion
 

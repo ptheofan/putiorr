@@ -241,6 +241,70 @@ test('a put.io name too long for the filesystem fails on the download, loudly', 
   }
 });
 
+// Audit finding 8's rename half, and re-review RC2: put.io renames a transfer
+// under putiorr's feet. The poll writes the new name into the row, and the
+// next sweep looks for the files under the new name, finds nothing, reads that
+// as "the user deleted them" — and deletes the download *and* its put.io
+// transfer, leaving the files orphaned at the old path with no remote copy to
+// re-fetch. The folder is frozen the first time it is prepared, so the rename
+// cannot move where putiorr looks.
+test('a put.io rename does not strand the files or cancel the transfer', async () => {
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 5 }],
+  });
+  putio.deletedFiles = [];
+  putio.deletedTransfers = [];
+  putio.deleteFile = async (id) => { putio.deletedFiles.push(id); };
+  putio.deleteTransfer = async (id) => { putio.deletedTransfers.push(id); };
+
+  const harness = await createHarness({ PUTIORR_CLEANUP_REMOTE_FILES: 'false' }, putio);
+  try {
+    const transfer = createTransfer(harness.store, { name: 'Original.Name', lifecycle: 'remote', total_size: 5 });
+    const staged = path.join(harness.config.targetDir, 'Original.Name');
+    await mkdir(staged, { recursive: true });
+    await writeFile(path.join(staged, 'movie.mkv'), 'movie');
+
+    const remote = {
+      id: transfer.putio_transfer_id,
+      fileId: transfer.putio_file_id,
+      saveParentId: 42,
+      hash: transfer.hash,
+      name: 'Original.Name',
+      status: 'COMPLETED',
+      percentDone: 100,
+      size: 5,
+    };
+    putio.remoteTransfers = [remote];
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+    await manager.pollOnce();
+    assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'processed');
+
+    // put.io renames the transfer. The row follows the name — it is what the
+    // user sees — but the files do not move.
+    remote.name = 'Renamed.By.Putio';
+    await manager.pollOnce();
+
+    const row = harness.store.findDownloadById(transfer.id);
+    assert.ok(row, 'the download survived the rename');
+    assert.equal(row.name, 'Renamed.By.Putio');
+    assert.deepEqual(putio.deletedTransfers, []);
+    assert.deepEqual(putio.deletedFiles, []);
+    assert.equal(await readFile(path.join(staged, 'movie.mkv'), 'utf8'), 'movie');
+
+    // And the *arr is still told where the files actually are.
+    const { torrents } = await harness.service.getTorrents({ ids: [row.id] });
+    assert.equal(torrents[0].name, 'Original.Name');
+    assert.equal(path.join(torrents[0].downloadDir, torrents[0].name), staged);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('prepareTransfer forgets files put.io no longer has', async () => {
   const putio = new FakePutio({
     remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],

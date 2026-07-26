@@ -8,6 +8,7 @@ import {
   downloadLocalRoot,
   extractCategory,
   oversizedFolderSegment,
+  stagingFolderName,
 } from '../download/paths.js';
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
@@ -336,7 +337,7 @@ export class TransferService {
     // files under the untruncated one — a failure with no symptom. Left to the
     // filesystem it was worse: mkdir failed inside the worker, on every poll,
     // while the download sat at 50% reporting no error at all.
-    const oversized = oversizedFolderSegment(download?.name);
+    const oversized = oversizedFolderSegment(stagingFolderName(download));
     if (oversized) {
       throw new Error(
         `Download ${download?.id ?? '(unknown)'} cannot be staged: put.io named it`
@@ -363,6 +364,24 @@ export class TransferService {
       `${root} already belongs to download ${claimed[0].id} (${claimed[0].name}),`
       + ' which put.io named the same thing; rename one of them on put.io, or delete the one you do not want',
     );
+  }
+
+  // Called once per download, the first time its files are about to be
+  // written: the folder it gets is recorded, and every later resolution — the
+  // downloader, the sweeps, the deletes, the name reported over RPC — reads
+  // that instead of the put.io name. A put.io rename then changes what the
+  // user sees and nothing else, rather than pointing putiorr at an empty
+  // directory and the sweep at the conclusion that the files are gone.
+  claimStagingRoot(profile, download) {
+    const root = this.requireExclusiveStagingRoot(profile, download);
+    if (download.staging_folder) return root;
+    const folder = stagingFolderName(download);
+    this.store.updateDownload(download.id, { staging_folder: folder });
+    logger.info('staged download folder frozen', {
+      transferId: download.id,
+      folder: root,
+    });
+    return root;
   }
 
   downloadsStagingAt(root) {
@@ -984,7 +1003,11 @@ export class TransferService {
     const torrent = {
       id: row.id,
       hashString: row.hash,
-      name: row.name,
+      // The folder the files are in, which is the name the *arr joins onto
+      // downloadDir to find them. Before the first prepare there is nothing on
+      // disk and this is simply the put.io name; after it, a put.io rename
+      // changes the name but not where the files are.
+      name: stagingFolderName(row),
       eta: row.eta ?? -1,
       status: progress.status,
       downloadDir: path.join(profile.download_at, row.category ?? ''),

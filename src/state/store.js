@@ -25,6 +25,10 @@ const DOWNLOADS_DDL = `
     save_parent_id INTEGER,
     hash TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL,
+    -- The folder this download's files went into, frozen the first time it was
+    -- staged. put.io renames transfers and the name column follows the rename;
+    -- this does not, because the files on disk do not move either.
+    staging_folder TEXT NOT NULL DEFAULT '',
     source TEXT NOT NULL DEFAULT '',
     source_type TEXT NOT NULL DEFAULT 'unknown',
     category TEXT NOT NULL DEFAULT '',
@@ -447,6 +451,12 @@ export class StateStore {
       this.migrateMagnetTransferHashes();
     }
     this.migrateDownloadsCollapse();
+    // Databases collapsed by an earlier build of phase 4 predate the frozen
+    // staging folder. An empty value means "not staged yet", which is the
+    // right answer for every row that has not been prepared since.
+    if (this.hasTable('downloads')) {
+      this.ensureColumn('downloads', 'staging_folder', "TEXT NOT NULL DEFAULT ''");
+    }
     this.migrateProfilesSchema();
     this.absolutizeProfileDownloadFolders();
     this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
@@ -1597,6 +1607,7 @@ export class StateStore {
       'putio_file_id',
       'save_parent_id',
       'name',
+      'staging_folder',
       'putio_status',
       'putio_status_message',
       'putio_peers',

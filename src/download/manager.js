@@ -220,7 +220,7 @@ export class DownloadManager {
       error: false,
       error_string: '',
     });
-    const downloadRoot = this.service.requireExclusiveStagingRoot(profile, updated);
+    const downloadRoot = this.service.claimStagingRoot(profile, updated);
     const remoteFileIds = [];
     let totalSize = 0;
     for (const remoteFile of remoteFiles) {
