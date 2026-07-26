@@ -19,7 +19,7 @@
   },
   "options_page": "options.html",
   "web_accessible_resources": [
-    { "resources": ["lib/resolve.js"], "matches": ["<all_urls>"] }
+    { "resources": ["lib/resolve.js", "lib/toast.js"], "matches": ["<all_urls>"] }
   ],
   "icons": {
     "16": "icons/icon16.png",
