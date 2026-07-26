@@ -184,6 +184,20 @@ const LEGACY_ASSOCIATIONS_DDL = `
   );
 `;
 
+// Which upgrade summary the user has read, kept apart from the reports it
+// refers to so that dismissing the sentence never destroys the record of the
+// run.
+const SCHEMA_MIGRATION_SUMMARY_DISMISSED_SETTING = 'schema_migration_summary_dismissed';
+
+// The identity of the summary sentence: both reports it is built from, each by
+// version and by the moment it was written. A later migration writes a new
+// report, so the key moves and an older dismissal no longer matches it.
+function schemaMigrationSummaryKey({ downloads, profiles }) {
+  const part = (name, report) => (report ? `${name}:${report.version ?? 0}@${report.at ?? ''}` : '');
+  const key = [part('downloads', downloads), part('profiles', profiles)].filter(Boolean).join('|');
+  return key || undefined;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -659,15 +673,43 @@ export class StateStore {
         return undefined;
       }
     };
+    const downloads = parse('downloads_schema_v1_report');
+    const profiles = parse('profiles_schema_v2_report');
+    const summaryKey = schemaMigrationSummaryKey({ downloads, profiles });
     return {
-      downloads: parse('downloads_schema_v1_report'),
-      profiles: parse('profiles_schema_v2_report'),
+      downloads,
+      profiles,
       // Computed live rather than recorded, because it describes what is in
       // the database right now: legacy tables that reappeared after the
       // migration mean an older putiorr has written downloads this version
       // cannot see.
       legacyTablesPresent: this.legacyRowsAfterMigration(),
+      // Which upgrade the summary on the dashboard is about, and whether the
+      // user has already read it. The reports themselves are never deleted —
+      // they are the record of the run, and a support question a year later
+      // still wants them.
+      summaryKey,
+      summaryDismissed: Boolean(summaryKey)
+        && this.getSetting(SCHEMA_MIGRATION_SUMMARY_DISMISSED_SETTING) === summaryKey,
     };
+  }
+
+  // The summary is a fact about an upgrade that has finished: nothing to act
+  // on, so it can be put away. What is recorded is the identity of the report
+  // it was put away for, not a bare "hide it" — the next upgrade writes a new
+  // report, the key moves, and the sentence comes back on its own. The
+  // quarantine warning beside it is unresolved work and has no dismissal at
+  // all.
+  dismissSchemaMigrationSummary(expectedKey) {
+    const summaryKey = this.schemaMigrationReports().summaryKey;
+    if (!summaryKey) throw new Error('There is no database upgrade summary to dismiss');
+    if (expectedKey !== undefined && expectedKey !== summaryKey) {
+      throw new Error(
+        'The database upgrade summary has changed since this page was loaded. Reload the dashboard and read it again.',
+      );
+    }
+    this.setSetting(SCHEMA_MIGRATION_SUMMARY_DISMISSED_SETTING, summaryKey);
+    return this.schemaMigrationReports();
   }
 
   // put.io transfers the poll could not attribute to exactly one RR profile,

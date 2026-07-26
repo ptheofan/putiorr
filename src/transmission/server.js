@@ -670,6 +670,18 @@ export class TransmissionRpcServer {
         return;
       }
 
+      // Half the migration panel is a finished fact and half is work still
+      // waiting, so only the first half can be put away. The key names the
+      // report the user actually read: a later upgrade writes a new one and
+      // its summary appears again. The reports are left where they are.
+      if (method === 'POST' && requestPath === '/api/schema-migrations/summary/dismiss') {
+        const body = await readJsonBody(req);
+        const key = body.key === undefined || body.key === null ? undefined : String(body.key);
+        this.service.store.dismissSchemaMigrationSummary(key);
+        jsonResponse(res, 200, this.settingsResponse(req), this.sessionId);
+        return;
+      }
+
       if (method === 'POST' && requestPath === '/api/putio/test') {
         const body = await readJsonBody(req);
         const token = String(body.putioToken || this.service.getPutioToken() || '').trim();

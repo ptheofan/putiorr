@@ -27,6 +27,7 @@ test('downloads UI exposes stable data-testid hooks for frontend tests', () => {
     'staging-collision-text',
     'schema-migration-notice',
     'schema-migration-summary',
+    'schema-migration-summary-dismiss',
     'schema-migration-warning',
     'orphaned-downloads',
     'orphaned-download',
@@ -74,6 +75,22 @@ test('the downloads view renders the schema migration report it is served', () =
   // field nobody ever sees.
   assert.match(downloadsJs, /state\.settings\?\.schemaMigrations/);
   assert.match(downloadsJs, /export function renderDownloads\(\) \{\s*renderSchemaMigrations\(\);/);
+});
+
+// The upgrade summary is a finished fact and can be put away; the quarantine
+// warning beside it is work still waiting, so it has no control of its own and
+// no way to be hidden.
+test('only the upgrade summary carries a dismiss control, wired without an inline handler', () => {
+  const html = readFileSync(new URL('../src/web/index.html', import.meta.url), 'utf8');
+  const downloadsJs = readFileSync(new URL('../src/web/downloads.js', import.meta.url), 'utf8');
+  const appJs = readFileSync(new URL('../src/web/app.js', import.meta.url), 'utf8');
+
+  assert.match(html, /id="schemaMigrationSummaryDismiss"/);
+  assert.match(html, /aria-label="Dismiss the database upgrade summary"/);
+  assert.doesNotMatch(html, /onclick=/);
+  assert.doesNotMatch(html, /schemaMigrationWarningDismiss/);
+  assert.match(downloadsJs, /'\/api\/schema-migrations\/summary\/dismiss'/);
+  assert.match(appJs, /el\.schemaMigrationSummaryDismiss\.addEventListener\('click'/);
 });
 
 // Audit finding 9: with every profile on one put.io folder, adoption never

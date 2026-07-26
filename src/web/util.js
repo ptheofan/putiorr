@@ -364,6 +364,9 @@ export function pluralize(count, noun) {
 }
 
 export function schemaMigrationSummary(migrations) {
+  // Read once, gone for good — recorded on the server against the report it
+  // was read for, so a reload, a restart and another browser all agree.
+  if (migrations?.summaryDismissed) return '';
   const parts = [];
   const downloads = migrations?.downloads;
   const profiles = migrations?.profiles;
@@ -572,6 +575,17 @@ export function stagingCollisionSummary(collisions) {
       + ` the same as ${holder} ${collision.localPath}.`
       + ' Rename one of them on put.io, or delete the one you do not want along with its files.';
   }).join(' ');
+}
+
+// The two halves of the migration panel, decided in one place. The summary is
+// a one-time fact and can be dismissed; the warning is downloads nobody can
+// see until they act on it, so it stays until the condition behind it is gone
+// — and the panel stays with it. Only when both have nothing to say does the
+// panel go.
+export function schemaMigrationNoticeView(migrations) {
+  const summary = schemaMigrationSummary(migrations);
+  const warning = schemaMigrationWarning(migrations);
+  return { summary, warning, noticeVisible: Boolean(summary || warning) };
 }
 
 export function schemaMigrationWarning(migrations) {
