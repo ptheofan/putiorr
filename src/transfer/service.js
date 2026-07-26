@@ -709,13 +709,20 @@ export class TransferService {
         continue;
       }
 
+      // Resolved before anything irreversible happens, the way the dashboard's
+      // bucket delete does it: a download whose put.io name cannot name a
+      // folder has no local half to delete, and discovering that after
+      // cancelling the put.io transfer leaves a row that fails the same way on
+      // every retry. The row was found scoped to this profile, so this is that
+      // profile.
+      const localTarget = deleteLocal ? this.requireStagingRoot(currentProfile, transfer) : undefined;
+
       // One download owns its put.io transfer outright, so removing it always
       // removes the remote side too; there is no second profile left holding a
       // claim on it.
       await this.removeRemoteTransfer(transfer);
       if (deleteLocal) {
-        // The row was found scoped to this profile, so this is that profile.
-        await deleteLocalData(this.requireStagingRoot(currentProfile, transfer), this.ownershipCheck());
+        await deleteLocalData(localTarget, this.ownershipCheck());
       }
       this.store.deleteDownload(transfer.id);
       logger.info('torrent removed', {
