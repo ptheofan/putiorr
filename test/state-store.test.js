@@ -361,6 +361,38 @@ test('prowlarr profiles default to removing completed local downloads', async ()
   }
 });
 
+test('putiorr grab profiles default to removing completed local downloads', () => {
+  const store = new StateStore(':memory:');
+  try {
+    // The wizard sends the flag explicitly, so this is the default every other
+    // door gets: POST /api/profiles and PUTIORR_PROFILES_JSON.
+    const grab = store.createProfile({
+      name: 'Browser',
+      type: 'grab',
+      slug: 'browser',
+      putio_folder_name: 'putiorr',
+      downloadAt: '/downloads',
+      enabled: true,
+    });
+    const explicitlyOff = store.createProfile({
+      name: 'Browser Two',
+      type: 'grab',
+      slug: 'browser-two',
+      putio_folder_name: 'putiorr',
+      downloadAt: '/downloads',
+      auto_remove_completed: false,
+      enabled: true,
+    });
+
+    assert.equal(grab.auto_remove_completed, true);
+    assert.equal(grab.autoRemoveCompleted, true);
+    // A caller that says what it wants is never overridden by a preset default.
+    assert.equal(explicitlyOff.auto_remove_completed, false);
+  } finally {
+    store.close();
+  }
+});
+
 test('profiles with linked downloads cannot be deleted', () => {
   const store = new StateStore(':memory:');
   try {

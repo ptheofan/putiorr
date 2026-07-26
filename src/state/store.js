@@ -9,6 +9,7 @@ import {
   normalizeDownloadPolicy,
 } from '../download/policy.js';
 import { normalizeBrowserDomains } from '../transfer/browser-domains.js';
+import { GRAB_PROFILE_TYPE } from '../web/constants.js';
 import { logger } from '../logger.js';
 
 // One download item, one owning profile, one put.io transfer (design rules 1
@@ -337,7 +338,18 @@ function profileAutoRemoveCompleted(input) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
+// The preset defaults that used to live in the browser only. A profile created
+// through POST /api/profiles or seeded from PUTIORR_PROFILES_JSON never went
+// through the wizard, so a default kept in src/web/constants.js was a default
+// two of the three doors did not have. Both presets want it for the same
+// reason: nothing imports their downloads, so nobody would ever clear them.
 function profileDefaultsToAutoRemoveCompleted(input) {
+  // Only the type says a profile is a Putiorr Grab one — the server refuses a
+  // browser grab to any other preset — so nothing looser is consulted here.
+  if (profileTypeValue(input) === GRAB_PROFILE_TYPE) return true;
+  // Prowlarr's is matched loosely because the preset predates the type column:
+  // profiles set up before it exist with type 'custom' and prowlarr everywhere
+  // else.
   return [
     input.type,
     input.slug,

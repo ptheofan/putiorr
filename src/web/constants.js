@@ -1,3 +1,8 @@
+// `autoRemoveCompleted` here only pre-checks the wizard's box. The default
+// itself is the store's (profileDefaultsToAutoRemoveCompleted): a profile
+// created through POST /api/profiles or seeded from PUTIORR_PROFILES_JSON
+// never opens the wizard, and used to miss the default entirely. The two must
+// agree, or the wizard shows a box the server would have ticked anyway.
 export const PROFILE_TYPES = {
   sonarr: {
     label: 'Sonarr',
