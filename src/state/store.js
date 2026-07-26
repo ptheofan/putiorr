@@ -315,9 +315,14 @@ function profileDownloadProfileId(input) {
 // and storing that comma-separated text verbatim would read back as no sites at
 // all. Re-normalizing an already normalized list is a no-op; unmatchable
 // entries are dropped, since a seed has nobody to report an error to.
-function profileBrowserDomainsPatch(input) {
+function profileBrowserDomainsList(input) {
   const domains = input.browser_domains ?? input.browserDomains;
-  return domains === undefined ? undefined : JSON.stringify(normalizeBrowserDomains(domains).domains);
+  return domains === undefined ? undefined : normalizeBrowserDomains(domains).domains;
+}
+
+function profileBrowserDomainsPatch(input) {
+  const domains = profileBrowserDomainsList(input);
+  return domains === undefined ? undefined : JSON.stringify(domains);
 }
 
 // Reads the same shapes profileAutoRemoveCompleted does, for the same reason:
@@ -1411,6 +1416,7 @@ export class StateStore {
     const autoRemoveCompleted = profileAutoRemoveCompleted(input) ?? profileDefaultsToAutoRemoveCompleted(input);
     const browserCatchAll = profileBrowserCatchAll(input) ?? false;
     this.assertSingleCatchAll(profileTypeValue(input), browserCatchAll);
+    this.assertNoSharedBrowserSites(profileTypeValue(input), profileBrowserDomainsList(input));
     const result = this.db.prepare(`
       INSERT INTO profiles (
         name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
@@ -1458,8 +1464,8 @@ export class StateStore {
     if (nextClientUseSsl !== undefined) normalizedPatch.client_use_ssl = nextClientUseSsl;
     const nextAutoRemoveCompleted = profileAutoRemoveCompleted(patch);
     if (nextAutoRemoveCompleted !== undefined) normalizedPatch.auto_remove_completed = nextAutoRemoveCompleted;
-    const nextBrowserDomains = profileBrowserDomainsPatch(patch);
-    if (nextBrowserDomains !== undefined) normalizedPatch.browser_domains = nextBrowserDomains;
+    const nextBrowserDomains = profileBrowserDomainsList(patch);
+    if (nextBrowserDomains !== undefined) normalizedPatch.browser_domains = JSON.stringify(nextBrowserDomains);
     const nextBrowserCatchAll = profileBrowserCatchAll(patch);
     if (nextBrowserCatchAll !== undefined) normalizedPatch.browser_catch_all = nextBrowserCatchAll;
     // Both writes land in the same column and every read compares it exactly,
@@ -1473,6 +1479,15 @@ export class StateStore {
     this.assertSingleCatchAll(
       normalizedPatch.type ?? existing.type,
       nextBrowserCatchAll ?? existing.browser_catch_all,
+      id,
+    );
+    // Checked against the row this update would leave behind, for the same
+    // reason: switching a profile that already lists sites onto the grab preset
+    // is the moment those sites start to route grabs, and the patch that does
+    // it need not mention them.
+    this.assertNoSharedBrowserSites(
+      normalizedPatch.type ?? existing.type,
+      nextBrowserDomains ?? existing.browser_domains,
       id,
     );
     const allowed = [
@@ -1565,6 +1580,53 @@ export class StateStore {
       `${holder.name} already takes grabs from any site no other profile claims;`
       + ' untick it on that profile first',
     );
+  }
+
+  // The Putiorr Grab profile that lists `site` as one of its browser sites,
+  // compared as the exact entry rather than by what it covers: "x.example" and
+  // "*.x.example" are two different claims that resolve in a defined order, and
+  // only the identical entry on two profiles is ambiguous.
+  //
+  // Enabled is deliberately not a filter, exactly as it is not one for a grab:
+  // a disabled profile still holds its sites.
+  findProfileClaimingBrowserSite(site, { exceptId = 0 } = {}) {
+    if (!site) return undefined;
+    return this.db.prepare(`
+      SELECT * FROM profiles
+      WHERE lower(type) = ? AND id <> ?
+      ORDER BY id ASC
+    `)
+      .all(GRAB_PROFILE_TYPE, Number(exceptId) || 0)
+      .map(normalizeProfileRow)
+      .find((profile) => profile.browser_domains.includes(site));
+  }
+
+  // Two grab profiles holding the same browser site would make every grab from
+  // it come down to creation order, and this codebase refuses rather than
+  // guessing which folder a download lands in.
+  //
+  // Coverage that merely overlaps is not a conflict and is not refused here:
+  // "dl.x.example" on one profile and "*.x.example" on another is a
+  // configuration that says something, and matchProfileByHost resolves it —
+  // exact first, then the longest wildcard base.
+  //
+  // The check is here rather than in the API's normalizeProfileInput for the
+  // reasons assertSingleCatchAll is: it has to see the other rows, and every
+  // door that writes a browser site goes through createProfile or
+  // updateProfile — the HTTP API, the wizard behind it, the toolbar popup's
+  // claim endpoint, and PUTIORR_PROFILES_JSON alike. At the API boundary the
+  // seed paths would be free to write a duplicate.
+  assertNoSharedBrowserSites(type, domains, exceptId = 0) {
+    if (type !== GRAB_PROFILE_TYPE || !Array.isArray(domains)) return;
+    for (const site of domains) {
+      const holder = this.findProfileClaimingBrowserSite(site, { exceptId });
+      if (holder) {
+        throw new Error(
+          `${holder.name} already claims ${site};`
+          + ' remove the site there first if it should belong to this profile',
+        );
+      }
+    }
   }
 
   // Enabled is deliberately not a filter here. A disabled profile still owns

@@ -782,6 +782,93 @@ test('only a Putiorr Grab profile can hold the catch-all role', () => {
   }
 });
 
+test('the same browser site on two grab profiles is refused by naming the holder', () => {
+  const store = new StateStore(':memory:');
+  try {
+    seedGrabProfile(store, 'movies', { browser_domains: ['x.example', '*.z.example'] });
+
+    // A conflict is the same entry twice. Only one of the two can ever answer
+    // for it, and which one would come down to creation order — so it is
+    // refused, naming the profile the fix is on.
+    assert.throws(
+      () => seedGrabProfile(store, 'music', { browser_domains: ['x.example'] }),
+      /MOVIES already claims x\.example/,
+    );
+    assert.equal(store.findProfileBySlug('music'), undefined);
+
+    // The wildcard form is an entry in its own right, and duplicates the same way.
+    assert.throws(
+      () => seedGrabProfile(store, 'music', { browser_domains: ['*.z.example'] }),
+      /MOVIES already claims \*\.z\.example/,
+    );
+
+    // Normalization happens before the comparison: the same site spelled two
+    // ways is still the same site.
+    assert.throws(
+      () => seedGrabProfile(store, 'music', { browser_domains: ['https://X.Example:8080/dl'] }),
+      /MOVIES already claims x\.example/,
+    );
+
+    const music = seedGrabProfile(store, 'music', { browser_domains: ['y.example'] });
+    assert.throws(
+      () => store.updateProfile(music.id, { browser_domains: ['y.example', 'x.example'] }),
+      /MOVIES already claims x\.example/,
+    );
+    assert.deepEqual(store.findProfileById(music.id).browser_domains, ['y.example']);
+
+    // A profile re-saving its own sites is not in conflict with itself, and an
+    // update that does not mention them leaves them alone.
+    assert.deepEqual(store.updateProfile(music.id, { browser_domains: ['y.example'] }).browser_domains, ['y.example']);
+    assert.deepEqual(store.updateProfile(music.id, { name: 'Renamed' }).browser_domains, ['y.example']);
+  } finally {
+    store.close();
+  }
+});
+
+test('browser sites that merely overlap are allowed, because precedence resolves them', () => {
+  const store = new StateStore(':memory:');
+  try {
+    // This is the configuration the wildcard rule exists for: one profile takes
+    // one host by name, another takes the rest of the domain. Refusing it would
+    // refuse the useful case along with the ambiguous one.
+    seedGrabProfile(store, 'movies', { browser_domains: ['*.x.example'] });
+    const named = seedGrabProfile(store, 'music', { browser_domains: ['dl.x.example'] });
+    assert.deepEqual(named.browser_domains, ['dl.x.example']);
+
+    // And a narrower wildcard under a broader one: longest base wins.
+    const narrow = seedGrabProfile(store, 'books', { browser_domains: ['*.dl.x.example'] });
+    assert.deepEqual(narrow.browser_domains, ['*.dl.x.example']);
+
+    // One profile may hold both forms of the same domain; they are different
+    // entries and neither absorbs the other.
+    const both = seedGrabProfile(store, 'shows', { browser_domains: ['y.example', '*.y.example'] });
+    assert.deepEqual(both.browser_domains, ['y.example', '*.y.example']);
+  } finally {
+    store.close();
+  }
+});
+
+test('only Putiorr Grab profiles are checked for a shared browser site', () => {
+  const store = new StateStore(':memory:');
+  try {
+    // browser_domains on an *arr profile is consulted by nothing, so it can
+    // neither conflict nor block the grab profile that would answer.
+    const arr = seedProfile(store, { browser_domains: ['x.example'] });
+    assert.deepEqual(arr.browser_domains, ['x.example']);
+    const grab = seedGrabProfile(store, 'movies', { browser_domains: ['x.example'] });
+    assert.deepEqual(grab.browser_domains, ['x.example']);
+
+    // Switching that *arr profile to the grab preset is the moment its sites
+    // start to route grabs, so that is where the collision is caught.
+    assert.throws(
+      () => store.updateProfile(arr.id, { type: 'grab' }),
+      /MOVIES already claims x\.example/,
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test('profile browser sites round-trip as a JSON array and default to none', () => {
   const store = new StateStore(':memory:');
   try {

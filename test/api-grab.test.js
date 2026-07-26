@@ -1145,6 +1145,45 @@ test('the catch-all is a field the profile API actually accepts', async (t) => {
   assert.equal(harness.store.findCatchAllGrabProfile(), undefined);
 });
 
+test('a browser site another grab profile already lists is refused through the API', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'movies', ['x.example', '*.z.example']);
+
+  const clash = await postProfile(harness, { type: 'grab', rpc_path: null, browserDomains: 'y.example, x.example' });
+
+  assert.equal(clash.status, 400);
+  assert.equal(
+    clash.body.error,
+    'MOVIES already claims x.example; remove the site there first if it should belong to this profile',
+  );
+  // A refusal is a refusal, not a partial save.
+  assert.equal(harness.store.findProfileBySlug('browser'), undefined);
+
+  // Overlapping coverage is not a conflict: precedence already resolves it.
+  const overlapping = await postProfile(harness, {
+    type: 'grab',
+    rpc_path: null,
+    browserDomains: '*.x.example, dl.z.example',
+  });
+  assert.equal(overlapping.status, 201);
+  assert.deepEqual(overlapping.body.browser_domains, ['*.x.example', 'dl.z.example']);
+
+  // The same rule on the update path, and a profile re-saving its own sites is
+  // not in conflict with itself.
+  const response = await fetch(`${harness.base}/api/profiles/${overlapping.body.id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ browserDomains: '*.x.example, *.z.example' }),
+  });
+  assert.equal(response.status, 400);
+  assert.match((await response.json()).error, /MOVIES already claims \*\.z\.example/);
+  assert.deepEqual(
+    harness.store.findProfileById(overlapping.body.id).browser_domains,
+    ['*.x.example', 'dl.z.example'],
+  );
+});
+
 test('a second catch-all is refused through the API, naming the profile that holds it', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
@@ -1274,21 +1313,64 @@ test('a site another profile claims is refused, naming that profile', async (t) 
   assert.deepEqual(harness.store.findProfileById(owner.id).browser_domains, ['x.example']);
 });
 
-test('a refusal by wildcard match names the entry that was actually listed', async (t) => {
-  // "already claims dl.x.example" alone would send the user looking for an
-  // entry that is on no profile: what exists is "*.x.example".
+test('a host another profile only covers by wildcard can still be claimed by name', async (t) => {
+  // Not a conflict: an exact entry beats a wildcard, so this is the user saying
+  // "this one host goes here, the rest of the domain stays where it is". A
+  // refusal would refuse the useful case along with the ambiguous one.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const wide = createSiteProfile(harness, 'movies', ['*.x.example']);
+  const other = createSiteProfile(harness, 'books', []);
+
+  const { status, body } = await claimSite(harness, other.id, { host: 'dl.x.example' });
+
+  assert.equal(status, 200);
+  assert.equal(body.added, 'dl.x.example');
+  assert.deepEqual(harness.store.findProfileById(other.id).browser_domains, ['dl.x.example']);
+  assert.deepEqual(harness.store.findProfileById(wide.id).browser_domains, ['*.x.example']);
+
+  // And the grab that follows goes to the profile that named the host.
+  const grab = await postGrab(harness, {
+    pageHost: 'dl.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+  assert.equal(grab.status, 200);
+  assert.equal(grab.body.profile.id, other.id);
+});
+
+test('a wildcard can be claimed, and takes the whole domain from then on', async (t) => {
+  // The popup's field is editable so a user can type the entry they mean
+  // rather than the host they happen to be on.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const profile = createSiteProfile(harness, 'browser', []);
+
+  const { status, body } = await claimSite(harness, profile.id, { host: '*.X.Example' });
+
+  assert.equal(status, 200);
+  assert.equal(body.added, '*.x.example');
+  assert.deepEqual(body.browser_domains, ['*.x.example']);
+
+  const grab = await postGrab(harness, {
+    pageHost: 'dl.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+  assert.equal(grab.status, 200);
+  assert.equal(grab.body.profile.id, profile.id);
+});
+
+test('the very same entry on another profile is refused, naming that profile', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
   createSiteProfile(harness, 'movies', ['*.x.example']);
   const other = createSiteProfile(harness, 'books', []);
 
-  const { status, body } = await claimSite(harness, other.id, { host: 'dl.x.example' });
+  const { status, body } = await claimSite(harness, other.id, { host: '*.x.example' });
 
   assert.equal(status, 409);
   assert.equal(
     body.error,
-    'MOVIES already claims dl.x.example through *.x.example; remove or narrow that site there'
-      + ' first if it should belong to another profile',
+    'MOVIES already claims *.x.example; remove the site there first if it should belong to another profile',
   );
   assert.deepEqual(harness.store.findProfileById(other.id).browser_domains, []);
 });

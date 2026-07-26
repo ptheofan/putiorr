@@ -1398,12 +1398,19 @@ export class TransmissionRpcServer {
   // profile form uses, so the popup can state what will be stored before the
   // click and be right about it.
   //
-  // A site another profile already claims is refused rather than moved. A move
-  // is two profiles changing at once, from a popup that shows one of them; and
-  // resolution stops at the first profile that matches, so a site added to a
-  // second profile behind an existing claim would look like a claim and route
-  // nothing at all. The refusal names the profile to edit, and the dashboard is
+  // The entry may be a wildcard: the popup's field is editable, so a user on
+  // dl.x.example can claim "*.x.example" and take the whole domain.
+  //
+  // The very same entry on another profile is refused rather than moved. A move
+  // is two profiles changing at once, from a popup that shows one of them, and
+  // two profiles holding one entry would leave every grab from it decided by
+  // creation order. The refusal names the profile to edit, and the dashboard is
   // where that edit can be seen whole.
+  //
+  // Coverage that merely overlaps is not refused: an exact entry beats a
+  // wildcard, so claiming dl.x.example while another profile holds
+  // "*.x.example" is the user narrowing one host out of a domain, which is a
+  // thing worth being able to do from here.
   async handleClaimBrowserSite(req, res, profileId) {
     if (this.refuseWithoutGrabHeader(req, res, 'claiming a site')) return;
     const body = await readJsonBody(req);
@@ -1446,21 +1453,19 @@ export class TransmissionRpcServer {
     // Read and write in one synchronous stretch, with no await between them:
     // the store is synchronous, so no second request can interleave here and
     // append onto the list this one already read.
-    const grabProfiles = this.service.store.listProfiles()
-      .filter((row) => row.type === GRAB_PROFILE_TYPE);
-    // Disabled profiles are deliberately included, exactly as they are when a
-    // grab resolves: one still claims its sites, and a second profile listing
-    // the same site would change nothing about where that grab goes.
-    const match = matchProfileByHost(grabProfiles, site);
-    if (match && match.profile.id !== profile.id) {
-      jsonResponse(res, 409, { error: claimedElsewhereRefusal(match, site) }, this.sessionId);
-      return;
-    }
-    // Already handled by this profile — the same site twice, or a host a
+    //
+    // Already handled by this profile — the same entry twice, or a host a
     // wildcard it lists already covers. Storing it again would add a row that
     // routes nothing, so the answer is the list as it stands and `added: null`.
-    if (match) {
+    if (alreadyClaimedHere(profile, site)) {
       jsonResponse(res, 200, claimResponse(profile, null, warnings), this.sessionId);
+      return;
+    }
+    // Disabled profiles are deliberately included, exactly as they are when a
+    // grab resolves: one still holds its entries.
+    const holder = this.service.store.findProfileClaimingBrowserSite(site, { exceptId: profile.id });
+    if (holder) {
+      jsonResponse(res, 409, { error: claimedElsewhereRefusal(holder, site) }, this.sessionId);
       return;
     }
 
@@ -1665,18 +1670,23 @@ function claimResponse(profile, added, warnings = []) {
   };
 }
 
-// Names the profile that already has the site and the entry it actually lists,
-// which is not always the host asked about: a claim on "dl.x.example" loses to
-// a profile listing "*.x.example", and "already claims dl.x.example" alone
-// would send the user looking for an entry that is not on any profile. The
-// entry comes from the match rather than being recomputed here, so there is one
-// implementation of what covers what.
-function claimedElsewhereRefusal(match, site) {
-  const tail = 'first if it should belong to another profile';
-  return match.wildcard
-    ? `${match.profile.name} already claims ${site} through ${match.domain};`
-      + ` remove or narrow that site there ${tail}`
-    : `${match.profile.name} already claims ${site}; remove the site there ${tail}`;
+// Would this claim change anything? The entry itself, or a wildcard on this
+// same profile that already covers the host being claimed. A wildcard entry is
+// a claim about a whole domain rather than a host, so nothing but the identical
+// entry counts as already having it.
+function alreadyClaimedHere(profile, site) {
+  const domains = Array.isArray(profile.browser_domains) ? profile.browser_domains : [];
+  if (domains.includes(site)) return true;
+  if (site.startsWith('*.')) return false;
+  return Boolean(matchProfileByHost([profile], site));
+}
+
+// Names the profile that holds the very entry being claimed. It is the same
+// string on both profiles — overlapping coverage is not refused — so there is
+// nothing to explain beyond which profile to edit.
+function claimedElsewhereRefusal(holder, site) {
+  return `${holder.name} already claims ${site};`
+    + ' remove the site there first if it should belong to another profile';
 }
 
 // Warnings are advice about what was just typed, not profile data: they ride
