@@ -3491,6 +3491,29 @@ test('the deletion preview counts what each option would touch', async (t) => {
     category: 'movies',
   });
   harness.store.markDownloadRemoved(tombstoned.id);
+  // The two ways a staging folder can be unreadable, both of which the
+  // confirmation has to report rather than quietly leave out of the total: a
+  // folder that cannot be listed at all, and one that lists but whose files
+  // cannot be sized.
+  const sealed = path.join(harness.config.targetDir, 'movies', 'Tombstoned.Release');
+  await mkdir(sealed, { recursive: true });
+  await writeFile(path.join(sealed, 'sealed.mkv'), 'z'.repeat(500));
+  harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 911,
+    hash: 'blindhash',
+    name: 'Blind.Release',
+    category: 'movies',
+  });
+  const blind = path.join(harness.config.targetDir, 'movies', 'Blind.Release');
+  await mkdir(blind, { recursive: true });
+  await writeFile(path.join(blind, 'blind.mkv'), 'w'.repeat(700));
+  await chmod(sealed, 0o000);
+  await chmod(blind, 0o400);
+  t.after(async () => {
+    await chmod(sealed, 0o700);
+    await chmod(blind, 0o700);
+  });
 
   const preview = await profileDeletionPreview(harness, profile.id);
 
@@ -3498,13 +3521,17 @@ test('the deletion preview counts what each option would touch', async (t) => {
   assert.equal(preview.body.profile.name, 'Radarr');
   // A tombstoned row still holds its put.io transfer and its files, and still
   // blocks the profile delete, so the count the dialog states includes it.
-  assert.equal(preview.body.downloads.total, 2);
-  assert.equal(preview.body.downloads.active, 1);
+  assert.equal(preview.body.downloads.total, 3);
+  assert.equal(preview.body.downloads.active, 2);
   assert.equal(preview.body.downloads.removed, 1);
   // The .part nothing has recorded and the file the user dropped in beside it
-  // both go, so both are counted.
-  assert.equal(preview.body.downloads.filesOnDisk, 2);
+  // both go, so both are counted — plus the one file the unlistable-by-size
+  // folder did name, which rm(recursive) takes whether or not it can be sized.
+  assert.equal(preview.body.downloads.filesOnDisk, 3);
   assert.equal(preview.body.downloads.localBytes, 400);
+  // Neither unreadable folder is guessed at, and neither is dropped: they are
+  // counted separately so the dialog can say the total is incomplete.
+  assert.equal(preview.body.downloads.unreadableFolders, 2);
   // Only profiles staging into the same folder can take these downloads: the
   // files do not move, so anything else would strand them.
   assert.deepEqual(
