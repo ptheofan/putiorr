@@ -307,7 +307,8 @@ export function adoptionNoticeSummary(notices) {
     return profiles.length > 1
       ? `${transfers} in ${folder} cannot be adopted: ${joinNames(profiles)} all download into it.`
         + ' Give each RR profile its own put.io folder.'
-      : `${transfers} in ${folder} are not downloaded: no RR profile uses that folder.`;
+      : `${transfers} in ${folder} ${notice.transferCount === 1 ? 'is' : 'are'} not downloaded:`
+        + ' no RR profile uses that folder.';
   }).join(' ');
 }
 

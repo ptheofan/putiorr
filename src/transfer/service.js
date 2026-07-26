@@ -522,8 +522,11 @@ export class TransferService {
       profiles: entry.profiles,
       transferCount: entry.transfers.length,
       // Enough to recognise which transfers are stuck without turning a
-      // settings row into a copy of the put.io transfer list.
-      transfers: entry.transfers.slice(0, 5),
+      // settings row into a copy of the put.io transfer list. Sorted by id
+      // because put.io's list order is its own business: reordering it is not
+      // a change in the configuration this reports, and re-warning on every
+      // poll would train the user to ignore the warning.
+      transfers: [...entry.transfers].sort((left, right) => Number(left.id) - Number(right.id)).slice(0, 5),
     }));
     // Nothing is written or logged while the answer is the same as last time:
     // the poll runs every few seconds, and this is a report about
@@ -553,12 +556,14 @@ export class TransferService {
     const existing = remote.id ? this.store.findDownloadByPutioTransferId(remote.id) : undefined;
 
     if (existing) {
-      // A corrected hash changes the string every *arr correlates its queue
-      // item against, so it is never silent: the log names both sides.
+      // Writing the hash changes the string every *arr correlates its queue
+      // item against, so neither the first write nor a later correction is
+      // silent: the log names both sides. The first write matters as much —
+      // a download put.io had no hash for reported none to the *arr too.
       const reported = String(remote.hash ?? '').trim().toLowerCase();
       const known = String(existing.hash ?? '').trim().toLowerCase();
-      if (reported && known && reported !== known) {
-        logger.info('corrected download hash from put.io', {
+      if (reported && reported !== known) {
+        logger.info(known ? 'corrected download hash from put.io' : 'recorded download hash from put.io', {
           id: existing.id,
           putioTransferId: remote.id,
           name: existing.name,

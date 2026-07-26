@@ -1051,6 +1051,79 @@ test('a torrent upload put.io reports no hash for is stored without one', async 
   assert.equal(row.putio_transfer_id, 91);
 });
 
+test('put.io\'s hash wins over the one derived from the magnet', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  // The two normally agree — put.io parses the magnet it is handed — so this
+  // is the case that says which one is authoritative when they do not: the
+  // transfer put.io created, described by put.io.
+  harness.putio.addTransfer = async (source, folderId) => ({
+    id: 78,
+    name: 'Example.Release',
+    hash: 'PUTIOSAYSOTHERWISE',
+    status: 'IN_QUEUE',
+    fileId: 88,
+    saveParentId: folderId,
+    magnetUri: source,
+  });
+
+  const added = await harness.service.addTorrent({
+    filename: 'magnet:?xt=urn:btih:magnetsaysthis&dn=Example.Release',
+  });
+
+  assert.equal(added['torrent-added'].hashString, 'putiosaysotherwise');
+  assert.equal(harness.store.findDownloadById(added['torrent-added'].id).hash, 'putiosaysotherwise');
+  assert.equal(harness.store.findDownloadByHash('magnetsaysthis'), undefined);
+});
+
+test('the first hash put.io reports is logged, not only a later correction', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  const download = harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 57,
+    putio_file_id: 58,
+    save_parent_id: 42,
+    hash: '',
+    name: 'Uploaded.Release',
+    lifecycle: 'remote',
+  });
+  harness.putio.transfers = [{
+    id: 57,
+    name: 'Uploaded.Release',
+    hash: 'firsthashfromputio',
+    status: 'DOWNLOADING',
+    fileId: 58,
+    saveParentId: 42,
+  }];
+
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (line) => logs.push(line);
+  try {
+    await harness.service.refreshRemoteTransfers();
+  } finally {
+    console.log = originalLog;
+  }
+
+  // It changes the string an *arr correlates its queue item against just as
+  // much as a correction does.
+  const logged = logs.map((line) => JSON.parse(line))
+    .find((entry) => entry.message === 'recorded download hash from put.io');
+  assert.equal(logged.meta.id, download.id);
+  assert.equal(logged.meta.previousHash, '');
+  assert.equal(logged.meta.hash, 'firsthashfromputio');
+});
+
 test('a refresh that reports a different hash corrects the stored one', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

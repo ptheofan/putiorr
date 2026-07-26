@@ -509,7 +509,7 @@ test('the adoption notice names the folder, the profiles and the cost', () => {
     profiles: [],
     transferCount: 1,
   }]);
-  assert.match(unwatched, /1 put\.io transfer/);
+  assert.match(unwatched, /1 put\.io transfer in put\.io folder 99 is not downloaded/);
   assert.match(unwatched, /no RR profile/);
 });
 
