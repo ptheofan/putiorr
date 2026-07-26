@@ -80,14 +80,24 @@ auto-capture can be switched off entirely in the options.
 
 ## Install
 
-The extension is not on the Chrome Web Store yet; until it is, load it unpacked.
+The extension is distributed from this repository rather than a store, so it is
+installed by loading it unpacked.
 
 1. Open `chrome://extensions` and enable **Developer mode**.
-2. Click **Load unpacked** and select this `extension/` directory.
+2. Click **Load unpacked** and select this `extension/` directory. Chrome reads
+   it from that path from then on, and derives the extension's id from it, so
+   keep the directory where it is — moving or deleting it breaks the extension
+   and loses its options.
 3. Reload any tabs that were already open — pages loaded before the extension
    have no content script, so clicks on them are not captured and the
    right-click menu answers "Reload the page, then try again" for `.torrent`
    links.
+
+After pulling a new version of these files, reload the extension on
+`chrome://extensions` — Chrome does not re-read the directory on its own — and
+reload open tabs again. The options survive, because the path did not change.
+[The extension guide](https://ptheofan.github.io/putiorr/extension.html) covers
+getting these files onto a machine that has no clone of the repository.
 
 ## Configure The Sites In putiorr
 

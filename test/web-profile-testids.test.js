@@ -314,7 +314,10 @@ test('the field guide explains the browser extension and how to install it', () 
   assert.match(appPreset, /magnet/);
   assert.match(appPreset, /\.torrent/);
   assert.match(appPreset, /sites listed on this profile/);
-  assert.match(appPreset, /Chrome Web Store/);
+  // Loading unpacked is how the extension is installed, not a stopgap: there is
+  // no store listing to wait for, so the help must not promise one.
+  assert.doesNotMatch(appPreset, /Chrome Web Store/);
+  assert.match(appPreset, /distributed from the putiorr repository/);
   assert.match(appPreset, /chrome:\/\/extensions/);
   assert.match(appPreset, /Developer mode/);
   assert.match(appPreset, /Load unpacked/);

@@ -410,16 +410,23 @@ Lidarr URL: http://lidarr:8686</code></pre>
               which would put the transfer in a folder nobody chose.
             </p>
             <p>
-              Install the extension from the Chrome Web Store once it is
-              published. Until then, load it unpacked:
+              The extension is distributed from the putiorr repository and
+              loaded unpacked, which is how it is installed:
             </p>
             <ol>
+              <li>Copy the repository's <code>extension/</code> folder onto the machine running Chrome — putiorr is on the NAS, the browser is not — and keep it somewhere permanent.</li>
               <li>Open <code>chrome://extensions</code> and enable Developer mode.</li>
-              <li>Choose Load unpacked and select the repository's <code>extension/</code> folder.</li>
+              <li>Choose Load unpacked and select that <code>extension/</code> folder.</li>
               <li>Open the extension options and enter the putiorr URL, such as <code>http://nas:9091</code>, plus the Basic auth credentials if putiorr uses them.</li>
               <li>Click Test connection &amp; load profiles and press Save. The card lists what putiorr routes to each profile, including which one takes the sites no profile claims.</li>
               <li>On a tracker page, click the extension's toolbar icon to see which profile a grab from that site would land in, and to claim the site for one of them.</li>
             </ol>
+            <p>
+              The <a href="extension.html">browser extension guide</a> covers
+              each of those in full: getting the files without a copy of the
+              repository, why the folder's path is the extension's identity, and
+              what to do when a new version of putiorr changes it.
+            </p>
             <p class="doc-note">
               The extension only ever lists Putiorr Grab profiles, so create at
               least one before loading profiles there. The preset also enables
@@ -430,6 +437,10 @@ Lidarr URL: http://lidarr:8686</code></pre>
               put.io once the files are on disk. Send
               <code>auto_remove_completed: false</code> to opt out.
             </p>
+            <div class="doc-actions">
+              <a class="button primary" href="extension.html">Install the extension</a>
+              <a class="button secondary" href="https://github.com/ptheofan/putiorr/blob/main/extension/README.md">Extension README</a>
+            </div>
           </section>
 
           <section id="progress" class="doc-section">
@@ -464,6 +475,7 @@ Lidarr URL: http://lidarr:8686</code></pre>
       <nav aria-label="Footer navigation">
         <a href="documentation.html">Docs</a>
         <a href="setup.html">Setup</a>
+        <a href="extension.html">Extension</a>
         <a href="agent-setup.html">Agent guide</a>
         <a href="putio-oauth-relay.html">OAuth relay</a>
       </nav>
