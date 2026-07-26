@@ -561,28 +561,35 @@ test('a default pointing at a non-grab profile is refused by naming the preset',
   assert.equal(harness.putio.added.length, 0);
 });
 
-test('a disabled profile does not claim its browser sites', async (t) => {
+test('a disabled profile still claims its browser sites, and the grab is refused by name', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
   const fallback = harness.store.listProfiles()[0];
-  // A profile is turned off to stop it receiving transfers; routing a grab to
-  // it by site would be exactly the transfer the user switched off.
-  createSiteProfile(harness, 'browser', ['x.example'], { enabled: false });
+  // Disabled means the profile accepts no new work, not that it stopped
+  // claiming its sites. Dropping it out of the match instead sent the grab to
+  // the caller's default profile, so switching a profile off silently moved
+  // its sites' downloads into another profile's folder.
+  const off = createSiteProfile(harness, 'browser', ['x.example'], { enabled: false });
 
   const refused = await postGrab(harness, {
     pageHost: 'x.example',
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
   assert.equal(refused.status, 400);
-  assert.equal(refused.body.error, 'No profile matches this site and no default profile is configured');
+  assert.match(refused.body.error, /is disabled and accepts no new downloads/);
+  assert.match(refused.body.error, new RegExp(off.name));
+  assert.equal(harness.putio.added.length, 0);
 
-  const fellBack = await postGrab(harness, {
+  // A configured default does not rescue it either: the site match already
+  // named an owner, and the default is only consulted when nothing does.
+  const stillRefused = await postGrab(harness, {
     pageHost: 'x.example',
     defaultProfileId: fallback.id,
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
-  assert.equal(fellBack.status, 200);
-  assert.equal(fellBack.body.profile.id, fallback.id);
+  assert.equal(stillRefused.status, 400);
+  assert.match(stillRefused.body.error, /is disabled and accepts no new downloads/);
+  assert.equal(harness.putio.added.length, 0);
 });
 
 test('an explicit profileId wins over the profile that claims the page host', async (t) => {

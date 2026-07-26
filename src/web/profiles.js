@@ -228,30 +228,35 @@ export const WIZARD_HELP = {
   },
   wizardEnabled: {
     title: 'Enable this profile',
+    // Disabled means one thing everywhere: this profile accepts no new work.
+    // It is a refusal, not a disappearance — the help says so in both
+    // directions, because the old behaviour was that a disabled profile
+    // quietly handed its downloads to another one.
     paragraphs: (profile) => isGrabProfile(profile)
       ? [
-        'Enabled profiles accept browser grabs. Disable one when you want to keep its sites and folders but stop the extension from sending anything to it.',
-        'A disabled profile is skipped even for the sites it claims, so those grabs fall through to the extension default profile.',
+        'Enabled profiles accept browser grabs. Disable one when you want to keep its sites and folders but stop new grabs landing in it.',
+        'A disabled profile still claims its sites: a grab from one is refused by name rather than sent to your default profile, so nothing lands in a folder you did not choose.',
       ]
       : [
-        'Enabled profiles accept RPC requests from the matching endpoint path. Disable a profile when you want to keep its settings but stop new requests from using it.',
-        'Disabling a profile is useful while changing app configuration because it avoids accepting new downloads with a half-finished setup.',
+        'Enabled profiles accept new downloads from the matching endpoint path. Disable a profile when you want to keep its settings but stop new grabs using it.',
+        'A disabled profile still owns its RPC path and the shared endpoint it was resolving: an add is refused with a message naming this profile, rather than routed to another one.',
       ],
     tips: (profile) => isGrabProfile(profile)
       ? [
-        'Existing queued downloads are not deleted just because this profile is disabled.',
+        'Downloads already in progress keep downloading, and stay listed and deletable in the dashboard.',
         'The extension lists enabled profiles only, so a disabled one drops out of its profile list and its right-click menu until you switch it back on.',
+        'put.io transfers that land in this profile\'s folder while it is off are not adopted, and say so in the dashboard.',
       ]
       : [
-        'Existing queued downloads are not deleted just because this profile is disabled.',
+        'Downloads already in progress keep downloading, and the app can still list, import and remove them over RPC.',
         'Re-enable the profile when the corresponding *arr download client is ready to test again.',
       ],
     valueLabel: 'Profile state',
     value: (profile) => {
       if (isGrabProfile(profile)) {
-        return profile.enabled ? 'Enabled: accepts browser grabs' : 'Disabled: saved, but browser grabs skip it';
+        return profile.enabled ? 'Enabled: accepts browser grabs' : 'Disabled: refuses new grabs, keeps the ones it has';
       }
-      return profile.enabled ? 'Enabled: accepts new RPC requests' : 'Disabled: saved, but not used for new RPC requests';
+      return profile.enabled ? 'Enabled: accepts new downloads' : 'Disabled: refuses new adds, keeps the ones it has';
     },
   },
   wizardAutoRemoveCompleted: {

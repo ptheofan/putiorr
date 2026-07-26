@@ -496,7 +496,13 @@ export class TransmissionRpcServer {
     // veto the one the category picked — which made a header any client on the
     // LAN can set the boundary between one profile's downloads and another's.
     // RPC auth is off by default, so that header was the whole barrier.
-    const currentProfile = profile ? this.service.requireProfile(profile) : undefined;
+    //
+    // Whether the profile is switched on is not asked here. It used to be, and
+    // it refused every method — so an *arr pointed at a profile the user had
+    // just disabled could not list, import or clean up the downloads already in
+    // its queue, and re-grabbed all of them on its next RSS cycle. Disabled
+    // means "accepts no new work", so torrent-add is the method that asks.
+    const currentProfile = profile;
 
     let rpcRequest;
     if (req.method === 'GET') {
@@ -538,11 +544,16 @@ export class TransmissionRpcServer {
               rpcPath: currentProfile.rpc_path,
             }
           : null,
-        enabledProfiles: this.service.store.listProfiles().map((enabledProfile) => ({
-          id: enabledProfile.id,
-          name: enabledProfile.name,
-          slug: enabledProfile.slug,
-          rpcPath: enabledProfile.rpc_path,
+        // Every profile, switched on or off, with which it is. A disabled
+        // profile is one of the likelier reasons a request is being logged
+        // here at all, and the old enabled-only list left it out of the very
+        // record someone reads to find out why.
+        profiles: this.service.store.listProfiles({ includeDisabled: true }).map((listed) => ({
+          id: listed.id,
+          name: listed.name,
+          slug: listed.slug,
+          rpcPath: listed.rpc_path,
+          enabled: listed.enabled,
         })),
         error: error.message,
       });
@@ -1308,13 +1319,15 @@ export class TransmissionRpcServer {
       return refuseNonGrabProfile(profile) ?? { ok: true, profile };
     }
 
-    // listProfiles() is enabled-only, so a profile that is switched off does
-    // not claim its sites: routing to it is exactly what the user turned off.
-    // Only a Putiorr Grab profile claims a site, so browser_domains left on an
-    // *arr profile is simply not consulted.
+    // A disabled profile still claims its sites, and addTorrent then refuses
+    // the grab by name. Filtering it out here instead sent the grab on to the
+    // caller's default profile — a transfer landing in a folder the user never
+    // chose, from switching a profile off. Only a Putiorr Grab profile claims a
+    // site, so browser_domains left on an *arr profile is not consulted.
     const matched = pageHost
       ? matchProfileByHost(
-        this.service.store.listProfiles().filter((profile) => profile.type === GRAB_PROFILE_TYPE),
+        this.service.store.listProfiles({ includeDisabled: true })
+          .filter((profile) => profile.type === GRAB_PROFILE_TYPE),
         pageHost,
       )
       : undefined;
@@ -1377,7 +1390,10 @@ export class TransmissionRpcServer {
       testedRpcPath: rpcPathIsActive,
       message: rpcPathIsActive
         ? 'Connection and shared folder write tests passed from putiorr. Confirm the *arr container can see the same host and download folder.'
-        : 'Host, port, SSL, and shared folder write tests passed from putiorr. Save and enable this profile before testing its custom RPC path.',
+        // Not "save and enable": a saved profile's path answers whether or not
+        // it is switched on — disabling refuses new adds, it does not retire
+        // the endpoint — so saving is the whole of what is missing here.
+        : 'Host, port, SSL, and shared folder write tests passed from putiorr. Save this profile before testing its custom RPC path.',
     };
   }
 

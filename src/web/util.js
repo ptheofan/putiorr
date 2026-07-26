@@ -304,6 +304,12 @@ export function adoptionNoticeSummary(notices) {
       : `put.io folder ${notice.putioFolderId ?? '(unknown)'}`;
     const transfers = `${pluralize(notice.transferCount, 'put.io transfer')}`;
     const profiles = Array.isArray(notice.profiles) ? notice.profiles : [];
+    // Three different folders, three different fixes: enable the profile,
+    // separate the folders, or point a profile at the folder.
+    if (notice.disabled && profiles.length === 1) {
+      return `${transfers} in ${folder} ${notice.transferCount === 1 ? 'is' : 'are'} not downloaded:`
+        + ` RR profile ${profiles[0]} is disabled and accepts no new downloads. Enable it to adopt them.`;
+    }
     return profiles.length > 1
       ? `${transfers} in ${folder} cannot be adopted: ${joinNames(profiles)} all download into it.`
         + ' Give each RR profile its own put.io folder.'

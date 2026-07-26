@@ -511,6 +511,19 @@ test('the adoption notice names the folder, the profiles and the cost', () => {
   }]);
   assert.match(unwatched, /1 put\.io transfer in put\.io folder 99 is not downloaded/);
   assert.match(unwatched, /no RR profile/);
+
+  // A folder with one owner that is switched off is a different problem with a
+  // different fix, so it does not borrow either of the other two sentences.
+  const disabled = adoptionNoticeSummary([{
+    putioFolderId: 42,
+    folderName: 'putiorr',
+    profiles: ['Sonarr'],
+    disabled: true,
+    transferCount: 2,
+  }]);
+  assert.match(disabled, /2 put\.io transfers in put\.io folder “putiorr” are not downloaded/);
+  assert.match(disabled, /RR profile Sonarr is disabled and accepts no new downloads/);
+  assert.match(disabled, /Enable it to adopt them/);
 });
 
 // put.io does not deduplicate transfer names and the staging folder is the

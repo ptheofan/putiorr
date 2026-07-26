@@ -1482,8 +1482,13 @@ export class StateStore {
     return normalizeProfileRow(row);
   }
 
+  // Enabled is deliberately not a filter here. A disabled profile still owns
+  // its RPC path — disabling means it accepts no new work, not that it stopped
+  // existing — and filtering it out made the request fall past the RPC route
+  // into serveWeb, which answers any unknown path with index.html and HTTP
+  // 200. Every *arr reads that as a successful grab.
   findProfileByRpcPath(rpcPath) {
-    const row = this.db.prepare('SELECT * FROM profiles WHERE rpc_path = ? AND enabled = 1').get(rpcPath);
+    const row = this.db.prepare('SELECT * FROM profiles WHERE rpc_path = ?').get(rpcPath);
     return normalizeProfileRow(row);
   }
 

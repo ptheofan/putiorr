@@ -87,6 +87,16 @@ export function ownerlessDownloadMessage(transfer) {
     + ' reassign it from the dashboard or delete it';
 }
 
+// The single meaning of `enabled = 0`, in the words every door uses. Disabling
+// a profile stops it accepting new work; the downloads it already has keep
+// downloading and stay listable, removable and manageable, so the sentence
+// says what was refused rather than that the profile is gone.
+export function disabledProfileMessage(profile) {
+  return `RR profile ${profile?.name ?? '(unnamed)'} is disabled and accepts no new downloads;`
+    + ' enable it in the dashboard, or send this to a profile that is switched on.'
+    + ' Its existing downloads are unaffected';
+}
+
 // A Transmission id may be a download id or a torrent hash. Only the first
 // identifies exactly one download: the hash is informational and not unique.
 function isDownloadId(identifier) {
@@ -174,21 +184,32 @@ export class TransferService {
   // whose slug, name or preset happens to read like an *arr category would
   // otherwise either swallow that download into a folder nothing imports from,
   // or refuse the add and point at an RPC path its wizard never shows.
+  //
+  // Disabled profiles are counted. `enabled = 0` means the profile accepts no
+  // new work, not that it is absent: if switching one off could decide who
+  // owns the shared endpoint, an add that was refused as ambiguous yesterday
+  // lands silently in the surviving profile's folder today.
   listArrProfiles() {
-    return this.store.listProfiles().filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
+    return this.store.listProfiles({ includeDisabled: true })
+      .filter((profile) => profile.type !== GRAB_PROFILE_TYPE);
   }
 
   // The one mechanism. An RPC request is owned by the profile whose path it
   // arrived on; the shared path serves exactly one *arr profile, or refuses.
   // Nothing else may select an owner — not the download-dir category, not the
   // client's name, not row order.
+  //
+  // This resolves; it does not admit. Whether the profile it names is switched
+  // on is asked once, at the point new work would be created — so a disabled
+  // profile's *arr can still list, remove and finish the downloads it already
+  // has instead of having its whole queue answered with a refusal.
   resolveRpcProfile(profile) {
-    if (profile) return this.requireProfile(profile);
+    if (profile) return profile;
     const profiles = this.listArrProfiles();
     if (profiles.length === 1) return profiles[0];
-    if (profiles.length === 0) throw new Error('No enabled RR profile is configured');
+    if (profiles.length === 0) throw new Error('No RR profile is configured');
     throw new Error(
-      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} enabled RR profiles could have meant it.`
+      `The shared RPC endpoint ${SHARED_RPC_PATH} is ambiguous: ${profiles.length} RR profiles could have meant it.`
       + ` Point this download client at the RPC path of the profile it means — ${this.rpcPathAdvice(profiles)}`,
     );
   }
@@ -206,9 +227,14 @@ export class TransferService {
       .join('; ');
   }
 
+  // The one door check, asked wherever new work would be created: torrent-add,
+  // /api/grab through all three of its resolution paths, and the adoption of a
+  // put.io transfer nobody created here. One sentence for all of them — the
+  // audit found four different answers depending on which door you knocked on,
+  // one of which was an HTML page with HTTP 200.
   requireProfile(profile) {
-    if (!profile) throw new Error('No enabled RR profile is configured');
-    if (!profile.enabled) throw new Error(`RR profile ${profile.name} is disabled`);
+    if (!profile) throw new Error('No RR profile is configured');
+    if (!profile.enabled) throw new Error(disabledProfileMessage(profile));
     return profile;
   }
 
@@ -483,7 +509,13 @@ export class TransferService {
     // accepted adds it would then refuse to list or remove: the *arr grabbed
     // releases it could never see, import or clean up, and re-grabbed them on
     // every RSS cycle.
-    const currentProfile = await this.ensureProfileFolder(this.resolveRpcProfile(profile));
+    // The only RPC method that creates new work, so the only one that asks
+    // whether the resolved profile accepts any. torrent-get and torrent-remove
+    // deliberately do not: a disabled profile's queue still has to be
+    // listable and clearable.
+    const currentProfile = await this.ensureProfileFolder(
+      this.requireProfile(this.resolveRpcProfile(profile)),
+    );
     const filename = firstDefined(args.filename, args.url);
     const magnetLink = firstDefined(args.magnetLink, args['magnet-link']);
     const metainfo = args.metainfo;
@@ -550,12 +582,18 @@ export class TransferService {
   async refreshRemoteTransfers() {
     const putio = this.getPutio();
     const profiles = [];
-    for (const profile of this.store.listProfiles()) {
-      profiles.push(await this.ensureProfileFolder(profile));
+    for (const profile of this.store.listProfiles({ includeDisabled: true })) {
+      // Creating a put.io folder is work, so a disabled profile does not get
+      // one made for it. The folder it already has is still its own, though,
+      // and it stays on the map: adoption has to refuse a transfer that lands
+      // there by name, not let whichever other profile shares the folder take
+      // it, and not fall silent.
+      profiles.push(profile.enabled ? await this.ensureProfileFolder(profile) : profile);
     }
 
     const byFolderId = new Map();
     for (const profile of profiles) {
+      if (profile.putio_folder_id == null) continue;
       const matches = byFolderId.get(profile.putio_folder_id) ?? [];
       matches.push(profile);
       byFolderId.set(profile.putio_folder_id, matches);
@@ -603,6 +641,7 @@ export class TransferService {
       putioFolderId: entry.putioFolderId,
       folderName: entry.folderName,
       profiles: entry.profiles,
+      disabled: entry.disabled,
       transferCount: entry.transfers.length,
       // Enough to recognise which transfers are stuck without turning a
       // settings row into a copy of the put.io transfer list. Sorted by id
@@ -681,6 +720,14 @@ export class TransferService {
       return;
     }
     const [profile] = folderProfiles;
+    // Adopting a transfer is accepting new work, which is the one thing a
+    // disabled profile does not do. It is reported rather than skipped: the
+    // audit's fourth meaning of "disabled" was this branch, which said nothing
+    // at all while the transfer sat on put.io forever.
+    if (!profile.enabled) {
+      this.recordUnattributedTransfer(remote, folderProfiles, unattributed);
+      return;
+    }
     rows.push(this.store.upsertDownload(putioTransferToStoreInput(remote, {
       profile_id: profile.id,
       source: remote.magnetUri ?? '',
@@ -697,6 +744,10 @@ export class TransferService {
       putioFolderId,
       folderName: folderProfiles[0]?.putio_folder_name ?? '',
       profiles: folderProfiles.map((profile) => profile.name),
+      // One profile owns the folder outright and is switched off. Told apart
+      // from an unclaimed or contested folder because the fix is different:
+      // enable the profile, rather than separate the folders.
+      disabled: folderProfiles.length === 1 && !folderProfiles[0].enabled,
       transfers: [],
     };
     entry.transfers.push({ id: remote.id ?? null, name: remote.name ?? '' });

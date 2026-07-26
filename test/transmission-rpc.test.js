@@ -1670,11 +1670,18 @@ test('an ambiguous shared endpoint logs the request context with credentials red
     },
   });
   assert.equal(errorLog.meta.matchedProfile, null);
+  // Every profile, with whether it is switched on: a disabled one is a likely
+  // reason a request failed, so it belongs in the record someone reads to find
+  // out why.
   assert.deepEqual(
-    errorLog.meta.enabledProfiles.map((profile) => ({ slug: profile.slug, rpcPath: profile.rpcPath })),
+    errorLog.meta.profiles.map((profile) => ({
+      slug: profile.slug,
+      rpcPath: profile.rpcPath,
+      enabled: profile.enabled,
+    })),
     [
-      { slug: 'default', rpcPath: '/default/transmission/rpc' },
-      { slug: 'sonarr', rpcPath: '/sonarr/transmission/rpc' },
+      { slug: 'default', rpcPath: '/default/transmission/rpc', enabled: true },
+      { slug: 'sonarr', rpcPath: '/sonarr/transmission/rpc', enabled: true },
     ],
   );
 });
@@ -2437,13 +2444,16 @@ test('a putiorr with only Putiorr Grab profiles has no *arr profile to resolve',
     await harness.rpcServer.stop();
     harness.store.close();
   });
-  const seeded = harness.store.findProfileBySlug('default');
-  harness.store.updateProfile(seeded.id, { enabled: false });
+  // Deleted, not disabled: `enabled = 0` means "accepts no new work", so a
+  // disabled *arr profile is still the profile the shared endpoint resolves
+  // to — and is refused by name there. "No *arr profile at all" is only true
+  // once it is gone.
+  harness.store.deleteProfile(harness.store.findProfileBySlug('default').id);
   createGrabProfile(harness);
 
   assert.throws(
     () => harness.service.resolveRpcProfile(undefined),
-    /No enabled RR profile is configured/,
+    /No RR profile is configured/,
   );
 });
 
@@ -3031,4 +3041,148 @@ test('the dashboard can reassign and delete a quarantined download', async (t) =
   assert.equal(deleted.status, 200);
   assert.deepEqual((await deleted.json()).orphaned, []);
   assert.deepEqual(harness.putio.deletedTransfers, []);
+});
+
+// One meaning for `enabled = 0`, on every door: the profile accepts no new
+// work. It is a refusal, never an absence — so routing still finds it, and
+// everything that keeps existing downloads moving still works.
+// Like profileRpc, but keeps the response itself: the failure this covers was
+// the dashboard's index.html arriving with HTTP 200, which is only visible in
+// the content type.
+async function profileRpcResponse(harness, rpcPath, method, args = {}) {
+  const url = harness.url.replace('/transmission/rpc', rpcPath);
+  const handshake = await fetch(url, { method: 'POST' });
+  const sessionId = handshake.headers.get('x-transmission-session-id');
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({ method, arguments: args }),
+  });
+}
+
+test('a disabled profile refuses an add on its own path instead of serving the dashboard', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr } = createTwoArrProfiles(harness);
+  harness.store.updateProfile(sonarr.id, { enabled: false });
+
+  // The lookup used to filter on enabled, so the request fell past the RPC
+  // route into serveWeb — which answers any unknown path with index.html and
+  // HTTP 200. Sonarr read that as a successful grab.
+  const added = await profileRpcResponse(harness, '/sonarr/transmission/rpc', 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Disabled.Release',
+  });
+
+  assert.match(added.headers.get('content-type') ?? '', /application\/json/);
+  assert.match((await added.json()).result, /Sonarr is disabled and accepts no new downloads/);
+  assert.equal(harness.putio.transfers.length, 0);
+  assert.equal(harness.store.listActiveDownloads().length, 0);
+});
+
+test('a disabled profile still lists and removes the downloads it already has', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const { sonarr } = createTwoArrProfiles(harness);
+  const transfer = harness.store.upsertDownload({
+    profile_id: sonarr.id,
+    putio_transfer_id: 77,
+    putio_file_id: 88,
+    save_parent_id: 42,
+    hash: 'inflighthash',
+    name: 'Inflight.Release',
+    category: 'sonarr',
+    lifecycle: 'downloading',
+  });
+  harness.store.updateProfile(sonarr.id, { enabled: false });
+
+  // Disabling stops new work; it does not strand the work already in the
+  // queue. An *arr that could not list or remove its own downloads would
+  // re-grab every one of them on its next RSS cycle.
+  const listed = await profileRpc(harness, '/sonarr/transmission/rpc', 'torrent-get', {
+    fields: ['id', 'hashString'],
+  });
+  assert.equal(listed.result, 'success');
+  assert.deepEqual(listed.arguments.torrents, [{ id: transfer.id, hashString: 'inflighthash' }]);
+
+  const removed = await profileRpc(harness, '/sonarr/transmission/rpc', 'torrent-remove', {
+    ids: [transfer.id],
+  });
+  assert.equal(removed.result, 'success');
+  assert.deepEqual(harness.putio.deletedTransfers, [77]);
+  assert.equal(harness.store.findDownloadById(transfer.id), undefined);
+});
+
+test('disabling one *arr profile does not hand the shared endpoint to another', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  // Exactly two *arr profiles: the seeded one would make the endpoint
+  // ambiguous whatever happens to these.
+  harness.store.deleteProfile(harness.store.findProfileBySlug('default').id);
+  const { sonarr } = createTwoArrProfiles(harness);
+  harness.store.updateProfile(sonarr.id, { enabled: false });
+
+  // Disabled is a refusal, not an absence: if switching a profile off could
+  // decide who owns the shared endpoint, an add that used to be refused as
+  // ambiguous would silently start landing in Radarr's folder.
+  const added = await sharedRpc(harness, 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Shared.Release',
+  });
+  assert.match(added.result, /shared RPC endpoint .* is ambiguous/);
+  assert.equal(harness.store.listActiveDownloads().length, 0);
+});
+
+test('the only *arr profile keeps the shared endpoint when it is disabled, and refuses by name', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const seeded = harness.store.findProfileBySlug('default');
+  harness.store.updateProfile(seeded.id, { enabled: false });
+
+  const added = await sharedRpc(harness, 'torrent-add', {
+    filename: 'magnet:?xt=urn:btih:abcdef&dn=Shared.Release',
+  });
+  assert.match(added.result, /is disabled and accepts no new downloads/);
+  assert.equal(harness.store.listActiveDownloads().length, 0);
+});
+
+test('a put.io transfer in a disabled profile folder is not adopted, and the dashboard says why', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+  const seeded = harness.store.findProfileBySlug('default');
+  harness.store.updateProfile(seeded.id, { putio_folder_id: 42, enabled: false });
+  harness.putio.transfers = [{
+    id: 501,
+    name: 'Adopted.Release',
+    hash: 'adoptedhash',
+    status: 'COMPLETED',
+    saveParentId: 42,
+  }];
+
+  await harness.service.refreshRemoteTransfers();
+
+  // Adoption is new work, so a disabled profile does not take it — and the
+  // folder is still its own, so nothing else quietly takes it either. The
+  // audit's complaint was that this branch said nothing at all.
+  assert.equal(harness.store.findDownloadByPutioTransferId(501), undefined);
+  const [notice] = harness.store.adoptionNotices();
+  assert.equal(notice.disabled, true);
+  assert.deepEqual(notice.profiles, [seeded.name]);
+  assert.equal(notice.transferCount, 1);
 });
