@@ -322,9 +322,12 @@ export function stagingCollisionSummary(collisions) {
   if (entries.length === 0) return '';
   return entries.map((collision) => {
     const [first, ...rest] = collision.downloads;
+    const holder = first.removed
+      ? `download ${first.id} (${first.name}), which is deleted but still has its files in`
+      : `download ${first.id} (${first.name}), which is using`;
     return `${pluralize(rest.length, 'download')} cannot start: put.io named ${rest.length === 1 ? 'it' : 'them'}`
-      + ` the same as download ${first.id} (${first.name}), which is using ${collision.localPath}.`
-      + ' Rename one of them on put.io, or delete the one you do not want.';
+      + ` the same as ${holder} ${collision.localPath}.`
+      + ' Rename one of them on put.io, or delete the one you do not want along with its files.';
   }).join(' ');
 }
 

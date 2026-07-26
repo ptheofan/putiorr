@@ -305,6 +305,53 @@ test('a put.io rename does not strand the files or cancel the transfer', async (
   }
 });
 
+// Re-review RI2: the loser of a collision only looked at live downloads, so a
+// rival tombstoned by "delete from the dashboard, keep the files" became
+// invisible — and the loser then size-matched the winner's leftover file,
+// called itself complete and finalised. The *arr imports the other release's
+// file under this one's name.
+test('a download does not inherit the files of a removed rival', async () => {
+  const putio = new FakePutio({
+    remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 5 }],
+  });
+  const harness = await createHarness({}, putio);
+  try {
+    const winner = createTransfer(harness.store, { name: 'Same.Name', lifecycle: 'processed', total_size: 5 });
+    harness.store.updateDownload(winner.id, { staging_folder: 'Same.Name' });
+    const staged = path.join(harness.config.targetDir, 'Same.Name');
+    await mkdir(staged, { recursive: true });
+    await writeFile(path.join(staged, 'movie.mkv'), 'other');
+    // Deleted from the dashboard, put.io copy kept: the row is a tombstone and
+    // the files are still on disk, which is what the user asked for.
+    harness.store.markDownloadRemoved(winner.id);
+
+    const loser = createTransfer(harness.store, {
+      putio_transfer_id: 11,
+      putio_file_id: 21,
+      hash: 'losinghash',
+      name: 'Same.Name',
+      lifecycle: 'remote',
+      total_size: 5,
+    });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+    });
+
+    await assert.rejects(
+      () => manager.prepareTransfer(harness.store.findDownloadById(loser.id)),
+      new RegExp(`download ${winner.id}`),
+    );
+    assert.deepEqual(harness.store.listFilesForDownload(loser.id), []);
+    assert.notEqual(harness.store.findDownloadById(loser.id).lifecycle, 'processed');
+    assert.equal(await readFile(path.join(staged, 'movie.mkv'), 'utf8'), 'other');
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('prepareTransfer forgets files put.io no longer has', async () => {
   const putio = new FakePutio({
     remoteFiles: [{ id: 901, name: 'movie.mkv', relativePath: 'movie.mkv', size: 10 }],

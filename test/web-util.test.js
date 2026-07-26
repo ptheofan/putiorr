@@ -532,4 +532,17 @@ test('the staging collision notice names the folder and who is using it', () => 
   assert.match(summary, /download 4 \(Example\.Release\)/);
   assert.match(summary, /\/downloads\/tv\/Example\.Release/);
   assert.match(summary, /Rename one of them on put\.io/);
+  // "Delete the one you do not want" walks into the trap on its own: a deleted
+  // download that keeps its files leaves the folder full, and the survivor
+  // would adopt them as its own.
+  assert.match(summary, /along with its files/);
+
+  const removed = stagingCollisionSummary([{
+    localPath: '/downloads/tv/Example.Release',
+    downloads: [
+      { id: 4, name: 'Example.Release', removed: true },
+      { id: 9, name: 'Example.Release' },
+    ],
+  }]);
+  assert.match(removed, /deleted but still has its files in/);
 });

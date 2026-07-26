@@ -362,7 +362,9 @@ export class TransferService {
     if (claimed.length === 0) return root;
     throw new Error(
       `${root} already belongs to download ${claimed[0].id} (${claimed[0].name}),`
-      + ' which put.io named the same thing; rename one of them on put.io, or delete the one you do not want',
+      + `${claimed[0].removed ? ' which is deleted but still has its files there,' : ''}`
+      + ' which put.io named the same thing; rename one of them on put.io,'
+      + ' or delete the one you do not want along with its files',
     );
   }
 
@@ -384,9 +386,13 @@ export class TransferService {
     return root;
   }
 
+  // Tombstoned downloads count. "Delete from the dashboard, keep the files on
+  // disk" leaves the row removed and the folder full, and a rival that cannot
+  // see it size-matches those files, calls itself complete and finalises —
+  // handing the *arr another release's file under this download's name.
   downloadsStagingAt(root) {
     const claims = [];
-    for (const download of this.store.listActiveDownloads()) {
+    for (const download of [...this.store.listActiveDownloads(), ...this.store.listRemovedDownloads()]) {
       const profile = this.findDownloadOwner(download);
       if (!profile) continue;
       let candidate;
@@ -395,7 +401,14 @@ export class TransferService {
       } catch {
         continue;
       }
-      if (candidate === root) claims.push({ id: download.id, name: download.name, profile: profile.name });
+      if (candidate === root) {
+        claims.push({
+          id: download.id,
+          name: download.name,
+          profile: profile.name,
+          removed: Boolean(download.removed_at),
+        });
+      }
     }
     return claims.sort((left, right) => left.id - right.id);
   }
@@ -405,7 +418,7 @@ export class TransferService {
   // clears itself the moment one of the two is renamed or removed.
   stagingCollisions() {
     const byRoot = new Map();
-    for (const download of this.store.listActiveDownloads()) {
+    for (const download of [...this.store.listActiveDownloads(), ...this.store.listRemovedDownloads()]) {
       const profile = this.findDownloadOwner(download);
       if (!profile) continue;
       let root;
@@ -416,7 +429,12 @@ export class TransferService {
       }
       if (!root) continue;
       const group = byRoot.get(root) ?? [];
-      group.push({ id: download.id, name: download.name, profile: profile.name });
+      group.push({
+        id: download.id,
+        name: download.name,
+        profile: profile.name,
+        removed: Boolean(download.removed_at),
+      });
       byRoot.set(root, group);
     }
     return [...byRoot.entries()]
