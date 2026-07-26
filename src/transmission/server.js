@@ -106,6 +106,27 @@ function refuseNonGrabProfile(profile) {
   };
 }
 
+// The wizard checkbox that fixes an unrouted grab, quoted verbatim: the user
+// has to find it on a page this message cannot open, so an approximation of the
+// label is worse than none.
+const CATCH_ALL_LABEL = 'Take grabs from any site no other profile claims';
+
+// The last refusal before a grab is lost, so it names both halves of what went
+// wrong — the site nothing claimed, and the setting nobody ticked. Anything
+// vaguer leaves the user with a link that failed and no way to find out why.
+//
+// The host is attacker-influenced and unbounded, and this sentence ends up in a
+// Chrome notification, so it is capped at the longest a hostname may legally
+// be. A grab that carried no host had no site to claim in the first place, and
+// says so rather than inventing one.
+function unclaimedGrabRefusal(pageHost) {
+  const suffix = `tick "${CATCH_ALL_LABEL}" on a profile in putiorr`;
+  return pageHost
+    ? `No Putiorr Grab profile claims ${pageHost.slice(0, 253)} and none is set to take`
+      + ` everything else; ${suffix}`
+    : `No Putiorr Grab profile is set to take grabs from a site it does not list; ${suffix}`;
+}
+
 // SQLite answers a duplicate with the column its index is on, which the wizard
 // shows under the form as-is. The *arr presets show the endpoint path, so
 // there the path is what has to change; a grab profile holds no path at all,
@@ -1356,11 +1377,16 @@ export class TransmissionRpcServer {
   }
 
   // Resolution order for a browser grab: the caller's explicit pick, then the
-  // enabled profile that claims the site the grab came from, then the caller's
-  // configured default. Returns `{ ok: true, profile }` or the refusal to send
-  // as `{ ok: false, status, error }` — tagged so a resolved profile is never
-  // confused with a branch that forgot to answer. Every path ends at a Putiorr
-  // Grab profile: no other preset is configured for browser grabs.
+  // profile that claims the site the grab came from, then the grab profile set
+  // to take everything else. Returns `{ ok: true, profile }` or the refusal to
+  // send as `{ ok: false, status, error }` — tagged so a resolved profile is
+  // never confused with a branch that forgot to answer. Every path ends at a
+  // Putiorr Grab profile: no other preset is configured for browser grabs.
+  //
+  // There is no fourth step. The caller used to send the profile its own
+  // options page had been told to fall back to, which put a routing decision in
+  // the one place that cannot see the profiles it decides between; a
+  // `defaultProfileId` in the body is now read by nothing.
   //
   // The refusals follow this file's convention: one that is about a named field
   // opens with that field spelled exactly as the caller sends it, and one that
@@ -1385,9 +1411,9 @@ export class TransmissionRpcServer {
 
     // A disabled profile still claims its sites, and addTorrent then refuses
     // the grab by name. Filtering it out here instead sent the grab on to the
-    // caller's default profile — a transfer landing in a folder the user never
-    // chose, from switching a profile off. Only a Putiorr Grab profile claims a
-    // site, so browser_domains left on an *arr profile is not consulted.
+    // next candidate — a transfer landing in a folder the user never chose,
+    // from switching a profile off. Only a Putiorr Grab profile claims a site,
+    // so browser_domains left on an *arr profile is not consulted.
     const matched = pageHost
       ? matchProfileByHost(
         this.service.store.listProfiles()
@@ -1397,30 +1423,18 @@ export class TransmissionRpcServer {
       : undefined;
     if (matched) return { ok: true, profile: matched };
 
-    // 0 is how the extension spells "no default profile", so it counts as an
-    // absent one rather than a bad id, as do '' and null.
-    const rawDefault = body.defaultProfileId;
-    const defaultId = Number(rawDefault);
-    const hasDefault = rawDefault !== undefined && rawDefault !== null
-      && String(rawDefault).trim() !== '' && defaultId !== 0;
-    if (!hasDefault) {
-      return {
-        ok: false,
-        status: 400,
-        error: 'No profile matches this site and no default profile is configured',
-      };
-    }
-    // A caller that sent something it believed was an id is told what was wrong
-    // with it: answering "no default profile is configured" would describe a
-    // request it did not make and hide the typo that caused this one.
-    if (!Number.isInteger(defaultId) || defaultId <= 0) {
-      return { ok: false, status: 400, error: 'defaultProfileId must be a positive integer' };
-    }
-    // A stale cached default has to surface; routing the grab elsewhere would
-    // put the transfer somewhere the user never chose.
-    const fallback = this.service.store.findProfileById(defaultId);
-    if (!fallback) return { ok: false, status: 404, error: 'Profile not found' };
-    return refuseNonGrabProfile(fallback) ?? { ok: true, profile: fallback };
+    // Only once no profile's browser sites matched. The catch-all is a
+    // fallback, not a wildcard: a profile that claims specific sites still wins
+    // for those sites, which is the whole reason the two settings can sit on
+    // the same profile without contradicting each other.
+    //
+    // The store filters it to the grab preset and, deliberately, not by
+    // `enabled` — a disabled catch-all still holds the role, and addTorrent
+    // refuses the grab by name rather than letting it fall through to nothing.
+    const catchAll = this.service.store.findCatchAllGrabProfile();
+    if (catchAll) return { ok: true, profile: catchAll };
+
+    return { ok: false, status: 400, error: unclaimedGrabRefusal(pageHost) };
   }
 
   async testClientSettings(input) {

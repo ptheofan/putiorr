@@ -360,8 +360,13 @@ test('grab rejects metainfo that is not valid base64', async (t) => {
 
 // Which profile a browser grab lands in is decided here rather than in the
 // extension, so these cases are the whole resolution order: explicit pick →
-// site match → the extension's default → refusal.
-function createSiteProfile(harness, slug, browserDomains, { enabled = true, type = 'grab' } = {}) {
+// site match → the catch-all grab profile → refusal.
+function createSiteProfile(
+  harness,
+  slug,
+  browserDomains,
+  { enabled = true, type = 'grab', catchAll = false } = {},
+) {
   return harness.store.createProfile({
     name: slug.toUpperCase(),
     type,
@@ -374,6 +379,7 @@ function createSiteProfile(harness, slug, browserDomains, { enabled = true, type
     // give one a path describe a database no wizard and no seed can produce.
     rpc_path: type === 'grab' ? null : `/${slug}/transmission/rpc`,
     browser_domains: browserDomains,
+    browser_catch_all: catchAll,
     enabled,
   });
 }
@@ -430,23 +436,113 @@ test('a page host on a subdomain still matches the site the profile claims', asy
   assert.equal(body.profile.id, site.id);
 });
 
-test('a page host no profile claims falls back to the extension default', async (t) => {
+test('a page host no profile claims goes to the catch-all grab profile', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
-  const fallback = harness.store.listProfiles()[0];
+  const catchAll = createSiteProfile(harness, 'everything', [], { catchAll: true });
   createSiteProfile(harness, 'browser', ['x.example']);
 
   const { status, body } = await postGrab(harness, {
     pageHost: 'notx.example',
-    defaultProfileId: fallback.id,
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
 
   assert.equal(status, 200);
-  assert.deepEqual(body.profile, { id: fallback.id, name: fallback.name });
+  assert.deepEqual(body.profile, { id: catchAll.id, name: catchAll.name });
+  // Naming it in the response is not the same as routing to it.
+  assert.equal(harness.store.findDownloadByPutioTransferId(77).profile_id, catchAll.id);
+});
+
+test('a grab with no page host at all still lands in the catch-all profile', async (t) => {
+  // The extension omits pageHost when the page URL will not parse. That is a
+  // grab no site could ever have claimed, which is exactly the case the
+  // catch-all exists for.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const catchAll = createSiteProfile(harness, 'everything', [], { catchAll: true });
+
+  const { status, body } = await postGrab(harness, {
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.profile.id, catchAll.id);
+});
+
+test('the catch-all is a fallback, not a wildcard: a listed site still wins', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  // Created first, so it also wins on id order if anything ever resolved by
+  // that: the site match runs before the catch-all is even consulted.
+  const catchAll = createSiteProfile(harness, 'everything', [], { catchAll: true });
+  const site = createSiteProfile(harness, 'browser', ['x.example']);
+  assert.ok(catchAll.id < site.id);
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'tracker.x.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.profile.id, site.id);
+});
+
+test('an explicit pick still wins over the catch-all profile', async (t) => {
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const picked = harness.store.listProfiles()[0];
+  createSiteProfile(harness, 'everything', [], { catchAll: true });
+
+  const { status, body } = await postGrab(harness, {
+    profileId: picked.id,
+    pageHost: 'notx.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.profile.id, picked.id);
+});
+
+test('a disabled catch-all profile is refused by name rather than skipped', async (t) => {
+  // Same rule as a disabled site match: disabling means the profile accepts no
+  // new work, not that it released the role. Falling past it would put the
+  // transfer in whatever folder the next candidate happened to have.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const off = createSiteProfile(harness, 'everything', [], { catchAll: true, enabled: false });
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  assert.match(body.error, /is disabled and accepts no new downloads/);
+  assert.match(body.error, new RegExp(off.name));
+  assert.equal(harness.putio.added.length, 0);
+});
+
+test('the catch-all flag on an *arr profile routes nothing', async (t) => {
+  // Only Putiorr Grab profiles serve grabs, so the flag elsewhere claims
+  // nothing — and the refusal has to be the one that names the fix, not one
+  // that names a preset the user never aimed at.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  createSiteProfile(harness, 'sonarr', [], { type: 'sonarr', catchAll: true });
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  assert.match(body.error, /^No Putiorr Grab profile claims notx\.example/);
+  assert.equal(harness.putio.added.length, 0);
 });
 
 test('a grab with nothing to resolve is refused with the fix in the message', async (t) => {
+  // This refusal is the only thing between the user and a lost grab, so it
+  // names the site that went unclaimed and the exact checkbox that fixes it.
   const harness = await createHarness();
   t.after(closeHarness(harness));
   createSiteProfile(harness, 'browser', ['x.example']);
@@ -457,40 +553,57 @@ test('a grab with nothing to resolve is refused with the fix in the message', as
   });
 
   assert.equal(status, 400);
-  assert.equal(body.error, 'No profile matches this site and no default profile is configured');
+  assert.equal(
+    body.error,
+    'No Putiorr Grab profile claims notx.example and none is set to take everything else;'
+    + ' tick "Take grabs from any site no other profile claims" on a profile in putiorr',
+  );
+  assert.equal(harness.putio.added.length, 0);
+
+  // With no page host there was no site to claim, so the sentence drops the
+  // half it cannot state rather than inventing a hostname.
+  const hostless = await postGrab(harness, { magnet: 'magnet:?xt=urn:btih:abcdef1234567890' });
+  assert.equal(hostless.status, 400);
+  assert.equal(
+    hostless.body.error,
+    'No Putiorr Grab profile is set to take grabs from a site it does not list;'
+    + ' tick "Take grabs from any site no other profile claims" on a profile in putiorr',
+  );
   assert.equal(harness.putio.added.length, 0);
 });
 
-test('a defaultProfileId that is not an id is refused as itself', async (t) => {
+test('the refused page host cannot grow the message without bound', async (t) => {
+  // pageHost is attacker-influenced and unbounded, and this message is
+  // rendered in a Chrome notification.
   const harness = await createHarness();
   t.after(closeHarness(harness));
+
+  const { status, body } = await postGrab(harness, {
+    pageHost: `${'a'.repeat(400)}.example`,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
+
+  assert.equal(status, 400);
+  assert.match(body.error, /^No Putiorr Grab profile claims a{253} and none/);
+});
+
+test('defaultProfileId is not a field putiorr reads any more', async (t) => {
+  // The setting moved onto the profile, so an extension still sending its old
+  // cached default must not route a grab by it — silently landing the transfer
+  // in a folder putiorr was never asked for.
+  const harness = await createHarness();
+  t.after(closeHarness(harness));
+  const stale = harness.store.listProfiles()[0];
   createSiteProfile(harness, 'browser', ['x.example']);
 
-  // "no default profile is configured" would describe a request the caller did
-  // not make and hide the typo that caused this one.
-  for (const defaultProfileId of ['abc', -1, 1.5]) {
-    const { status, body } = await postGrab(harness, {
-      pageHost: 'notx.example',
-      defaultProfileId,
-      magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
-    });
-    assert.equal(status, 400, String(defaultProfileId));
-    assert.equal(body.error, 'defaultProfileId must be a positive integer', String(defaultProfileId));
-  }
+  const { status, body } = await postGrab(harness, {
+    pageHost: 'notx.example',
+    defaultProfileId: stale.id,
+    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
+  });
 
-  // 0, '' and null are how a caller spells "I have no default", not a bad id.
-  for (const defaultProfileId of [0, '0', '', null]) {
-    const { body } = await postGrab(harness, {
-      pageHost: 'notx.example',
-      defaultProfileId,
-      magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
-    });
-    assert.equal(
-      body.error,
-      'No profile matches this site and no default profile is configured',
-      String(defaultProfileId),
-    );
-  }
+  assert.equal(status, 400);
+  assert.match(body.error, /^No Putiorr Grab profile claims notx\.example/);
   assert.equal(harness.putio.added.length, 0);
 });
 
@@ -526,7 +639,7 @@ test('an *arr profile that lists the site does not claim a grab on its own', asy
   });
 
   assert.equal(status, 400);
-  assert.equal(body.error, 'No profile matches this site and no default profile is configured');
+  assert.match(body.error, /^No Putiorr Grab profile claims x\.example/);
   assert.equal(harness.putio.added.length, 0);
 });
 
@@ -548,31 +661,13 @@ test('an explicit pick of a non-grab profile is refused by naming the preset', a
   assert.equal(harness.putio.added.length, 0);
 });
 
-test('a default pointing at a non-grab profile is refused by naming the preset', async (t) => {
-  const harness = await createHarness();
-  t.after(closeHarness(harness));
-  const arr = createSiteProfile(harness, 'sonarr', [], { type: 'sonarr' });
-
-  const { status, body } = await postGrab(harness, {
-    pageHost: 'notx.example',
-    defaultProfileId: arr.id,
-    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
-  });
-
-  assert.equal(status, 400);
-  assert.match(body.error, /SONARR/);
-  assert.match(body.error, /Putiorr Grab/);
-  assert.equal(harness.putio.added.length, 0);
-});
-
 test('a disabled profile still claims its browser sites, and the grab is refused by name', async (t) => {
   const harness = await createHarness();
   t.after(closeHarness(harness));
-  const fallback = harness.store.listProfiles()[0];
   // Disabled means the profile accepts no new work, not that it stopped
-  // claiming its sites. Dropping it out of the match instead sent the grab to
-  // the caller's default profile, so switching a profile off silently moved
-  // its sites' downloads into another profile's folder.
+  // claiming its sites. Dropping it out of the match instead sent the grab on
+  // to the next candidate, so switching a profile off silently moved its
+  // sites' downloads into another profile's folder.
   const off = createSiteProfile(harness, 'browser', ['x.example'], { enabled: false });
 
   const refused = await postGrab(harness, {
@@ -584,11 +679,11 @@ test('a disabled profile still claims its browser sites, and the grab is refused
   assert.match(refused.body.error, new RegExp(off.name));
   assert.equal(harness.putio.added.length, 0);
 
-  // A configured default does not rescue it either: the site match already
-  // named an owner, and the default is only consulted when nothing does.
+  // A catch-all profile does not rescue it either: the site match already
+  // named an owner, and the catch-all is only consulted when nothing does.
+  createSiteProfile(harness, 'everything', [], { catchAll: true });
   const stillRefused = await postGrab(harness, {
     pageHost: 'x.example',
-    defaultProfileId: fallback.id,
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
   assert.equal(stillRefused.status, 400);
@@ -620,23 +715,6 @@ test('an explicit profileId that does not exist is a 404 even when the site matc
   const { status, body } = await postGrab(harness, {
     profileId: 9999,
     pageHost: 'x.example',
-    magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
-  });
-
-  assert.equal(status, 404);
-  assert.equal(body.error, 'Profile not found');
-  assert.equal(harness.putio.added.length, 0);
-});
-
-test('a defaultProfileId that no longer exists is a 404, not a silent grab', async (t) => {
-  const harness = await createHarness();
-  t.after(closeHarness(harness));
-
-  // The extension caches the default profile id; deleting that profile in
-  // putiorr has to surface, not quietly route the grab somewhere else.
-  const { status, body } = await postGrab(harness, {
-    pageHost: 'notx.example',
-    defaultProfileId: 9999,
     magnet: 'magnet:?xt=urn:btih:abcdef1234567890',
   });
 
