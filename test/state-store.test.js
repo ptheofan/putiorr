@@ -7,6 +7,34 @@ import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 
+// What an older putiorr leaves behind when it starts against a migrated
+// database: the tables the collapse dropped, recreated by its own schema setup.
+// Only the names and the parent/child link matter here, so the columns are the
+// few the tests write; the real DDL is in store.js and is not what is under test.
+const LEGACY_TABLES_AS_AN_OLDER_PUTIORR_RECREATES_THEM = `
+  CREATE TABLE IF NOT EXISTS transfers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    putio_transfer_id INTEGER,
+    name TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS transfer_associations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_id INTEGER,
+    profile_id INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS transfer_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_id INTEGER
+  );
+
+  CREATE TABLE IF NOT EXISTS association_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    transfer_id INTEGER
+  );
+`;
+
 // downloads.profile_id is NOT NULL, so every download in these tests needs a
 // profile to own it. The owner is resolved once, at ingestion, and frozen.
 function seedProfile(store, overrides = {}) {
@@ -1315,6 +1343,60 @@ test('a download cannot be stored without an owning profile', () => {
     });
     store.seedFromConfig(config);
     assert.equal(store.findDownloadById(stored.id).profile_id, owner.id);
+  } finally {
+    store.close();
+  }
+});
+
+// A 2.0.x image started once against a migrated database recreates the legacy
+// tables as part of its own schema setup and writes nothing into them — which
+// is what a stale `:latest` pull does. They came back empty, so nothing is
+// invisible and nothing is lost; reporting that as data loss and pointing the
+// user at a pre-upgrade backup would cost them every download since.
+test('legacy tables that came back empty are dropped, not reported as data loss', () => {
+  const store = new StateStore(':memory:');
+  try {
+    assert.equal(store.getSetting('downloads_schema_v1'), '1');
+    store.db.exec(LEGACY_TABLES_AS_AN_OLDER_PUTIORR_RECREATES_THEM);
+    assert.equal(store.hasTable('transfers'), true, 'the reappeared table must exist to begin with');
+
+    store.reclaimEmptyLegacyTables();
+
+    assert.equal(store.hasTable('transfers'), false);
+    assert.equal(store.hasTable('transfer_associations'), false);
+    assert.equal(store.legacyRowsAfterMigration(), undefined, 'nothing left for the dashboard to warn about');
+  } finally {
+    store.close();
+  }
+});
+
+test('legacy tables holding rows are kept and still reported', () => {
+  const store = new StateStore(':memory:');
+  try {
+    store.db.exec(LEGACY_TABLES_AS_AN_OLDER_PUTIORR_RECREATES_THEM);
+    store.db.prepare('INSERT INTO transfers (putio_transfer_id, name) VALUES (?, ?)').run(41, 'Written by 2.0.x');
+
+    store.reclaimEmptyLegacyTables();
+
+    assert.equal(store.hasTable('transfers'), true, 'a table with rows is never dropped');
+    assert.equal(store.legacyRowsAfterMigration(), 1);
+  } finally {
+    store.close();
+  }
+});
+
+// transfers empty while a child still holds rows is not "nothing was written";
+// dropping the parent would take the child's rows with it.
+test('an empty parent is kept while any legacy table still holds rows', () => {
+  const store = new StateStore(':memory:');
+  try {
+    store.db.exec(LEGACY_TABLES_AS_AN_OLDER_PUTIORR_RECREATES_THEM);
+    store.db.prepare('INSERT INTO transfer_associations (transfer_id, profile_id) VALUES (?, ?)').run(1, 1);
+
+    store.reclaimEmptyLegacyTables();
+
+    assert.equal(store.hasTable('transfers'), true);
+    assert.equal(store.hasTable('transfer_associations'), true);
   } finally {
     store.close();
   }

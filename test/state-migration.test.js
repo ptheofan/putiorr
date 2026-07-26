@@ -1010,9 +1010,11 @@ test('reappearing legacy tables are reported after the migration has run', async
   assert.equal(reports.profiles.version, 2);
   first.close();
 
-  // An older putiorr booting against the migrated database.
+  // An older putiorr booting against the migrated database, and writing a
+  // download into the table it recreated.
   const downgraded = new DatabaseSync(dbPath);
   downgraded.exec('CREATE TABLE transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+  downgraded.prepare('INSERT INTO transfers (name) VALUES (?)').run('Written by the older build');
   downgraded.close();
 
   const logs = [];
@@ -1027,9 +1029,54 @@ test('reappearing legacy tables are reported after the migration has run', async
   try {
     const warned = logs.map((line) => JSON.parse(line))
       .find((entry) => entry.message === 'legacy transfer tables reappeared after the downloads schema migration');
-    assert.ok(warned, 'the downgrade has to be loud: zero rows in a table nobody reads is a legal answer');
+    assert.ok(warned, 'a row only the older build can read is invisible here, and has to be loud');
+    assert.equal(warned.meta.strandedLegacyRows, 1);
     assert.match(warned.meta.fix, /pre-downloads-\*\.bak/);
+    assert.equal(store.hasTable('transfers'), true, 'a table holding rows is never dropped');
     // And it does not re-run the collapse against the decoy.
+    assert.equal(store.findDownloadById(2).id, 2);
+  } finally {
+    store.close();
+  }
+});
+
+// The same downgrade without the write. Starting an older putiorr is enough to
+// recreate the tables, so presence alone proves nothing — and this is the case
+// a user actually hit: the alarm said 0 downloads were unreadable and sent them
+// to restore a backup that would have cost every download since the upgrade.
+test('empty legacy tables an older putiorr recreated are dropped in silence', async () => {
+  const dbPath = await tempDbPath();
+  writeLegacyDb(dbPath, {
+    downloadProfiles: [{ id: 1, name: 'Default', slug: 'default', created_at: 'now', updated_at: 'now' }],
+    profiles: [profileRow({ id: 1, download_profile_id: 1 })],
+    transfers: [transferRow({ id: 2, putio_transfer_id: 1002 })],
+    associations: [associationRow({ id: 2, transfer_id: 2 })],
+  });
+  new StateStore(dbPath).close();
+
+  const downgraded = new DatabaseSync(dbPath);
+  downgraded.exec('CREATE TABLE transfers (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+  downgraded.close();
+
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (line) => logs.push(line);
+  let store;
+  try {
+    store = new StateStore(dbPath);
+  } finally {
+    console.log = originalLog;
+  }
+  try {
+    const entries = logs.map((line) => JSON.parse(line));
+    assert.equal(
+      entries.find((entry) => entry.message === 'legacy transfer tables reappeared after the downloads schema migration'),
+      undefined,
+      'nothing was written, so there is nothing to alarm anyone about',
+    );
+    assert.equal(store.hasTable('transfers'), false, 'the empty decoy is dropped');
+    assert.equal(store.schemaMigrationReports().legacyTablesPresent, undefined);
+    // The migrated download is untouched by the reclaim.
     assert.equal(store.findDownloadById(2).id, 2);
   } finally {
     store.close();
