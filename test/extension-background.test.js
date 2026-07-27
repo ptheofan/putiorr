@@ -891,14 +891,14 @@ test('a .torrent the page could not fetch is fetched here, where CORS does not a
     },
   });
 
-  const response = await askForLink(harness, 'https://file.onejav.test/torrents/abc/2/name.torrent');
+  const response = await askForLink(harness, 'https://files.tracker.test/torrents/abc/2/name.torrent');
 
   assert.deepEqual(response, {
     ok: true,
     torrentBase64: Buffer.from(bytes).toString('base64'),
     filename: 'Rescued Release.torrent',
   });
-  assert.equal(request.url, 'https://file.onejav.test/torrents/abc/2/name.torrent');
+  assert.equal(request.url, 'https://files.tracker.test/torrents/abc/2/name.torrent');
   // Cookies are still asked for. They will not include a SameSite=Lax one —
   // this request is not same-site with the tracker — which is exactly why the
   // page is asked first and this is only ever the rescue.
