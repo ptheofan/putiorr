@@ -5,8 +5,6 @@
 // be), so shared helpers load via dynamic import.
 
 (() => {
-  const FETCH_TIMEOUT_MS = 15000;
-
   const bypass = new WeakSet();
   const inFlight = new Set();
   // Right-click grabs run in the service worker, which sends the page an
@@ -20,10 +18,15 @@
 
   // Until the helpers land, clicks fall through to the browser untouched. A
   // failed import must say so: silently never capturing anything looks
-  // identical to a broken extension from the user's side.
-  import(chrome.runtime.getURL('lib/resolve.js'))
-    .then((module) => {
-      lib = module;
+  // identical to a broken extension from the user's side. Both modules are
+  // needed to capture anything at all — one decides what a link is, the other
+  // fetches it — so they load as one gate rather than two half-working ones.
+  Promise.all([
+    import(chrome.runtime.getURL('lib/resolve.js')),
+    import(chrome.runtime.getURL('lib/torrent.js')),
+  ])
+    .then(([resolve, torrent]) => {
+      lib = { ...resolve, ...torrent };
     })
     .catch((error) => {
       console.warn('[putiorr] link helpers failed to load, capture is off on this page:', error);
@@ -102,73 +105,37 @@
     if (area === 'sync' && changes.autoCapture) autoCapture = changes.autoCapture.newValue ?? true;
   });
 
-  function arrayBufferToBase64(buffer) {
-    const bytes = new Uint8Array(buffer);
-    let binary = '';
-    const chunk = 0x8000;
-    for (let i = 0; i < bytes.length; i += chunk) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-    }
-    return btoa(binary);
-  }
-
-  // RFC 6266 parameters. Each name is anchored to the start of the header or to
-  // a ";" so that a different parameter ending in "filename" cannot pose as one.
-  const EXT_FILENAME = /(?:^|;)\s*filename\*\s*=\s*([^;]+)/i;
-  const PLAIN_FILENAME = /(?:^|;)\s*filename\s*=\s*(?:"((?:[^"\\]|\\.)*)"|([^;]*))/i;
-
-  function filenameFromDisposition(disposition) {
-    // filename* wins when both are present, which is exactly when the real name
-    // is non-ASCII and the plain filename is the server's mangled fallback.
-    const extended = disposition.match(EXT_FILENAME);
-    if (extended) {
-      // ext-value is charset'language'percent-encoded-name, and is not allowed
-      // to be quoted — but servers that quote it anyway would otherwise leave
-      // the closing quote glued to the name.
-      const value = extended[1].trim().replace(/^"(.*)"$/s, '$1').replace(/^[^']*'[^']*'/, '');
-      try {
-        return decodeURIComponent(value);
-      } catch {
-        // A charset other than UTF-8 leaves byte escapes decodeURIComponent
-        // rejects; the still-encoded name beats guessing at the bytes.
-        return value;
-      }
-    }
-
-    const plain = disposition.match(PLAIN_FILENAME);
-    if (!plain) return '';
-    // A quoted string may hold the ";" that would otherwise end the parameter.
-    if (plain[1] !== undefined) return plain[1].replace(/\\(.)/g, '$1');
-    // Percent escapes are literal here: decoding a plain filename would turn
-    // "a%2Fb.torrent" into a path.
-    return plain[2].trim();
-  }
-
-  // put.io takes the upload's name at face value, and the right-click path exists
-  // precisely for trackers whose download URLs are "download.php?id=123": neither
-  // that basename nor a disposition naming the script is a torrent name.
-  function withTorrentSuffix(name) {
-    return /\.torrent$/i.test(name) ? name : `${name}.torrent`;
-  }
-
-  function filenameFrom(response, url) {
-    const fromHeader = filenameFromDisposition(response.headers.get('content-disposition') ?? '').trim();
-    if (fromHeader) return withTorrentSuffix(fromHeader);
-    const base = new URL(url, window.location.href).pathname.split('/').pop();
-    return base ? withTorrentSuffix(base) : 'upload.torrent';
-  }
-
+  // The fetch this page can make, and the reason .torrent capture starts here:
+  // the request carries the tracker's own session cookies, which is what a
+  // private tracker hands its files to.
   async function fetchTorrent(url) {
-    // A tracker that accepts the connection and then stalls would otherwise
-    // leave the click dead for good: preventDefault has already run and the
-    // promise never settles, so the fallback below never gets its turn.
-    const response = await fetch(url, {
-      credentials: 'include',
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    if (!response.ok) throw new Error(`fetch failed with ${response.status}`);
-    const buffer = await response.arrayBuffer();
-    return { torrentBase64: arrayBufferToBase64(buffer), filename: filenameFrom(response, url) };
+    if (!lib) throw new Error('the putiorr link helpers are not loaded on this page; reload it');
+    return lib.fetchTorrent(url, { base: window.location.href });
+  }
+
+  // ...and the reason it cannot end here. A fetch made from a page is bound by
+  // that page's CORS policy, and a great many trackers serve their .torrent
+  // files from a separate download host or CDN: the link 302s to another
+  // origin, the response carries no Access-Control-Allow-Origin, and the fetch
+  // fails on a file that is perfectly reachable. The service worker holds
+  // host_permissions and is not bound by the page's CORS, so it gets the
+  // second attempt — before the click is handed back to the browser, never
+  // instead of the attempt above. Its cookie jar is not the page's: a
+  // cross-site request from the worker carries no SameSite=Lax cookie, so a
+  // tracker that gates downloads on a session cookie can still fail here. That
+  // is what the ordering is for — this is the rescue, not the route.
+  async function fetchTorrentWithRescue(url) {
+    try {
+      return await fetchTorrent(url);
+    } catch (error) {
+      console.warn('[putiorr] the page could not fetch the .torrent, asking the extension:', error);
+      const answer = await chrome.runtime.sendMessage({ kind: 'fetch-torrent', url });
+      // A refusal here throws, so it lands in the click handler's catch with
+      // the page's own failures and is answered the same way: withdraw the
+      // acknowledgement, replay the click, let the browser have it.
+      if (!answer?.ok) throw new Error(answer?.error ?? 'the extension could not fetch the .torrent either');
+      return { torrentBase64: answer.torrentBase64, filename: answer.filename };
+    }
   }
 
   function refire(anchor) {
@@ -227,7 +194,7 @@
       try {
         const payload = magnet
           ? { kind: 'grab', magnet, pageUrl: window.location.href }
-          : { kind: 'grab', ...(await fetchTorrent(href)), pageUrl: window.location.href };
+          : { kind: 'grab', ...(await fetchTorrentWithRescue(href)), pageUrl: window.location.href };
         const result = await chrome.runtime.sendMessage(payload);
         settleFeedback(feedback, result);
       } catch (error) {
@@ -281,6 +248,9 @@
       return undefined;
     }
     if (message?.kind !== 'fetch-link') return undefined;
+    // The page's attempt and only that: this request came from the worker, and
+    // the worker retries with its own fetch when the answer says the page could
+    // not. Rescuing from here would send it straight back where it came from.
     fetchTorrent(message.url)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch((error) => sendResponse({ ok: false, error: error.message }));
