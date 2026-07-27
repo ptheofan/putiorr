@@ -27,8 +27,7 @@ exactly the way they normally do.
 
 ## Status
 
-Version 1 focuses on the core bridge workflow and reliability over feature
-breadth:
+putiorr favours reliability over feature breadth. What it does today:
 
 - durable SQLite state
 - Transmission-compatible RPC endpoints
@@ -38,6 +37,8 @@ breadth:
 - WebSocket dashboard updates
 - file-level local download progress and speed
 - safe handling of `delete-local-data`
+- a Chrome extension that sends magnet links and `.torrent` clicks on any site
+  to put.io, routed to a profile by the site they came from
 - automatic cleanup of completed transfers for profiles nothing imports from —
   the `prowlarr` and **Putiorr Grab** presets get it by default (removed from
   the list and put.io, downloaded files kept on disk)
