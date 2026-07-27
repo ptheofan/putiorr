@@ -1,12 +1,19 @@
 # putiorr
 
-`putiorr` is a put.io bridge for Sonarr, Radarr, Lidarr, Readarr, and other
-apps that can use a Transmission download client.
+`putiorr` lets Sonarr, Radarr, Lidarr, Readarr, and Prowlarr **use put.io as
+their download client**.
 
 It pretends to be Transmission on the *arr side, sends magnet/torrent grabs to
-put.io, downloads completed put.io files to a local folder, and exposes enough
-queue state for completed-download handling to import media into your normal
-library.
+put.io, downloads completed put.io files to a local folder those apps already
+mount, and exposes enough queue state for completed-download handling to import
+media into your normal library. Anything else that speaks Transmission works
+too, pointed at a profile's own RPC path.
+
+**Docs: <https://ptheofan.github.io/putiorr/>** —
+[setup](https://ptheofan.github.io/putiorr/setup.html),
+[configuration](https://ptheofan.github.io/putiorr/configuration.html),
+[browser extension](https://ptheofan.github.io/putiorr/extension.html),
+[install with an AI agent](https://ptheofan.github.io/putiorr/agent-setup.html).
 
 The common target setup is:
 
