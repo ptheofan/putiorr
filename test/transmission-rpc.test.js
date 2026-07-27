@@ -2015,9 +2015,9 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(settingsBody.tokenConfigured, true);
   assert.equal(typeof settingsBody.defaultDownloadProfileId, 'number');
   assert.equal(settingsBody.downloadPolicy.slowSpeedThresholdBytesPerSecond, 0);
-  // The dashboard's adoption notice reads this; a fresh store has nothing to
-  // report, and the field still has to be there rather than undefined.
-  assert.deepEqual(settingsBody.adoptionNotices, []);
+  // The dashboard's staging collision notice reads this; a fresh store has
+  // nothing to report, and the field still has to be there rather than
+  // undefined.
   assert.deepEqual(settingsBody.stagingCollisions, []);
   assert.equal(settingsBody.putioOAuth.appId, '12345');
   assert.equal(settingsBody.putioOAuth.defaultAppId, '12345');
@@ -3625,7 +3625,7 @@ test('the only *arr profile keeps the shared endpoint when it is disabled, and r
   assert.equal(harness.store.listActiveDownloads().length, 0);
 });
 
-test('a put.io transfer in a disabled profile folder is not adopted, and the dashboard says why', async (t) => {
+test('a put.io transfer in a disabled profile folder is not adopted', async (t) => {
   const harness = await createHarness();
   t.after(async () => {
     await harness.rpcServer.stop();
@@ -3644,13 +3644,10 @@ test('a put.io transfer in a disabled profile folder is not adopted, and the das
   await harness.service.refreshRemoteTransfers();
 
   // Adoption is new work, so a disabled profile does not take it — and the
-  // folder is still its own, so nothing else quietly takes it either. The
-  // audit's complaint was that this branch said nothing at all.
+  // folder is still its own, so nothing else quietly takes it either. Nothing
+  // is reported about it: the transfer is simply left where it is.
   assert.equal(harness.store.findDownloadByPutioTransferId(501), undefined);
-  const [notice] = harness.store.adoptionNotices();
-  assert.equal(notice.disabled, true);
-  assert.deepEqual(notice.profiles, [seeded.name]);
-  assert.equal(notice.transferCount, 1);
+  assert.equal(harness.store.getSetting('adoption_notices'), undefined);
 });
 
 // Design decision 5: deleting a profile prompts for what happens to its

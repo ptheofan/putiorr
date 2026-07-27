@@ -129,6 +129,46 @@ test('an upgrade freezes the staging folder of every download already staged', a
   }
 });
 
+// The put.io adoption notice is gone: a transfer the poll cannot attribute to
+// one RR profile is skipped, and nothing is reported about it. Every install
+// that ran a version which did report it has the row still sitting in
+// `settings`, where nothing would ever rewrite it — so the last thing that
+// version saw would have outlived the feature.
+test('an upgrade deletes the retired adoption notice setting', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-retired-settings-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new StateStore(dbPath);
+  try {
+    first.setSetting('adoption_notices', JSON.stringify([{ putioFolderId: 42, transferCount: 3 }]));
+    first.setSetting('putio_token', 'kept');
+  } finally {
+    first.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    assert.equal(reopened.getSetting('adoption_notices'), undefined);
+    // Only the retired key goes: this runs on every boot, of every install.
+    assert.equal(reopened.getSetting('putio_token'), 'kept');
+  } finally {
+    reopened.close();
+  }
+});
+
+// The same step on the overwhelming majority of boots: a database that never
+// had the key, or has already had it removed. Deleting a row that is not there
+// is not an error, and it must not become one.
+test('deleting the retired adoption notice setting is a no-op when it was never written', () => {
+  const store = new StateStore(':memory:');
+  try {
+    assert.equal(store.getSetting('adoption_notices'), undefined);
+    store.dropRetiredSettings();
+    assert.equal(store.getSetting('adoption_notices'), undefined);
+  } finally {
+    store.close();
+  }
+});
+
 // "Idempotent, and a no-op on every boot after the first" was only true of the
 // rows the upgrade found. It is an unguarded UPDATE, so every later boot froze
 // whatever was sitting at 'downloading' with no staging folder — which is the

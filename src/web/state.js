@@ -140,8 +140,6 @@ export const el = {
   schemaMigrationSummary: document.querySelector('#schemaMigrationSummary'),
   schemaMigrationSummaryDismiss: document.querySelector('#schemaMigrationSummaryDismiss'),
   schemaMigrationWarning: document.querySelector('#schemaMigrationWarning'),
-  adoptionNotice: document.querySelector('#adoptionNotice'),
-  adoptionNoticeText: document.querySelector('#adoptionNoticeText'),
   stagingCollisionNotice: document.querySelector('#stagingCollisionNotice'),
   stagingCollisionText: document.querySelector('#stagingCollisionText'),
   orphanedDownloads: document.querySelector('#orphanedDownloads'),

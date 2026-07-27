@@ -21,8 +21,6 @@ test('downloads UI exposes stable data-testid hooks for frontend tests', () => {
     'delete-from-putio',
     'delete-local-files',
     'delete-confirm-submit',
-    'adoption-notice',
-    'adoption-notice-text',
     'staging-collision-notice',
     'staging-collision-text',
     'schema-migration-notice',
@@ -93,16 +91,12 @@ test('only the upgrade summary carries a dismiss control, wired without an inlin
   assert.match(appJs, /el\.schemaMigrationSummaryDismiss\.addEventListener\('click'/);
 });
 
-// Audit finding 9: with every profile on one put.io folder, adoption never
-// happens. GET /api/settings carries the report; a payload nobody renders
-// leaves the user with a poll that quietly does nothing.
-test('the downloads view renders the adoption notice it is served', () => {
+// GET /api/settings carries the report; a payload nobody renders leaves the
+// user with two downloads put.io named the same thing, only the older one
+// staging, and the other looking like a download that just stopped.
+test('the downloads view renders the staging collision notice it is served', () => {
   const downloadsJs = readFileSync(new URL('../src/web/downloads.js', import.meta.url), 'utf8');
 
-  assert.match(downloadsJs, /state\.settings\?\.adoptionNotices/);
-  assert.match(downloadsJs, /renderAdoptionNotices\(\);/);
-  // Same for two downloads put.io named the same thing: only the older one
-  // stages, and the other looks like a download that just stopped.
   assert.match(downloadsJs, /state\.settings\?\.stagingCollisions/);
   assert.match(downloadsJs, /renderStagingCollisions\(\);/);
 });

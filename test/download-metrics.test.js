@@ -308,12 +308,12 @@ test('poll prunes processed transfers after local staging data disappears', asyn
   }
 });
 
-// Phase 4 of the ownership cleanup (#67), audit finding 9: adoption of a
-// transfer putiorr did not create maps the put.io folder to a profile, and is
-// skipped unless exactly one profile owns that folder. Every profile defaults
-// to the same `putiorr` folder, which the README recommends — so in the
-// documented setup nothing is ever adopted, and it used to say nothing at all.
-test('put.io transfers a shared folder cannot attribute are reported, not skipped in silence', async () => {
+// Adoption maps a put.io folder to a profile and gives up unless exactly one
+// profile owns that folder. Sharing one put.io folder is what the README
+// recommends, so the folder that cannot be attributed is the ordinary case,
+// not a misconfiguration — and something in put.io that putiorr cannot place
+// is put.io's business. It is left alone, without a notice and without a word.
+test('a put.io transfer no single RR profile owns is skipped in silence', async () => {
   const harness = await createHarness();
   try {
     harness.store.createProfile({
@@ -327,6 +327,7 @@ test('put.io transfers a shared folder cannot attribute are reported, not skippe
     });
 
     harness.putio.remoteTransfers = [
+      // Two profiles download into folder 42, and no profile downloads into 99.
       { id: 80, fileId: 81, saveParentId: 42, hash: 'sharedfolderhash', name: 'Shared.Folder.Release', status: 'COMPLETED', percentDone: 100 },
       { id: 82, fileId: 83, saveParentId: 99, hash: 'unwatchedhash', name: 'Unwatched.Release', status: 'COMPLETED', percentDone: 100 },
     ];
@@ -334,46 +335,39 @@ test('put.io transfers a shared folder cannot attribute are reported, not skippe
     const logs = [];
     const originalLog = console.log;
     console.log = (line) => logs.push(line);
+    let rows;
     try {
-      await harness.service.refreshRemoteTransfers();
+      rows = await harness.service.refreshRemoteTransfers();
     } finally {
       console.log = originalLog;
     }
 
+    // Skipped, not adopted and not failed: the poll returns normally and the
+    // transfers stay put.io's.
+    assert.deepEqual(rows, []);
     assert.deepEqual(harness.store.listActiveDownloads(), []);
-    const notices = harness.store.adoptionNotices();
-    const shared = notices.find((notice) => notice.putioFolderId === 42);
-    assert.deepEqual(shared.profiles, ['Custom', 'Radarr']);
-    assert.equal(shared.transferCount, 1);
-    assert.deepEqual(shared.transfers, [{ id: 80, name: 'Shared.Folder.Release' }]);
-    const unwatched = notices.find((notice) => notice.putioFolderId === 99);
-    assert.deepEqual(unwatched.profiles, []);
-    assert.equal(unwatched.transferCount, 1);
-
-    const logged = logs.map((line) => JSON.parse(line))
-      .find((entry) => entry.message === 'put.io transfers cannot be attributed to one RR profile');
-    assert.equal(logged.meta.folders.length, 2);
+    assert.equal(harness.store.getSetting('adoption_notices'), undefined);
+    assert.deepEqual(logs, []);
   } finally {
     harness.store.close();
   }
 });
 
-test('the adoption notice clears once nothing is left unattributed', async () => {
+// Skipping the one it cannot place is all it does: the transfers it can place
+// are adopted in the same poll, unchanged.
+test('an unattributable put.io transfer does not disturb the ones that are attributable', async () => {
   const harness = await createHarness();
   try {
-    harness.store.saveAdoptionNotices([{
-      putioFolderId: 42, folderName: 'putiorr', profiles: [], transfers: [], transferCount: 3,
-    }]);
-
     harness.putio.remoteTransfers = [
       { id: 84, fileId: 85, saveParentId: 42, hash: 'adoptablehash', name: 'Adoptable.Release', status: 'COMPLETED', percentDone: 100 },
+      { id: 86, fileId: 87, saveParentId: 99, hash: 'unwatchedhash', name: 'Unwatched.Release', status: 'COMPLETED', percentDone: 100 },
     ];
     await harness.service.refreshRemoteTransfers();
 
-    // One profile owns folder 42, so the transfer is adopted and the notice
-    // has nothing left to report.
+    // One profile owns folder 42, so that transfer is adopted. Nobody owns 99.
     assert.equal(harness.store.findDownloadByPutioTransferId(84).name, 'Adoptable.Release');
-    assert.deepEqual(harness.store.adoptionNotices(), []);
+    assert.equal(harness.store.findDownloadByPutioTransferId(86), undefined);
+    assert.equal(harness.store.getSetting('adoption_notices'), undefined);
   } finally {
     harness.store.close();
   }
