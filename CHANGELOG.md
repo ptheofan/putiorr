@@ -9,6 +9,23 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [3.0.5] — 2026-07-27
+
+### Fixed
+
+- **Sending a `.torrent` file to put.io always failed with a 401.** put.io serves
+  uploads from a host of its own, `upload.put.io`, and putiorr posted them to
+  the API host instead. Magnet links were never affected — they go to a
+  different endpoint — so a working put.io connection would add magnets happily
+  and reject every `.torrent`, reporting a credentials error against a token
+  that was perfectly valid. Uploading metainfo had never worked by any route:
+  not from the browser extension, and not from an *arr sending base64 metainfo
+  over `torrent-add`.
+
+  The 401 was hard to read because put.io answers a rejected token with the same
+  sentence on every endpoint, so the message pointed at the credentials while
+  the credentials were fine.
+
 ## [3.0.4] — 2026-07-27
 
 ### Security
