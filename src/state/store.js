@@ -409,7 +409,7 @@ function downloadFolderLockedError(profile, count, from, to) {
     + ' finish and leave putiorr, or delete them from the dashboard — the delete dialog can take'
     + ' their files with them — and the folder is free to change. The two folders are compared as'
     + ' they are written, so a symlink or a bind mount naming the same directory counts as a'
-    + ' different one',
+    + ' different one.',
   );
   // Not prose to be parsed: the wizard offers to put the folder back, and it
   // needs the folder this profile still has and how many downloads are behind
