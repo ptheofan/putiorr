@@ -186,7 +186,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
               <li>Open <code>chrome://extensions</code>.</li>
               <li>Turn on <strong>Developer mode</strong> with the toggle at the top right, and leave it on. Chrome 134 and later disable an unpacked extension whenever Developer mode is off, so this is a permanent setting rather than an install step.</li>
               <li>Click <strong>Load unpacked</strong> and select the folder that contains <code>manifest.json</code> itself — the folder the release archive unpacked to, or the clone's <code>extension/</code> directory — never the folder above it.</li>
-              <li>Reload any tabs that were already open. Pages loaded before the extension have no content script, so clicks on them are not captured and the right-click menu answers "Reload the page, then try again" for <code>.torrent</code> links.</li>
+              <li>Reload any tabs that were already open. Pages loaded before the extension have no content script, so clicks on them are not captured. The right-click menu still works on such a tab, but the fetch is then made by the extension rather than by the page, without the page's session cookies, so a private tracker may refuse it.</li>
             </ol>
             <p>
               The card that appears is named <strong>putiorr grab</strong>. Pin it
@@ -264,7 +264,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
               <li><strong>Click capture recognises a path ending in <code>.torrent</code>, or a link with a magnet in it.</strong> Trackers whose download URLs look like <code>download.php?id=…</code> are grabbed with right-click → <strong>Send to putiorr</strong>, which also overrides the profile for that one grab.</li>
               <li><strong>Links inside iframes are not captured.</strong> An embedded frame behaves as if the extension were not installed.</li>
               <li><strong>Modifier clicks are never captured.</strong> Alt+click stays "download to disk", and is the escape hatch when you want the raw <code>.torrent</code> file.</li>
-              <li><strong>A cross-origin <code>.torrent</code> is fetched by the page,</strong> so private-tracker session cookies apply — and so does the page's CORS policy. A host that refuses the page's origin fails the fetch, and the click falls back to a normal browser download.</li>
+              <li><strong>A <code>.torrent</code> is fetched by the page first,</strong> so private-tracker session cookies apply — and so does the page's CORS policy, which is what a link redirecting to a separate download host runs into. The extension then fetches it itself, which CORS does not apply to; that request carries no <code>SameSite=Lax</code> cookie, so a tracker that gates downloads on its session can still refuse it. Only when both fail does the click fall back to a normal browser download.</li>
             </ul>
             <p>
               The extension's own <a href="https://github.com/ptheofan/putiorr/blob/main/extension/README.md">README</a>
