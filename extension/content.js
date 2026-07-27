@@ -135,12 +135,25 @@
     try {
       return await fetchTorrent(url);
     } catch (error) {
-      console.warn('[putiorr] the page could not fetch the .torrent, asking the extension:', error);
+      // Not a warning: on any tracker that serves .torrent files from a second
+      // host this is every successful grab's normal first step, and Chrome
+      // files console.warn under the extension's Errors page — so a working
+      // install accumulated an "error" per download. The line still earns its
+      // keep at debug: it is what says which of the two fetches was refused.
+      console.debug('[putiorr] the page could not fetch the .torrent, asking the extension:', error);
       const answer = await chrome.runtime.sendMessage({ kind: 'fetch-torrent', url });
       // A refusal here throws, so it lands in the click handler's catch with
       // the page's own failures and is answered the same way: withdraw the
       // acknowledgement, replay the click, let the browser have it.
-      if (!answer?.ok) throw new Error(answer?.error ?? 'the extension could not fetch the .torrent either');
+      // Both reasons, because they are rarely the same one and the quiet line
+      // above is no longer in the warn stream to supply the page's. Chasing
+      // this failure with only the last attempt's words cost real time: a page
+      // refused by CORS and a worker refused by the tracker read identically
+      // from the outside, and only the pair tells them apart.
+      if (!answer?.ok) {
+        const rescueFailure = answer?.error ?? 'the extension could not fetch the .torrent either';
+        throw new Error(`${rescueFailure} (the page was refused with: ${error.message})`);
+      }
       return { torrentBase64: answer.torrentBase64, filename: answer.filename };
     }
   }

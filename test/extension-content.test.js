@@ -710,7 +710,12 @@ test('a failed .torrent fetch falls through to a normal download exactly once', 
   const refired = harness.events.at(-1);
   assert.equal(refired.prevented, false);
   assert.equal(refired.stopped, false);
-  assert.match(harness.warnings.join('\n'), /fetch failed with 403/);
+  // Both reasons, not just the last attempt's: the page's refusal and the
+  // worker's are rarely the same, and telling them apart is what the fallback
+  // line is for now that the page's own is logged quietly.
+  const reported = harness.warnings.join('\n');
+  assert.match(reported, /fetch failed with 403/);
+  assert.match(reported, /the extension could not fetch it either/);
 });
 
 test('a second click on a link that already fell back is captured again', async () => {
@@ -1214,4 +1219,72 @@ test('an orphaned content script says to reload the page instead of vanishing', 
   assert.equal(toast?.tone, 'failure');
   assert.match(toast?.title ?? '', /reload this page/i);
   assert.equal(anchor.clicks, 1, 'the browser still gets its turn at the link');
+});
+
+// Reported: click one link, then click a second before putiorr has answered the
+// first. The second is captured and then handed to the browser anyway — a new
+// tab and a plain download — even though nothing about it failed.
+test('a second .torrent click while the first is still in flight is captured too', async () => {
+  const bytes = new Uint8Array([0x64, 0x38, 0x3a, 0x61]);
+  const grabs = [];
+  const rescued = [];
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const harness = await loadContent({
+    fetch: async () => { throw new TypeError('Failed to fetch'); },
+    sendMessage: async (message) => {
+      if (message.kind === 'fetch-torrent') {
+        rescued.push(message.url);
+        if (rescued.length === 1) await held;
+        return { ok: true, torrentBase64: Buffer.from(bytes).toString('base64'), filename: 'R.torrent' };
+      }
+      grabs.push(message);
+      return { ok: true, profileName: 'Movies', transferName: 'Example' };
+    },
+  });
+
+  const first = harness.anchor('https://tracker.test/dl/first.torrent');
+  const second = harness.anchor('https://tracker.test/dl/second.torrent');
+  harness.dispatch(first);
+  await settle(20);
+  harness.dispatch(second);
+  await settle(30);
+
+  assert.equal(second.clicks, 0, 'the second click must not be handed to the browser');
+  release();
+  await settle(30);
+  assert.equal(first.clicks, 0, 'nor the first');
+  assert.equal(grabs.length, 2, 'both grabs should reach putiorr');
+});
+
+// The same race with the wait where the report puts it: putiorr is slow to
+// answer the first grab, and the second link is clicked while it hangs.
+test('a second .torrent click while putiorr is still answering the first', async () => {
+  const bytes = new Uint8Array([0x64, 0x38, 0x3a, 0x61]);
+  const grabs = [];
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  const harness = await loadContent({
+    fetch: async () => { throw new TypeError('Failed to fetch'); },
+    sendMessage: async (message) => {
+      if (message.kind === 'fetch-torrent') {
+        return { ok: true, torrentBase64: Buffer.from(bytes).toString('base64'), filename: 'R.torrent' };
+      }
+      grabs.push(message);
+      if (grabs.length === 1) await held;
+      return { ok: true, profileName: 'Movies', transferName: 'Example' };
+    },
+  });
+
+  const first = harness.anchor('https://tracker.test/dl/first.torrent');
+  const second = harness.anchor('https://tracker.test/dl/second.torrent');
+  harness.dispatch(first);
+  await settle(20);
+  harness.dispatch(second);
+  await settle(30);
+
+  assert.equal(second.clicks, 0, 'the second click must not be handed to the browser');
+  release();
+  await settle(30);
+  assert.equal(grabs.length, 2, 'both grabs should reach putiorr');
 });
