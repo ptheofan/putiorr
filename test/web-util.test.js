@@ -38,7 +38,6 @@ import {
   setProfileFact,
   escapeSvgText,
   truncateLabel,
-  adoptionNoticeSummary,
   schemaMigrationSummary,
   stagingCollisionSummary,
   remoteAlreadyGoneNotice,
@@ -518,48 +517,6 @@ test('the schema migration warning covers both ways downloads go missing', () =>
   assert.equal(schemaMigrationWarning({ legacyTablesPresent: 0 }), '');
 });
 
-// Audit finding 9: in the configuration the README recommends, every profile
-// shares one put.io folder and nothing is ever adopted. The dashboard is where
-// that has to be visible — the alternative is transfers sitting on put.io
-// forever with no explanation anywhere the user looks.
-test('the adoption notice names the folder, the profiles and the cost', () => {
-  assert.equal(adoptionNoticeSummary(undefined), '');
-  assert.equal(adoptionNoticeSummary([]), '');
-
-  const shared = adoptionNoticeSummary([{
-    putioFolderId: 42,
-    folderName: 'putiorr',
-    profiles: ['Sonarr', 'Radarr'],
-    transferCount: 3,
-  }]);
-  assert.match(shared, /3 put\.io transfers/);
-  assert.match(shared, /putiorr/);
-  assert.match(shared, /Sonarr and Radarr/);
-  assert.match(shared, /own put\.io folder/);
-
-  const unwatched = adoptionNoticeSummary([{
-    putioFolderId: 99,
-    folderName: '',
-    profiles: [],
-    transferCount: 1,
-  }]);
-  assert.match(unwatched, /1 put\.io transfer in put\.io folder 99 is not downloaded/);
-  assert.match(unwatched, /no RR profile/);
-
-  // A folder with one owner that is switched off is a different problem with a
-  // different fix, so it does not borrow either of the other two sentences.
-  const disabled = adoptionNoticeSummary([{
-    putioFolderId: 42,
-    folderName: 'putiorr',
-    profiles: ['Sonarr'],
-    disabled: true,
-    transferCount: 2,
-  }]);
-  assert.match(disabled, /2 put\.io transfers in put\.io folder “putiorr” are not downloaded/);
-  assert.match(disabled, /RR profile Sonarr is disabled and accepts no new downloads/);
-  assert.match(disabled, /Enable it to adopt them/);
-});
-
 // put.io does not deduplicate transfer names and the staging folder is the
 // name, so two distinct transfers can resolve to one folder. Only the older
 // one stages; without this the other looks like a download that just stopped.
@@ -660,15 +617,16 @@ test('the profile deletion prompt states what each answer would do, in counts', 
   assert.match(kept, /Removes 4 downloads from putiorr, leaves them on put\.io/);
   assert.match(kept, /leaves the downloaded files on disk, then deletes RR profile Radarr\./);
   // Left on put.io in a folder no profile owns any more, they stop being
-  // adoptable — the dashboard says so, so the dialog says so first.
-  assert.match(kept, /unattributed/);
+  // adoptable, and putiorr says nothing about a transfer it cannot place — so
+  // this dialog is the only place it is said at all.
+  assert.match(kept, /putiorr ignores a put\.io transfer in a folder no RR profile downloads into/);
 
   const purged = profileDeletionOutcome(preview, { mode: 'delete', deleteRemote: true, deleteLocal: true });
   assert.match(purged, /cancels their 4 put\.io transfers/);
   // The count is the staging folders' own, so it says so: it includes the
   // .part files and anything else in them, which rm(recursive) takes too.
   assert.match(purged, /deletes everything in their staging folders — 9 files, 2\.0 KB/);
-  assert.doesNotMatch(purged, /unattributed/);
+  assert.doesNotMatch(purged, /putiorr ignores a put\.io transfer/);
 
   // A folder it could not read is named rather than quietly left out of the
   // total: silently under-reporting is the failure this count replaces.

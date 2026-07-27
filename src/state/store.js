@@ -591,9 +591,26 @@ export class StateStore {
     this.migrateProfilesSchema();
     this.absolutizeProfileDownloadFolders();
     this.db.exec(PROFILES_RPC_PATH_INDEX_DDL);
+    this.dropRetiredSettings();
     // Before the warning, so an empty set is reclaimed rather than reported.
     this.reclaimEmptyLegacyTables();
     this.warnAboutDowngradedWrites();
+  }
+
+  // Settings rows a feature that no longer exists left behind. Nothing reads
+  // them and nothing would ever rewrite them, so without this they outlive the
+  // feature on every install that ran the version which wrote them.
+  //
+  // `adoption_notices` held the put.io transfers a poll could not attribute to
+  // one RR profile, which the dashboard turned into a notice telling the user
+  // to give every profile its own put.io folder — in the very setup the README
+  // recommends. A transfer putiorr cannot place is now simply left alone.
+  //
+  // Deleting a key that is not there is not an error, so this is a no-op on a
+  // database that never had it — which is every fresh install, and every boot
+  // after the first.
+  dropRetiredSettings() {
+    this.deleteSetting('adoption_notices');
   }
 
   // Every download an older build already staged, frozen to the name it was
@@ -754,29 +771,6 @@ export class StateStore {
     }
     this.setSetting(SCHEMA_MIGRATION_SUMMARY_DISMISSED_SETTING, summaryKey);
     return this.schemaMigrationReports();
-  }
-
-  // put.io transfers the poll could not attribute to exactly one RR profile,
-  // as of the last poll. Recorded rather than only logged: in the configuration
-  // the README recommends — every profile pointing at the same put.io folder —
-  // adoption never happens, and a NAS user does not read the log to find out.
-  adoptionNotices() {
-    const raw = this.getSetting('adoption_notices');
-    if (!raw) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-
-  saveAdoptionNotices(notices) {
-    if (!Array.isArray(notices) || notices.length === 0) {
-      this.deleteSetting('adoption_notices');
-      return;
-    }
-    this.setSetting('adoption_notices', JSON.stringify(notices));
   }
 
   // Staging folders more than one live download resolves to. put.io does not

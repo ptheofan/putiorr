@@ -420,38 +420,6 @@ export function schemaMigrationSummary(migrations) {
   return `The last database upgrade ${parts.join(', ')}. Files on disk were not touched.`;
 }
 
-function joinNames(names) {
-  if (names.length <= 1) return names[0] ?? '';
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-}
-
-// put.io transfers the last poll could not attribute to one RR profile. Every
-// profile defaults to the same put.io folder, so in the documented setup this
-// is every transfer putiorr did not create itself — and until now the only
-// evidence was that nothing happened.
-export function adoptionNoticeSummary(notices) {
-  const entries = Array.isArray(notices) ? notices.filter((notice) => notice?.transferCount) : [];
-  if (entries.length === 0) return '';
-  return entries.map((notice) => {
-    const folder = notice.folderName
-      ? `put.io folder “${notice.folderName}”`
-      : `put.io folder ${notice.putioFolderId ?? '(unknown)'}`;
-    const transfers = `${pluralize(notice.transferCount, 'put.io transfer')}`;
-    const profiles = Array.isArray(notice.profiles) ? notice.profiles : [];
-    // Three different folders, three different fixes: enable the profile,
-    // separate the folders, or point a profile at the folder.
-    if (notice.disabled && profiles.length === 1) {
-      return `${transfers} in ${folder} ${notice.transferCount === 1 ? 'is' : 'are'} not downloaded:`
-        + ` RR profile ${profiles[0]} is disabled and accepts no new downloads. Enable it to adopt them.`;
-    }
-    return profiles.length > 1
-      ? `${transfers} in ${folder} cannot be adopted: ${joinNames(profiles)} all download into it.`
-        + ' Give each RR profile its own put.io folder.'
-      : `${transfers} in ${folder} ${notice.transferCount === 1 ? 'is' : 'are'} not downloaded:`
-        + ' no RR profile uses that folder.';
-  }).join(' ');
-}
-
 // Web Awesome checkboxes and buttons carry their state in both the property
 // and the attribute, and which one is authoritative depends on whether the
 // component has upgraded yet, so both are written and both are read.
@@ -538,12 +506,13 @@ export function profileDeletionOutcome(preview, choice = {}) {
       + ` — ${pluralize(filesOnDisk, 'file')}, ${formatBytes(preview?.downloads?.localBytes)}${blind}`
     : 'leaves the downloaded files on disk';
   // Kept on put.io, in a folder no RR profile owns any more, they stop being
-  // adoptable. The dashboard says so on the next poll; the dialog says so
-  // first, while the choice is still the user's.
+  // adoptable — and putiorr says nothing about a transfer it cannot place. So
+  // this dialog is the only place it is ever said, and it is said while the
+  // choice is still the user's.
   const stranded = choice.deleteRemote
     ? ''
-    : ` The ${total === 1 ? 'transfer' : 'transfers'} left on put.io ${total === 1 ? 'is' : 'are'} listed`
-      + ' as unattributed until an RR profile downloads into that folder.';
+    : ` The ${total === 1 ? 'transfer' : 'transfers'} left on put.io stay${total === 1 ? 's' : ''} there:`
+      + ' putiorr ignores a put.io transfer in a folder no RR profile downloads into.';
   return `Removes ${downloads} from putiorr, ${remote}, ${local}, then deletes RR profile ${name}.${stranded}`;
 }
 

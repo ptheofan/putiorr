@@ -576,7 +576,10 @@ the shared endpoint, still claims its browser sites, is still counted when the
 shared endpoint decides whether it is ambiguous, and still owns its put.io
 folder. Whether it accepts work is asked only where work is created:
 `torrent-add`, `/api/grab`, and the adoption of a put.io transfer putiorr did
-not create. Each of those refuses with one sentence naming the profile.
+not create. `torrent-add` and `/api/grab` refuse with one sentence naming the
+profile, because somebody is waiting on the answer. Adoption is nobody's
+request, so the transfer is left on put.io without a word, and enabling the
+profile adopts it on the next poll.
 
 It is not asked on `torrent-get`, `torrent-remove` or `session-get`. The
 downloads already queued keep downloading and stay listable, importable and
@@ -613,9 +616,9 @@ folders are compared as they are written, so a symlink or bind mount naming
 the same directory counts as a different one.
 
 Whichever answer is given, the download rows themselves go: there is no owner
-left to keep them under. put.io transfers you chose to keep reappear in the
-dashboard's adoption notice on the next poll, and the dialog says so before you
-commit.
+left to keep them under. put.io transfers you chose to keep stay on put.io and
+are never picked up again — putiorr ignores a transfer in a folder no RR profile
+downloads into — and the dialog says so before you commit.
 
 `deleteLocal` is a recursive delete of the whole staging folder, so it also
 takes the `.part` file of anything still running and anything else you put in

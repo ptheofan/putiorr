@@ -670,8 +670,7 @@ export class TransferService {
       // Creating a put.io folder is work, so a disabled profile does not get
       // one made for it. The folder it already has is still its own, though,
       // and it stays on the map: adoption has to refuse a transfer that lands
-      // there by name, not let whichever other profile shares the folder take
-      // it, and not fall silent.
+      // there, not let whichever other profile shares the folder take it.
       profiles.push(profile.enabled ? await this.ensureProfileFolder(profile) : profile);
     }
 
@@ -686,7 +685,6 @@ export class TransferService {
     const remoteIds = new Set();
     const remoteHashes = new Set();
     const rows = [];
-    const unattributed = new Map();
     for (const remote of remoteTransfers) {
       if (remote.id != null) remoteIds.add(remote.id);
       if (remote.hash) remoteHashes.add(String(remote.hash).trim().toLowerCase());
@@ -696,7 +694,7 @@ export class TransferService {
       // tick, until a restart. A bad row is skipped and named; the next tick
       // retries it.
       try {
-        this.refreshRemoteTransfer(remote, byFolderId, rows, unattributed);
+        this.refreshRemoteTransfer(remote, byFolderId, rows);
       } catch (error) {
         logger.warn('skipped put.io transfer that failed to refresh', {
           putioTransferId: remote.id,
@@ -708,57 +706,14 @@ export class TransferService {
         });
       }
     }
-    this.recordAdoptionNotices(unattributed);
     this.pruneRemoteTransfers(remoteIds, remoteHashes);
     this.pruneRemovedTransfers(remoteIds, remoteHashes);
     return rows;
   }
 
-  // Audit finding 9: adoption maps a put.io folder to a profile and gives up
-  // unless exactly one profile owns that folder. Every profile defaults to the
-  // same `putiorr` folder, which the README recommends, so in the documented
-  // setup nothing is ever adopted — and it used to give up without a word. The
-  // notice is rewritten from scratch on every poll, so it disappears by itself
-  // once the folders are separated or the transfers are gone.
-  recordAdoptionNotices(unattributed) {
-    const notices = [...unattributed.values()].map((entry) => ({
-      putioFolderId: entry.putioFolderId,
-      folderName: entry.folderName,
-      profiles: entry.profiles,
-      disabled: entry.disabled,
-      transferCount: entry.transfers.length,
-      // Enough to recognise which transfers are stuck without turning a
-      // settings row into a copy of the put.io transfer list. Sorted by id
-      // because put.io's list order is its own business: reordering it is not
-      // a change in the configuration this reports, and re-warning on every
-      // poll would train the user to ignore the warning.
-      transfers: [...entry.transfers].sort((left, right) => Number(left.id) - Number(right.id)).slice(0, 5),
-    }));
-    // Nothing is written or logged while the answer is the same as last time:
-    // the poll runs every few seconds, and this is a report about
-    // configuration, which does not change on that timescale.
-    if (JSON.stringify(notices) === JSON.stringify(this.store.adoptionNotices())) return;
-    this.store.saveAdoptionNotices(notices);
-
-    if (notices.length === 0) {
-      logger.info('every put.io transfer can be attributed to one RR profile again');
-      return;
-    }
-    logger.warn('put.io transfers cannot be attributed to one RR profile', {
-      consequence: 'they are not adopted, so putiorr will not download them',
-      fix: 'give each RR profile its own put.io folder, or remove the transfers from put.io',
-      folders: notices.map((notice) => ({
-        putioFolderId: notice.putioFolderId,
-        folderName: notice.folderName,
-        profiles: notice.profiles,
-        transferCount: notice.transferCount,
-      })),
-    });
-  }
-
   // One put.io transfer's worth of work, extracted so the caller can isolate a
   // failure to the row that caused it. Appends the refreshed rows to `rows`.
-  refreshRemoteTransfer(remote, byFolderId, rows, unattributed = new Map()) {
+  refreshRemoteTransfer(remote, byFolderId, rows) {
     const existing = remote.id ? this.store.findDownloadByPutioTransferId(remote.id) : undefined;
 
     if (existing) {
@@ -796,46 +751,30 @@ export class TransferService {
 
     // Adoption of a transfer putiorr did not create. profile_id is mandatory,
     // so a folder that maps to no profile, or to more than one, has no answer
-    // — but "no answer" is a thing the user has to be told rather than a
-    // reason to move on quietly.
+    // — and a folder shared by several profiles is the setup the README
+    // recommends, so this is the ordinary case rather than a misconfiguration.
+    // A transfer putiorr cannot place is put.io's, and is left alone.
     const folderProfiles = byFolderId.get(remote.saveParentId) ?? [];
-    if (folderProfiles.length !== 1) {
-      this.recordUnattributedTransfer(remote, folderProfiles, unattributed);
+    // Adopting a transfer is accepting new work, which is the one thing a
+    // disabled profile does not do. Same outcome, same silence: the transfer
+    // stays on put.io, and enabling the profile adopts it on the next poll.
+    if (folderProfiles.length !== 1 || !folderProfiles[0].enabled) {
+      // Below the default level, so it costs nothing on a running install and
+      // still answers "why is this transfer not being downloaded?" for anyone
+      // who asks the question with PUTIORR_LOG_LEVEL=debug.
+      logger.debug('put.io transfer not adopted: its folder does not map to one enabled RR profile', {
+        putioTransferId: remote.id,
+        saveParentId: remote.saveParentId,
+        name: remote.name,
+      });
       return;
     }
     const [profile] = folderProfiles;
-    // Adopting a transfer is accepting new work, which is the one thing a
-    // disabled profile does not do. It is reported rather than skipped: the
-    // audit's fourth meaning of "disabled" was this branch, which said nothing
-    // at all while the transfer sat on put.io forever.
-    if (!profile.enabled) {
-      this.recordUnattributedTransfer(remote, folderProfiles, unattributed);
-      return;
-    }
     rows.push(this.store.upsertDownload(putioTransferToStoreInput(remote, {
       profile_id: profile.id,
       source: remote.magnetUri ?? '',
       source_type: 'remote',
     })));
-  }
-
-  // Grouped by folder rather than listed per transfer: the problem is the
-  // folder's mapping, and one line per stuck transfer on every poll is noise
-  // that buries it.
-  recordUnattributedTransfer(remote, folderProfiles, unattributed) {
-    const putioFolderId = remote.saveParentId ?? null;
-    const entry = unattributed.get(putioFolderId) ?? {
-      putioFolderId,
-      folderName: folderProfiles[0]?.putio_folder_name ?? '',
-      profiles: folderProfiles.map((profile) => profile.name),
-      // One profile owns the folder outright and is switched off. Told apart
-      // from an unclaimed or contested folder because the fix is different:
-      // enable the profile, rather than separate the folders.
-      disabled: folderProfiles.length === 1 && !folderProfiles[0].enabled,
-      transfers: [],
-    };
-    entry.transfers.push({ id: remote.id ?? null, name: remote.name ?? '' });
-    unattributed.set(putioFolderId, entry);
   }
 
   pruneRemoteTransfers(remoteIds, remoteHashes) {
