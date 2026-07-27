@@ -150,6 +150,19 @@ API changes, for anything scripted against putiorr:
   one of the likelier reasons a request is in that log at all, and the old shape
   left it out.
 
+## Cross-Site Requests
+
+putiorr has no login, which is not the same as having nothing to lose: a page
+the user visits can aim requests at their LAN putiorr and the browser sends
+them. Every request to `/api/` that is not a `GET` is therefore refused with
+`403` when the browser labels it `Sec-Fetch-Site: cross-site` or `same-site` —
+another site started it. Nothing else is refused. The dashboard is
+`same-origin`, a direct navigation is `none`, and a caller that is not a
+browser — `curl`, a script, a cron job — sends no such header at all and is
+left alone, as is anything carrying the `X-Putiorr-Grab` header the extension
+sends. `GET` requests and the Transmission RPC endpoints the *arr apps use are
+untouched.
+
 ## Browser Extension
 
 The [`extension/`](extension) directory holds a Chrome (Manifest V3) extension
