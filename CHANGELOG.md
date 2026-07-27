@@ -9,6 +9,28 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [3.0.4] — 2026-07-27
+
+### Security
+
+- **Cross-site requests can no longer change putiorr's state.** Only
+  `POST /api/grab` was protected; every other state-changing `/api` endpoint —
+  settings, profiles, download profiles, starting and deleting downloads, the
+  orphan routes, the OAuth routes and `POST /api/poll` — could be driven by any
+  page the user happened to visit. No credentials were needed, because putiorr
+  has none to steal: the attacker only needed the victim's browser to reach a
+  putiorr on their network.
+
+  A request is now refused when the browser reports it was started by another
+  site. Nothing else changes: the dashboard, `curl` and scripts, the browser
+  extension, and the *arr apps on the Transmission RPC endpoints are all
+  unaffected, and reads are untouched. Refusals are logged with the path and
+  method behind them.
+
+  This is a mitigation, not a boundary. A caller that is not a browser is
+  deliberately still allowed through — refusing those would break every
+  scripted setup and would not stop the attack it is aimed at.
+
 ## [3.0.3] — 2026-07-27
 
 ### Fixed
