@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ptheofan.github.io/putiorr/sitemap.xml
