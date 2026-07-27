@@ -425,13 +425,14 @@ Lidarr URL: http://lidarr:8686</code></pre>
               which would put the transfer in a folder nobody chose.
             </p>
             <p>
-              The extension is distributed from the putiorr repository and
-              loaded unpacked, which is how it is installed:
+              The extension is not on the Chrome Web Store; it is loaded
+              unpacked from a folder on the browser's own disk, which is how it
+              is installed:
             </p>
             <ol>
-              <li>Copy the repository's <code>extension/</code> folder onto the machine running Chrome — putiorr is on the NAS, the browser is not — and keep it somewhere permanent.</li>
+              <li>Get the extension onto the machine running Chrome — putiorr is on the NAS, the browser is not — and keep it somewhere permanent. Download <code>putiorr-grab-&lt;version&gt;.zip</code> from the Assets of the newest <a href="https://github.com/ptheofan/putiorr/releases">release</a> and unpack it, or copy the repository's <code>extension/</code> folder.</li>
               <li>Open <code>chrome://extensions</code> and enable Developer mode.</li>
-              <li>Choose Load unpacked and select that <code>extension/</code> folder.</li>
+              <li>Choose Load unpacked and select that folder — the one holding <code>manifest.json</code>.</li>
               <li>Open the extension options and enter the putiorr URL, such as <code>http://nas:9091</code>, plus the Basic auth credentials if putiorr uses them.</li>
               <li>Click Test connection &amp; load profiles and press Save. The card lists what putiorr routes to each profile, including which one takes the sites no profile claims.</li>
               <li>On a tracker page, click the extension's toolbar icon to see which profile a grab from that site would land in, and to claim the site for one of them.</li>
@@ -493,6 +494,7 @@ Lidarr URL: http://lidarr:8686</code></pre>
         <a href="extension.html">Extension</a>
         <a href="agent-setup.html">Agent guide</a>
         <a href="putio-oauth-relay.html">OAuth relay</a>
+        <a href="privacy.html">Privacy</a>
       </nav>
     </footer>
   </body>
