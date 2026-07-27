@@ -1,12 +1,19 @@
 # putiorr
 
-`putiorr` is a put.io bridge for Sonarr, Radarr, Lidarr, Readarr, and other
-apps that can use a Transmission download client.
+`putiorr` lets Sonarr, Radarr, Lidarr, Readarr, and Prowlarr **use put.io as
+their download client**.
 
 It pretends to be Transmission on the *arr side, sends magnet/torrent grabs to
-put.io, downloads completed put.io files to a local folder, and exposes enough
-queue state for completed-download handling to import media into your normal
-library.
+put.io, downloads completed put.io files to a local folder those apps already
+mount, and exposes enough queue state for completed-download handling to import
+media into your normal library. Anything else that speaks Transmission works
+too, pointed at a profile's own RPC path.
+
+**Docs: <https://ptheofan.github.io/putiorr/>** —
+[setup](https://ptheofan.github.io/putiorr/setup.html),
+[configuration](https://ptheofan.github.io/putiorr/configuration.html),
+[browser extension](https://ptheofan.github.io/putiorr/extension.html),
+[install with an AI agent](https://ptheofan.github.io/putiorr/agent-setup.html).
 
 The common target setup is:
 
@@ -20,8 +27,7 @@ exactly the way they normally do.
 
 ## Status
 
-Version 1 focuses on the core bridge workflow and reliability over feature
-breadth:
+putiorr favours reliability over feature breadth. What it does today:
 
 - durable SQLite state
 - Transmission-compatible RPC endpoints
@@ -31,6 +37,8 @@ breadth:
 - WebSocket dashboard updates
 - file-level local download progress and speed
 - safe handling of `delete-local-data`
+- a Chrome extension that sends magnet links and `.torrent` clicks on any site
+  to put.io, routed to a profile by the site they came from
 - automatic cleanup of completed transfers for profiles nothing imports from —
   the `prowlarr` and **Putiorr Grab** presets get it by default (removed from
   the list and put.io, downloaded files kept on disk)
