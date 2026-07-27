@@ -710,7 +710,12 @@ test('a failed .torrent fetch falls through to a normal download exactly once', 
   const refired = harness.events.at(-1);
   assert.equal(refired.prevented, false);
   assert.equal(refired.stopped, false);
-  assert.match(harness.warnings.join('\n'), /fetch failed with 403/);
+  // Both reasons, not just the last attempt's: the page's refusal and the
+  // worker's are rarely the same, and telling them apart is what the fallback
+  // line is for now that the page's own is logged quietly.
+  const reported = harness.warnings.join('\n');
+  assert.match(reported, /fetch failed with 403/);
+  assert.match(reported, /the extension could not fetch it either/);
 });
 
 test('a second click on a link that already fell back is captured again', async () => {
