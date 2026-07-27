@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 // content.js is an IIFE injected into pages: it registers a document click
@@ -10,6 +11,8 @@ import test from 'node:test';
 
 const CONTENT_URL = new URL('../extension/content.js', import.meta.url);
 const RESOLVE_URL = new URL('../extension/lib/resolve.js', import.meta.url);
+const TORRENT_URL = new URL('../extension/lib/torrent.js', import.meta.url);
+const MANIFEST_URL = new URL('../extension/manifest.json', import.meta.url);
 const PAGE_URL = 'https://tracker.test/browse/page';
 // The https "send to put.io" link the project owner clicked, magnet and all.
 const HANDLER_URL = 'https://put.io/default/magnet?url=magnet:?xt=urn:btih:86B9AFE1C4D0F2A3B5C6D7E8F90123456789ABCD'
@@ -148,11 +151,18 @@ function findByClass(node, name) {
   return null;
 }
 
-function createHarness({ sync = {}, fetch: fetchStub, sendMessage, broken = false } = {}) {
+function createHarness({ sync = {}, fetch: fetchStub, workerFetch, sendMessage, broken = false } = {}) {
   const sent = [];
   const warnings = [];
   const listeners = {};
   const events = [];
+  const workerFetches = [];
+  // What the service worker answers when the page asks it to fetch a .torrent
+  // the page could not. It answers rather than throwing, refusals included, so
+  // the default is a worker that could not get the file either — which leaves
+  // every test written before the rescue existed with the fallback it was
+  // written for.
+  const rescue = workerFetch ?? (async () => ({ ok: false, error: 'the extension could not fetch it either' }));
 
   // `path` stands in for composedPath(): the browser hands the listener the
   // full chain from the innermost node outwards, crossing open shadow roots.
@@ -188,6 +198,10 @@ function createHarness({ sync = {}, fetch: fetchStub, sendMessage, broken = fals
       id: 'putiorr-extension-id',
       getURL: (path) => new URL(`../extension/${path}`, import.meta.url).href,
       sendMessage: sendMessage ?? (async (message) => {
+        if (message?.kind === 'fetch-torrent') {
+          workerFetches.push(message.url);
+          return rescue(message.url);
+        }
         sent.push(message);
         return { ok: true };
       }),
@@ -255,6 +269,7 @@ function createHarness({ sync = {}, fetch: fetchStub, sendMessage, broken = fals
     warnings,
     listeners,
     events,
+    workerFetches,
     anchor,
     dispatch,
     toasts,
@@ -287,6 +302,19 @@ test('the dynamic import target is a real module exposing the link helpers', asy
   assert.equal(typeof module.isMagnetLink, 'function');
   assert.equal(typeof module.isTorrentLink, 'function');
   assert.equal(typeof module.magnetFromLink, 'function');
+});
+
+test('the fetch helpers are a real module, and one the page is allowed to import', async () => {
+  // The content script reaches them by dynamic import, which only works for a
+  // web-accessible resource: leaving it off that list turns capture off on
+  // every page, and nothing else in the extension would say so.
+  const module = await import(TORRENT_URL.href);
+  assert.equal(typeof module.fetchTorrent, 'function');
+  assert.equal(typeof module.looksLikeMetainfo, 'function');
+
+  const manifest = JSON.parse(await readFile(MANIFEST_URL, 'utf8'));
+  const resources = manifest.web_accessible_resources.flatMap((entry) => entry.resources);
+  assert.ok(resources.includes('lib/torrent.js'), `lib/torrent.js is not web-accessible: ${resources}`);
 });
 
 test('a magnet click is captured and forwarded without touching the network', async () => {
@@ -527,6 +555,136 @@ test('a grabbed file is always named as a torrent, whatever the server calls it'
   assert.equal(await filenameFor('https://tracker.test/dl/4.torrent', 'attachment; filename=Real.torrent'), 'Real.torrent');
 });
 
+test('a .torrent the page can fetch is never fetched twice', async () => {
+  // The page's fetch is the one that carries the tracker's session cookies, so
+  // the worker's must stay a rescue: asking it on the common path would trade
+  // a working private-tracker grab for a login page.
+  const harness = await loadContent({
+    fetch: async () => torrentResponse(new Uint8Array([0x64, 0x65])),
+  });
+
+  harness.dispatch(harness.anchor('https://tracker.test/dl/1234.torrent'));
+  await settle();
+
+  assert.equal(harness.sent.length, 1);
+  assert.deepEqual(harness.workerFetches, [], 'a fetch the page made needs no rescue');
+});
+
+test('a .torrent the page is refused by CORS is fetched by the extension instead', async () => {
+  // Issue #97, from a real tracker: the .torrent link 302s to a separate
+  // download host, the redirect target sends no Access-Control-Allow-Origin,
+  // and the page's fetch dies on a file that is perfectly reachable. Before
+  // the rescue the click was handed back to the browser, which downloaded the
+  // file itself, and nothing ever reached putiorr.
+  const bytes = new Uint8Array([0x64, 0x38, 0x3a, 0x61]);
+  let attempts = 0;
+  const harness = await loadContent({
+    // What a page fetch blocked by CORS actually does: it rejects with a
+    // TypeError that says nothing about why, exactly as it would for a host
+    // that is not there. The content script cannot tell the two apart, which
+    // is the whole reason the rescue is worth attempting.
+    fetch: async () => {
+      attempts += 1;
+      throw new TypeError('Failed to fetch');
+    },
+    sendMessage: async (message) => {
+      if (message.kind === 'fetch-torrent') {
+        harness.workerFetches.push(message.url);
+        return { ok: true, torrentBase64: Buffer.from(bytes).toString('base64'), filename: 'Rescued.torrent' };
+      }
+      harness.sent.push(message);
+      return { ok: true, profileName: 'Movies', transferName: 'Rescued.Release.2024.1080p' };
+    },
+  });
+
+  const anchor = harness.anchor('https://onejav.test/torrent/1/download/2/name.torrent');
+  const event = harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(event.prevented, true);
+  assert.equal(attempts, 1, 'the page still gets the first attempt');
+  assert.deepEqual(harness.workerFetches, ['https://onejav.test/torrent/1/download/2/name.torrent']);
+  assert.deepEqual(harness.sent, [{
+    kind: 'grab',
+    torrentBase64: Buffer.from(bytes).toString('base64'),
+    filename: 'Rescued.torrent',
+    pageUrl: PAGE_URL,
+  }]);
+  assert.equal(anchor.clicks, 0, 'a grab that reached putiorr must not also be downloaded by the browser');
+  // The acknowledgement has to settle into the answer, not be withdrawn: from
+  // the user's side a rescued grab is an ordinary one.
+  assert.deepEqual(harness.toasts(), [{
+    tone: 'success',
+    title: 'Downloading with putiorr using Movies profile',
+    detail: 'Rescued.Release.2024.1080p',
+  }]);
+});
+
+test('a .torrent the extension is refused too still falls back to the browser', async () => {
+  // Both attempts spent, so the file really cannot be had by the extension and
+  // the browser is the last thing left that might get it.
+  const harness = await loadContent({
+    fetch: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    workerFetch: async () => ({ ok: false, error: 'that link did not answer with a .torrent file' }),
+  });
+
+  const anchor = harness.anchor('https://tracker.test/dl/1234.torrent');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(harness.workerFetches.length, 1);
+  assert.deepEqual(harness.sent, [], 'a grab must not be claimed on a file nobody could fetch');
+  assert.equal(anchor.clicks, 1, 'the click must be refired so the user still gets the file');
+  assert.deepEqual(harness.toasts(), [], 'the acknowledgement goes with it');
+  assert.match(harness.warnings.join('\n'), /did not answer with a \.torrent file/);
+});
+
+test('an extension fetch that times out is answered rather than left pending', async () => {
+  // The worker holds the same deadline the page does, and reports the abort as
+  // a failed fetch. Anything else would leave the acknowledgement on screen
+  // for the life of the page, on a click that was swallowed by preventDefault.
+  const harness = await loadContent({
+    fetch: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    workerFetch: async () => ({ ok: false, error: 'The operation was aborted due to timeout' }),
+  });
+
+  const anchor = harness.anchor('https://tracker.test/dl/1234.torrent');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.equal(harness.workerFetches.length, 1, 'the worker has to have been asked for this to mean anything');
+  assert.deepEqual(harness.toasts(), []);
+  assert.equal(anchor.clicks, 1);
+});
+
+test('an extension that cannot be reached at all still falls back to the browser', async () => {
+  // sendMessage rejects outright when an extension reload has orphaned this
+  // content script — the rescue is the second message on that click, and it
+  // must fail the same way the grab itself does.
+  const asked = [];
+  const harness = await loadContent({
+    fetch: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+    sendMessage: async (message) => {
+      asked.push(message.kind);
+      throw new Error('Extension context invalidated.');
+    },
+  });
+
+  const anchor = harness.anchor('https://tracker.test/dl/1234.torrent');
+  harness.dispatch(anchor);
+  await settle();
+
+  assert.deepEqual(asked, ['fetch-torrent'], 'the rescue is asked for, and its rejection ends the capture');
+  assert.equal(anchor.clicks, 1);
+  assert.deepEqual(harness.toasts(), []);
+});
+
 test('a failed .torrent fetch falls through to a normal download exactly once', async () => {
   let attempts = 0;
   const harness = await loadContent({
@@ -541,6 +699,9 @@ test('a failed .torrent fetch falls through to a normal download exactly once', 
   await settle();
 
   assert.equal(event.prevented, true);
+  // The worker was asked before the browser was: a 403 from the page can be a
+  // 200 from an origin the page was not allowed to read.
+  assert.deepEqual(harness.workerFetches, ['https://tracker.test/dl/1234.torrent']);
   assert.equal(anchor.clicks, 1, 'the click must be refired so the user still gets the file');
   assert.equal(attempts, 1, 'the refired click must not be captured again');
   assert.deepEqual(harness.sent, []);

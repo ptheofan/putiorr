@@ -26,7 +26,10 @@ There are two ways to grab:
   or a link with a magnet in it.
 
 `.torrent` files are fetched from inside the page, so private-tracker session
-cookies apply.
+cookies apply. When that fetch cannot be made — most often because the link
+redirects to a separate download host and the page's CORS policy refuses the
+response — the service worker fetches the file itself and the grab goes ahead;
+see [Known Limitations](#known-limitations) for what that costs.
 
 Either way the grab reports itself on the page it came from, and again as a
 Chrome notification — see [What A Grab Looks Like](#what-a-grab-looks-like).
@@ -104,9 +107,9 @@ Then, either way:
    from it, so keep the directory where it is — moving or deleting it breaks the
    extension and loses its options.
 3. Reload any tabs that were already open — pages loaded before the extension
-   have no content script, so clicks on them are not captured and the
-   right-click menu answers "Reload the page, then try again" for `.torrent`
-   links.
+   have no content script, so clicks on them are not captured. The right-click
+   menu still works on such a tab, but the fetch is made by the service worker
+   without the page's session cookies, so a private tracker may refuse it.
 
 After unpacking a newer archive over the same path, or pulling a new version of
 these files, reload the extension on `chrome://extensions` — Chrome does not
@@ -440,8 +443,9 @@ that reason.
 - Only genuine left-clicks are captured; a click a page synthesised on a link it
   planted is ignored.
 - If a capture fails before the grab reaches the extension's service worker —
-  the `.torrent` fetch failed or timed out, or an extension reload orphaned the
-  page's content script — the click is replayed as a normal browser action: a
+  neither the page nor the worker could fetch the `.torrent`, or an extension
+  reload orphaned the page's content script — the click is replayed as a
+  normal browser action: a
   magnet goes to the OS handler, a `.torrent` downloads, and a link that
   wrapped a magnet is followed to the page it points at. The **Sending to
   putiorr…** item is taken back down with it, since the browser is about to do
@@ -453,7 +457,9 @@ that reason.
   either, and never replays the click.
 - Clicking the same link again while a capture is still in flight is dropped, so
   an impatient double-click does not create two transfers.
-- Fetches have deadlines: 15s for the in-page `.torrent` fetch and for **Test
+- Fetches have deadlines: 15s for a `.torrent` fetch — the page's and the
+  worker's rescue alike, so a hung download host cannot leave the toast up for
+  the life of the tab — and for **Test
   connection & load profiles**, 25s for the worker's request to putiorr (putiorr
   waits on put.io while adding the transfer, so it needs the headroom, but the
   deadline stays under the 30s at which Chrome retires an idle worker).
@@ -566,10 +572,25 @@ does to every other putiorr route.
 
 ## Known Limitations
 
-- Cross-origin `.torrent` links are fetched by the content script and are
-  therefore subject to the page's CORS policy; a host that does not allow the
-  page's origin fails the fetch and the click falls back to a normal browser
-  download.
+- A `.torrent` is fetched by the content script first, because only that fetch
+  carries the tracker's session cookies — and a fetch made from a page is
+  subject to that page's CORS policy, so a link that redirects to a separate
+  download host or CDN fails there. The service worker then fetches it instead:
+  it holds `host_permissions` and is not bound by the page's origin. That
+  request is not same-site with the tracker, so Chrome withholds every
+  `SameSite=Lax` cookie from it, and a tracker that gates downloads on its
+  session cookie can still refuse it — which is why the page is asked first and
+  this is a rescue rather than the route. Only when both fail does the click
+  fall back to a normal browser download.
+- The service worker will only fetch an `http(s)` link whose path ends in
+  `.torrent` — the same rule click capture uses — so it cannot be turned into a
+  general-purpose cross-origin proxy by anything that can message it. A link
+  the rescue fetches that answers with something other than a bencoded file
+  (an HTML login page returning `200`, which is where a redirect can land) is
+  treated as a failed fetch, so the click still falls back to the browser
+  instead of ending in a refusal from putiorr. A right-clicked link is not held
+  to the `.torrent` rule: it came from the user, and grabbing a
+  `download.php?id=…` is what the menu is for.
 - Links inside iframes are not captured (`all_frames` is not set in the
   manifest), so an embedded frame behaves as if the extension were not
   installed.

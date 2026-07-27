@@ -1,6 +1,7 @@
 import { encodeCredentials } from './lib/auth.js';
-import { magnetFromLink, sanitizeProfiles } from './lib/resolve.js';
+import { isTorrentLink, magnetFromLink, sanitizeProfiles } from './lib/resolve.js';
 import { SYNC_DEFAULTS } from './lib/settings.js';
+import { fetchTorrent, looksLikeMetainfo } from './lib/torrent.js';
 
 const MENU_ROOT = 'putiorr-root';
 const MENU_CONFIGURE = 'putiorr-configure';
@@ -170,10 +171,69 @@ async function handleGrab(payload) {
   }
 }
 
+// The worker's own .torrent fetch, which exists because a page's cannot always
+// be made: a link that redirects to a download host or CDN leaves the page's
+// origin behind, the response carries no Access-Control-Allow-Origin, and the
+// fetch fails on a file that is perfectly reachable. This worker holds
+// host_permissions and is not bound by the page's CORS, so it can get the file
+// the page was refused.
+//
+// It is a rescue and stays one. The page is asked first everywhere, because
+// only the page's fetch carries the tracker's session cookies: a cross-site
+// request from here is not same-site with the tracker, so Chrome withholds
+// every SameSite=Lax cookie and a tracker that gates downloads on its session
+// refuses this attempt too.
+async function fetchTorrentHere(url) {
+  const file = await fetchTorrent(url);
+  // What a redirect can land on. An HTML login or error page answers 200 and
+  // would be uploaded to put.io as a torrent — putiorr refuses those, but a
+  // refusal from putiorr is the end of the road, while a rescue that reports
+  // failure still lets the click fall back to the browser and show the user
+  // the page the tracker actually sent.
+  if (!looksLikeMetainfo(file.torrentBase64)) throw new Error('that link did not answer with a .torrent file');
+  return file;
+}
+
+function isHttpLink(url) {
+  try {
+    const { protocol } = new URL(url);
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+// This worker is exempt from CORS, so a fetch it will make on request is a
+// fetch someone else cannot make for themselves — with the user's cookies
+// attached and the bytes handed back to the asker. It must therefore only
+// fetch what the extension would have fetched anyway: an http(s) link whose
+// path ends in .torrent, which is the same rule the content script captures
+// clicks on. Two things already narrow who may ask — the sender check below,
+// and the absence of externally_connectable in the manifest, which is what
+// stops a web page from messaging this worker at all — and this narrows what
+// may be asked, so a content script that a page had somehow bent to its will
+// still cannot turn the worker into a general-purpose proxy.
+async function handleLinkFetch(url) {
+  if (!isHttpLink(url) || !isTorrentLink(url)) {
+    return { ok: false, error: 'that is not a .torrent link the extension will fetch' };
+  }
+  try {
+    return { ok: true, ...(await fetchTorrentHere(url)) };
+  } catch (error) {
+    return { ok: false, error: error.message };
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Other installed extensions can message this worker; only our own content
   // script may spend the user's put.io account.
   if (sender?.id !== chrome.runtime.id) return undefined;
+  if (message?.kind === 'fetch-torrent') {
+    handleLinkFetch(message?.url)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, error: error.message }));
+    return true;
+  }
   if (message?.kind !== 'grab') return undefined;
   // The .catch matters: an unhandled rejection would close the message port
   // silently and a magnet click (already preventDefault-ed) would do nothing.
@@ -326,12 +386,36 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       notify('putiorr grab failed', 'No tab available to fetch the link');
       return;
     }
-    // Fetch the .torrent from the page context so tracker session cookies apply.
-    const fetched = await chrome.tabs.sendMessage(tab.id, { kind: 'fetch-link', url: linkUrl });
-    if (!fetched?.ok) throw new Error(fetched?.error ?? 'failed to fetch the link');
+    // Fetch the .torrent from the page context so tracker session cookies
+    // apply, and fall back to this worker's own fetch when that cannot be
+    // done — the page is subject to CORS and to having no content script in it
+    // at all, and neither says anything about whether the file can be had.
+    // The rescue is not held to the .torrent path rule the message handler
+    // applies: this URL is a link the user right-clicked, not one a page
+    // asked for, and grabbing a "download.php?id=…" is the whole reason the
+    // menu exists.
+    let file = null;
+    let pageError;
+    try {
+      const fetched = await chrome.tabs.sendMessage(tab.id, { kind: 'fetch-link', url: linkUrl });
+      if (fetched?.ok) file = fetched;
+      else pageError = new Error(fetched?.error ?? 'failed to fetch the link');
+    } catch (error) {
+      pageError = error;
+    }
+    if (!file && isHttpLink(linkUrl)) {
+      file = await fetchTorrentHere(linkUrl).catch((error) => {
+        console.warn('the extension could not fetch the link either', error);
+        return null;
+      });
+    }
+    // The page's failure is the one reported: it is the attempt that had the
+    // tracker's cookies, so its 403 or its 404 is the answer that means
+    // something to the user. The rescue only ever adds a way to succeed.
+    if (!file) throw pageError ?? new Error('failed to fetch the link');
     await drawOnTab(tab.id, feedbackId, await handleGrab({
-      torrentBase64: fetched.torrentBase64,
-      filename: fetched.filename,
+      torrentBase64: file.torrentBase64,
+      filename: file.filename,
       pageUrl,
       profileId,
     }));

@@ -111,7 +111,7 @@ function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, se
     },
   };
 
-  return { chrome, log, notifications, tabMessages, listeners };
+  return { chrome, log, notifications, tabMessages, listeners, warnings: [] };
 }
 
 async function loadWorker(options = {}) {
@@ -120,6 +120,10 @@ async function loadWorker(options = {}) {
   globalThis.fetch = options.fetch ?? (async () => {
     throw new Error('fetch not stubbed');
   });
+  // The rescue fetch is supposed to say so when it fails, and several tests
+  // below make it fail on purpose; capturing keeps that expected noise out of
+  // the suite output and makes it assertable.
+  globalThis.console = { ...console, warn: (...args) => harness.warnings.push(args.map(String).join(' ')) };
 
   const url = new URL(WORKER_URL);
   url.search = `?load=${++workerLoad}`;
@@ -852,6 +856,252 @@ test('grab messages from other extensions are ignored', async () => {
   assert.equal(result, undefined, 'the port must not be held open for a foreign sender');
   assert.equal(responded, false);
   assert.equal(fetched, false, 'a foreign extension must not be able to spend the put.io account');
+});
+
+// What a tracker's download host actually answers with. The redirect that got
+// there is invisible from here: fetch follows it and hands back the final
+// response, which is the whole reason the worker can get a file the page cannot.
+function trackerResponse(bytes, headers = {}) {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers(headers),
+    arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+  };
+}
+
+function askForLink(harness, url, sender = { id: 'putiorr-extension-id' }) {
+  return new Promise((resolve) => {
+    const held = harness.listeners.message({ kind: 'fetch-torrent', url }, sender, resolve);
+    assert.equal(held, true, 'the port must stay open for the async fetch');
+  });
+}
+
+test('a .torrent the page could not fetch is fetched here, where CORS does not apply', async () => {
+  // Issue #97: the link redirects to a separate download host, the page's fetch
+  // is refused by CORS, and this worker — which holds host_permissions and is
+  // not bound by the page's origin — is the one thing left that can get it.
+  const bytes = new Uint8Array([0x64, 0x38, 0x3a, 0x61]);
+  let request;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'Movies' }] },
+    fetch: async (url, init) => {
+      request = { url: String(url), init };
+      return trackerResponse(bytes, { 'content-disposition': 'attachment; filename="Rescued Release.torrent"' });
+    },
+  });
+
+  const response = await askForLink(harness, 'https://file.onejav.test/torrents/abc/2/name.torrent');
+
+  assert.deepEqual(response, {
+    ok: true,
+    torrentBase64: Buffer.from(bytes).toString('base64'),
+    filename: 'Rescued Release.torrent',
+  });
+  assert.equal(request.url, 'https://file.onejav.test/torrents/abc/2/name.torrent');
+  // Cookies are still asked for. They will not include a SameSite=Lax one —
+  // this request is not same-site with the tracker — which is exactly why the
+  // page is asked first and this is only ever the rescue.
+  assert.equal(request.init.credentials, 'include');
+  // A download host that stalls must not hold the page's acknowledgement up for
+  // the life of the tab: the deadline is what turns that into a fallback.
+  assert.ok(request.init.signal instanceof AbortSignal, 'the rescue fetch must carry a timeout signal');
+  assert.equal(request.init.signal.aborted, false);
+});
+
+test('the worker fetches only the links the extension would have fetched itself', async () => {
+  // The worker is exempt from CORS, so a fetch it makes on request is a fetch
+  // the asker could not make themselves — with cookies attached and the bytes
+  // handed back. Anything wider than "an http(s) link ending in .torrent" is a
+  // cross-origin proxy with the user's credentials on it.
+  let fetched = 0;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async () => {
+      fetched += 1;
+      return trackerResponse(new Uint8Array([0x64, 0x65]));
+    },
+  });
+
+  const refused = [
+    'https://tracker.test/account/settings',
+    'https://tracker.test/api/keys?format=torrent',
+    'file:///Users/someone/.ssh/id_rsa.torrent',
+    'data:application/x-bittorrent;base64,ZGU=',
+    'javascript:fetch("/x.torrent")',
+    'chrome-extension://abcdefg/lib/settings.js',
+    'not a url at all',
+    '',
+    undefined,
+  ];
+
+  for (const url of refused) {
+    // eslint-disable-next-line no-await-in-loop
+    const response = await askForLink(harness, url);
+    assert.equal(response.ok, false, `${url} should have been refused`);
+    assert.match(response.error, /not a \.torrent link/);
+  }
+  assert.equal(fetched, 0, 'nothing outside the rule may reach the network');
+
+  // And the rule it is held to is the one the content script captures on.
+  const allowed = await askForLink(harness, 'https://cdn.tracker.test/files/9.TORRENT?passkey=secret');
+  assert.equal(allowed.ok, true);
+  assert.equal(fetched, 1);
+});
+
+test('a rescue that lands on a login page is a failed fetch, not a grab putiorr must refuse', async () => {
+  // A redirect can end on an HTML error or login page that answers 200. putiorr
+  // would refuse those bytes, and correctly — but a refusal from putiorr is the
+  // end of the road, while a failed fetch still lets the click fall back to the
+  // browser and put the tracker's own page in front of the user.
+  const html = new TextEncoder().encode('<!doctype html><title>Log in</title>');
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async () => trackerResponse(html, { 'content-type': 'text/html' }),
+  });
+
+  const response = await askForLink(harness, 'https://tracker.test/dl/9.torrent');
+
+  assert.equal(response.ok, false);
+  assert.match(response.error, /did not answer with a \.torrent file/);
+});
+
+test('a rescue the download host never answers is reported, not left pending', async () => {
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    // What AbortSignal.timeout actually produces once it fires.
+    fetch: async () => {
+      throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    },
+  });
+
+  const response = await askForLink(harness, 'https://tracker.test/dl/9.torrent');
+
+  assert.deepEqual(response, { ok: false, error: 'The operation was aborted due to timeout' });
+});
+
+test('the rescue deadline is the page\'s, so two attempts cannot outlive the worker', async () => {
+  // Chrome retires an idle MV3 worker at 30s, and a rescue is the second of two
+  // fetches on one click. Both are held to this one budget.
+  const source = readFileSync(new URL('../extension/lib/torrent.js', import.meta.url), 'utf8');
+  const timeout = Number(source.match(/export const FETCH_TIMEOUT_MS = (\d+);/)?.[1]);
+  assert.ok(timeout > 0 && timeout <= 15000, `FETCH_TIMEOUT_MS must stay within 15000, got ${timeout}`);
+});
+
+test('a link fetch asked for by another extension is ignored', async () => {
+  let fetched = false;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [] },
+    fetch: async () => {
+      fetched = true;
+      return trackerResponse(new Uint8Array([0x64, 0x65]));
+    },
+  });
+
+  let responded = false;
+  const result = harness.listeners.message(
+    { kind: 'fetch-torrent', url: 'https://tracker.test/dl/9.torrent' },
+    { id: 'some-other-extension' },
+    () => { responded = true; },
+  );
+  await settle();
+
+  assert.equal(result, undefined, 'the port must not be held open for a foreign sender');
+  assert.equal(responded, false);
+  assert.equal(fetched, false, 'a foreign extension must not borrow this worker to fetch with');
+});
+
+test('a right-clicked link the page cannot fetch is fetched here instead', async () => {
+  // The menu path fetches from the page for the same reason and is refused for
+  // the same reason. Without the rescue the documented way around an awkward
+  // download URL fails on exactly the trackers that need it.
+  const bytes = new Uint8Array([0x64, 0x65]);
+  let body;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async (tabId, message) => (message.kind === 'fetch-link'
+      ? { ok: false, error: 'Failed to fetch' }
+      : { ok: true }),
+    fetch: async (url, init) => {
+      if (String(url).includes('putiorr.test')) {
+        body = JSON.parse(init.body);
+        return { ok: true, status: 200, json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: { name: 'Example' } }) };
+      }
+      return trackerResponse(bytes, { 'content-disposition': 'attachment; filename=Rescued.torrent' });
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'https://tracker.x.example/download.php?id=5' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  // Not held to the .torrent path rule: this URL was right-clicked by the user,
+  // and a "download.php?id=…" is the reason the menu exists at all.
+  assert.equal(body.torrentBase64, Buffer.from(bytes).toString('base64'));
+  assert.equal(body.filename, 'Rescued.torrent');
+  const feedback = harness.tabMessages.filter((message) => message.kind === 'grab-feedback');
+  assert.deepEqual(feedback.at(-1).result, { ok: true, profileName: 'TV', transferName: 'Example' });
+  assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
+});
+
+test('a right-click grab in a tab with no content script is fetched here rather than refused', async () => {
+  // Every tab open before the extension loaded has no content script, and the
+  // answer to that used to be "Reload the page, then try again". The worker can
+  // simply fetch the link.
+  const bytes = new Uint8Array([0x64, 0x65]);
+  let body;
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async () => {
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    },
+    fetch: async (url, init) => {
+      if (String(url).includes('putiorr.test')) {
+        body = JSON.parse(init.body);
+        return { ok: true, status: 200, json: async () => ({ ok: true, profile: { id: 3, name: 'TV' }, transfer: { name: 'Example' } }) };
+      }
+      return trackerResponse(bytes);
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'https://tracker.x.example/file.torrent' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  assert.equal(body.torrentBase64, Buffer.from(bytes).toString('base64'));
+  assert.deepEqual(harness.notifications.map((entry) => entry.title), ['Sent to putiorr → TV']);
+});
+
+test('a right-clicked link nobody can fetch is reported in the page\'s words, not the rescue\'s', async () => {
+  // The page's attempt is the one that carried the tracker's session cookies,
+  // so its refusal is the one that means something. The rescue only ever adds
+  // a way to succeed.
+  const harness = await loadWorker({
+    sync: { baseUrl: 'http://putiorr.test', profiles: [{ id: 3, name: 'TV' }] },
+    sendMessage: async (tabId, message) => (message.kind === 'fetch-link'
+      ? { ok: false, error: 'fetch failed with 403' }
+      : { ok: true }),
+    fetch: async () => {
+      throw new TypeError('Failed to fetch');
+    },
+  });
+
+  await harness.listeners.menu(
+    { menuItemId: 'putiorr-profile-3', linkUrl: 'https://tracker.x.example/file.torrent' },
+    { id: 1, url: 'https://tracker.x.example/page' },
+  );
+  await settle();
+
+  const feedback = harness.tabMessages.filter((message) => message.kind === 'grab-feedback');
+  assert.deepEqual(feedback.at(-1).result, { ok: false, error: 'fetch failed with 403' });
+  assert.equal(harness.notifications[0].message, 'fetch failed with 403');
+  // Reported to the user in the page's words, but not thrown away: the rescue's
+  // own failure is the only record that a second attempt was even made.
+  assert.match(harness.warnings.join('\n'), /could not fetch the link either/);
 });
 
 test('a stalled putiorr is reported as not responding, and the fetch carries a deadline', async () => {

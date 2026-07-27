@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "putiorr grab",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Send magnet links and .torrent files to putiorr",
   "permissions": ["storage", "notifications", "contextMenus"],
   "host_permissions": ["<all_urls>"],
@@ -19,7 +19,7 @@
   },
   "options_page": "options.html",
   "web_accessible_resources": [
-    { "resources": ["lib/resolve.js", "lib/toast.js"], "matches": ["<all_urls>"] }
+    { "resources": ["lib/resolve.js", "lib/toast.js", "lib/torrent.js"], "matches": ["<all_urls>"] }
   ],
   "icons": {
     "16": "icons/icon16.png",
