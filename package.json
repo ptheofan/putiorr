@@ -10,6 +10,7 @@
   },
   "scripts": {
     "dev": "node --watch --disable-warning=ExperimentalWarning src/main.js",
+    "ext:package": "node scripts/package-extension.js",
     "lint": "node scripts/lint.js",
     "release:check": "pnpm release:gate",
     "release:create": "node scripts/create-release.js",
