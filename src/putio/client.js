@@ -1,4 +1,11 @@
 const DEFAULT_BASE_URL = 'https://api.put.io/v2';
+// put.io serves uploads from a host of its own, which its official Go SDK spells
+// out beside the API host (`defaultBaseURL = https://api.put.io`,
+// `defaultUploadURL = https://upload.put.io/v2/files/upload`). Posting metainfo
+// to the API host is answered with a 401 carrying the same sentence a rejected
+// token gets, so a perfectly good token looked invalid — and only ever for
+// .torrent uploads, because magnets go to /transfers/add on the API host.
+const DEFAULT_UPLOAD_URL = 'https://upload.put.io/v2/files/upload';
 
 // What put.io's own client asks for, and the ceiling it enforces.
 const FILES_PAGE_SIZE = 1000;
@@ -63,14 +70,23 @@ export function normalizeTransfer(transfer) {
 }
 
 export class PutioClient {
-  constructor({ token, baseUrl = DEFAULT_BASE_URL, fetchImpl = globalThis.fetch } = {}) {
+  constructor({
+    token,
+    baseUrl = DEFAULT_BASE_URL,
+    uploadUrl = DEFAULT_UPLOAD_URL,
+    fetchImpl = globalThis.fetch,
+  } = {}) {
     this.token = required(token, 'put.io token');
     this.baseUrl = baseUrl.replace(/\/+$/, '');
+    this.uploadUrl = uploadUrl;
     this.fetch = required(fetchImpl, 'fetch implementation');
   }
 
+  // An absolute URL is taken as given, so a caller on another put.io host —
+  // uploads are the one that is — still gets the auth header and the error
+  // handling every other call has.
   async request(path, options = {}) {
-    const url = new URL(`${this.baseUrl}${path}`);
+    const url = new URL(/^https?:\/\//i.test(path) ? path : `${this.baseUrl}${path}`);
     if (options.query) {
       for (const [key, value] of Object.entries(options.query)) {
         if (value != null) url.searchParams.set(key, String(value));
@@ -139,7 +155,7 @@ export class PutioClient {
     form.set('file', new Blob([data]), filename);
     form.set('parent_id', String(folderId));
 
-    const body = await this.request('/files/upload', {
+    const body = await this.request(this.uploadUrl, {
       method: 'POST',
       body: form,
     });
