@@ -237,3 +237,33 @@ test('PutioClient refuses a cursor that never ends rather than looping forever',
 
   await assert.rejects(() => client.listFiles(0), /too many pages/);
 });
+
+// put.io serves uploads from a host of its own — its official Go SDK carries
+// both, `defaultBaseURL = https://api.put.io` and
+// `defaultUploadURL = https://upload.put.io/v2/files/upload`. Posting metainfo
+// to the API host answers 401 with the same sentence a rejected token gets, so
+// a valid token looked invalid and only ever for .torrent uploads: magnets go
+// to /transfers/add on the API host and were unaffected.
+test('a .torrent is uploaded to put.io\'s upload host, not the API host', async () => {
+  const ok = createFetch([{ body: { transfer: { id: 7, name: 'Torrent' } } }]);
+  const client = new PutioClient({ token: 'token', fetchImpl: ok.fetchImpl });
+
+  await client.uploadTorrent(Buffer.from('d1:ee'), 'file.torrent', 12);
+
+  assert.equal(ok.calls[0].url, 'https://upload.put.io/v2/files/upload');
+  assert.equal(ok.calls[0].options.headers.get('Authorization'), 'Bearer token');
+});
+
+test('the upload host is configurable alongside the API host', async () => {
+  const ok = createFetch([{ body: { transfer: { id: 8 } } }]);
+  const client = new PutioClient({
+    token: 'token',
+    baseUrl: 'https://api.example.test/v2',
+    uploadUrl: 'https://upload.example.test/v2/files/upload',
+    fetchImpl: ok.fetchImpl,
+  });
+
+  await client.uploadTorrent(Buffer.from('d1:ee'), 'file.torrent', 3);
+
+  assert.equal(ok.calls[0].url, 'https://upload.example.test/v2/files/upload');
+});
