@@ -48,8 +48,11 @@ import {
   withCatchAllTakeoverNote,
   withoutCatchAllTakeover,
   renderCatchAllTakeover,
+  renderKeepDownloadFolder,
+  keepDownloadFolderConsequence,
+  KEEP_DOWNLOAD_FOLDER_LABEL,
 } from '../src/web/util.js';
-import { CATCH_ALL_CONFLICT_CODE } from '../src/web/constants.js';
+import { CATCH_ALL_CONFLICT_CODE, DOWNLOAD_FOLDER_LOCKED_CODE } from '../src/web/constants.js';
 
 // util.js takes every element it touches as an argument and reads only a
 // handful of properties off it, so these stand-ins are the whole environment it
@@ -776,6 +779,33 @@ test('the error api() throws keeps what the reply said beyond the sentence', () 
   assert.equal(apiError(503, {}).message, 'HTTP 503');
   assert.equal(apiError(503).code, undefined);
   assert.equal(apiError(400, { error: 'Profile not found' }).code, undefined);
+
+  // The same, for the refusal that protects a profile's downloads: the counts
+  // and the folder it still has are what the wizard renders its offer from.
+  const locked = apiError(400, {
+    error: 'RR profile Sonarr still owns 3 downloads staged under /downloads',
+    code: DOWNLOAD_FOLDER_LOCKED_CODE,
+    downloadFolderLock: { profile: { id: 2, name: 'Sonarr' }, downloads: 3, from: '/downloads', to: '/media' },
+  });
+  assert.equal(locked.code, DOWNLOAD_FOLDER_LOCKED_CODE);
+  assert.deepEqual(locked.downloadFolderLock, {
+    profile: { id: 2, name: 'Sonarr' },
+    downloads: 3,
+    from: '/downloads',
+    to: '/media',
+  });
+  assert.equal(apiError(400, { error: 'Profile not found' }).downloadFolderLock, undefined);
+});
+
+// The wizard is still showing the folder the server refused, so every later
+// save is refused too until it goes back. The offer says what putting it back
+// costs and what it buys, the way the takeover offer does.
+test('the refused download folder can be put back from the message itself', () => {
+  assert.equal(KEEP_DOWNLOAD_FOLDER_LABEL, 'Keep the folder this profile has');
+  assert.equal(
+    keepDownloadFolderConsequence('/downloads'),
+    ' — the folder goes back to /downloads and the rest of this profile is saved.',
+  );
 });
 
 // The wizard re-submits the payload it already had, with the intent added, so
@@ -843,6 +873,46 @@ test('the refusal offers the takeover as an action, and still reads without it',
 
     link.listeners.click({ preventDefault: () => {} });
     assert.deepEqual(clickedWith, { id: 4, name: 'MOVIES' });
+  } finally {
+    globalThis.document = previousDocument;
+  }
+});
+
+// The same offer, for the refusal that keeps a profile's download folder where
+// its downloads' files are. Rendered onto the sentence the user is already
+// reading, so the explanation and the way out are one paragraph.
+test('the download folder refusal offers to put the folder back, and still reads without it', () => {
+  const previousDocument = globalThis.document;
+  const created = [];
+  globalThis.document = {
+    createElement: (tag) => {
+      const node = { tag, dataset: {}, listeners: {}, addEventListener: (type, fn) => { node.listeners[type] = fn; } };
+      created.push(node);
+      return node;
+    },
+    createTextNode: (text) => ({ tag: '#text', textContent: text }),
+  };
+  try {
+    const appended = [];
+    const element = { append: (...nodes) => appended.push(...nodes) };
+    const lock = { profile: { id: 2, name: 'Sonarr' }, downloads: 3, from: '/downloads', to: '/media' };
+    let clickedWith;
+
+    renderKeepDownloadFolder(element, lock, (target) => { clickedWith = target; });
+
+    const link = created[0];
+    assert.equal(link.tag, 'button');
+    assert.equal(link.type, 'button');
+    assert.equal(link.textContent, KEEP_DOWNLOAD_FOLDER_LABEL);
+    assert.equal(link.dataset.testid, 'profile-download-folder-keep');
+    assert.deepEqual(appended.map((node) => node.textContent), [
+      '\n\nOr: ',
+      'Keep the folder this profile has',
+      ' — the folder goes back to /downloads and the rest of this profile is saved.',
+    ]);
+
+    link.listeners.click({ preventDefault: () => {} });
+    assert.deepEqual(clickedWith, lock);
   } finally {
     globalThis.document = previousDocument;
   }
