@@ -9,6 +9,24 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [3.0.6] — 2026-07-27
+
+### Changed
+
+- **A put.io transfer putiorr cannot place is now ignored quietly.** The
+  dashboard used to report it and tell you to give each RR profile its own
+  put.io folder — advice that contradicted the recommended setup, where every
+  profile shares one folder, and that asked for a whole put.io reorganisation
+  over a single stray transfer. The notice, its stored state and its per-poll
+  warning are gone.
+
+  Nothing about what gets downloaded changed: a transfer whose folder maps to
+  exactly one enabled profile is still adopted, and one that does not is still
+  left alone on put.io — now without the noise. Set `PUTIORR_LOG_LEVEL=debug` if
+  you ever need to ask why a particular transfer was skipped.
+
+  Installs carrying the old notice have it cleared on first start.
+
 ## [3.0.5] — 2026-07-27
 
 ### Fixed
