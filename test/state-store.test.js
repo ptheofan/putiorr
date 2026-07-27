@@ -492,6 +492,140 @@ test('profiles with linked downloads cannot be deleted', () => {
   }
 });
 
+// Issue #68. The files stay where they are and the staging folder is frozen,
+// so a moved root points putiorr at a directory the files are not in — and the
+// next poll reads a finished download whose files are missing as user-deleted,
+// cancels its put.io transfer and deletes the row over it.
+function seedOwnedDownload(store, profile, overrides = {}) {
+  return store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 500,
+    hash: 'ownedhash',
+    name: 'Owned.Release',
+    lifecycle: 'processed',
+    ...overrides,
+  });
+}
+
+test('a profile that owns downloads refuses to move its download folder', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    seedOwnedDownload(store, profile);
+    seedOwnedDownload(store, profile, { putio_transfer_id: 501, hash: 'ownedhash501' });
+
+    const error = thrownBy(() => store.updateProfile(profile.id, { downloadAt: '/media/tv' }));
+    assert.match(error.message, /Sonarr still owns 2 downloads staged under \/downloads/);
+    assert.match(error.message, /pointing it at \/media\/tv/);
+    // The two ways out, named: nothing here is a dead end.
+    assert.match(error.message, /finish and leave putiorr/);
+    assert.match(error.message, /delete them from the dashboard/);
+    // Branchable without matching prose, exactly as the catch-all refusal is.
+    assert.deepEqual(error.downloadFolderLock, {
+      profile: { id: profile.id, name: 'Sonarr' },
+      downloads: 2,
+      from: '/downloads',
+      to: '/media/tv',
+    });
+    assert.equal(store.findProfileById(profile.id).download_at, '/downloads');
+  } finally {
+    store.close();
+  }
+});
+
+test('a refused download folder move writes nothing else in the same patch', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    seedOwnedDownload(store, profile);
+
+    assert.throws(
+      () => store.updateProfile(profile.id, { name: 'Renamed', downloadAt: '/media/tv' }),
+      /still owns 1 download staged under/,
+    );
+    const unchanged = store.findProfileById(profile.id);
+    assert.equal(unchanged.name, 'Sonarr');
+    assert.equal(unchanged.download_at, '/downloads');
+    assert.equal(unchanged.updated_at, profile.updated_at);
+  } finally {
+    store.close();
+  }
+});
+
+test('a profile that owns downloads still saves while its download folder stands', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    seedOwnedDownload(store, profile);
+
+    // Not a change: the wizard sends the folder back on every save, and a
+    // profile that owns downloads has to stay editable.
+    const renamed = store.updateProfile(profile.id, { name: 'Renamed', downloadAt: '/downloads' });
+    assert.equal(renamed.name, 'Renamed');
+    assert.equal(renamed.download_at, '/downloads');
+    // Nor is a folder spelled differently for the same directory.
+    const trailingSlash = store.updateProfile(profile.id, { downloadAt: '/downloads/' });
+    assert.equal(trailingSlash.download_at, '/downloads');
+    assert.equal(store.updateProfile(profile.id, { downloadAt: '/downloads/./' }).download_at, '/downloads');
+    // And a patch that never mentions the folder is not a folder change.
+    assert.equal(store.updateProfile(profile.id, { enabled: false }).download_at, '/downloads');
+  } finally {
+    store.close();
+  }
+});
+
+test('a profile that owns no downloads moves its download folder freely', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    assert.equal(store.updateProfile(profile.id, { downloadAt: '/media/tv' }).download_at, '/media/tv');
+
+    // And it is free again once the downloads that held it are gone.
+    const download = seedOwnedDownload(store, profile);
+    assert.throws(() => store.updateProfile(profile.id, { downloadAt: '/media/shows' }), /still owns 1 download/);
+    store.deleteDownload(download.id);
+    assert.equal(store.updateProfile(profile.id, { downloadAt: '/media/shows' }).download_at, '/media/shows');
+  } finally {
+    store.close();
+  }
+});
+
+test('a download deleted from the dashboard still holds the folder its files are in', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    const download = seedOwnedDownload(store, profile);
+    // Tombstoned, not gone: "remove from putiorr, keep the files" leaves the
+    // row removed and the folder full, and every staging claim still counts it.
+    store.markDownloadRemoved(download.id);
+
+    const error = thrownBy(() => store.updateProfile(profile.id, { downloadAt: '/media/tv' }));
+    assert.equal(error.downloadFolderLock.downloads, 1);
+    assert.equal(store.findProfileById(profile.id).download_at, '/downloads');
+  } finally {
+    store.close();
+  }
+});
+
+// A 'remote' download has no files of its own yet — and that is not the same as
+// nothing on disk. The staging folder is claimed, and a part-file resumed from,
+// while the row is still 'remote'; the *arr has already been told the
+// download-dir; and nothing records the files a user dropped in beside them.
+test('a download that has not started yet holds the folder just as firmly', () => {
+  const store = new StateStore(':memory:');
+  try {
+    const profile = seedProfile(store);
+    seedOwnedDownload(store, profile, { lifecycle: 'remote' });
+
+    assert.throws(
+      () => store.updateProfile(profile.id, { downloadAt: '/media/tv' }),
+      /still owns 1 download staged under \/downloads/,
+    );
+  } finally {
+    store.close();
+  }
+});
+
 test('migration enables auto-remove for existing prowlarr profiles once', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'putiorr-store-'));
   const dbPath = path.join(root, 'state.sqlite');

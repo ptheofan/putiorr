@@ -57,6 +57,12 @@ export const GRAB_PROFILE_TYPE = 'grab';
 // matching prose — a boundary this codebase has been bitten across before.
 // Imported by the server as well as the wizard: one string, one definition.
 export const CATCH_ALL_CONFLICT_CODE = 'catch_all_conflict';
+// What a profile save refused for moving its download folder rides on, next to
+// the sentence and the counts, for the same reason the catch-all conflict does:
+// the wizard puts the folder back in one click, and deciding that from the
+// prose would break on the next reword. Imported by the store as well as the
+// wizard: one string, one definition.
+export const DOWNLOAD_FOLDER_LOCKED_CODE = 'download_folder_locked';
 // The endpoint every Transmission client reaches by default. It belongs to one
 // *arr profile or to none; it is never a Putiorr Grab profile's path, and the
 // server refuses it outright once more than one *arr profile could have meant it.
