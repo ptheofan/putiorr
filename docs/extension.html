@@ -46,9 +46,9 @@
         <p>
           The extension captures the magnet links and <code>.torrent</code>
           downloads you click and hands them to putiorr. It is distributed from
-          the putiorr repository and loaded unpacked, so the first job is getting
-          a copy of the files onto the computer running Chrome — not onto the NAS
-          running putiorr.
+          the putiorr repository — packed onto each release, or taken from a
+          clone — and loaded unpacked, so the first job is getting the files
+          onto the computer running Chrome, not onto the NAS running putiorr.
         </p>
       </section>
 
@@ -94,11 +94,28 @@
           <section id="get-files" class="doc-section">
             <h2>Get the files</h2>
             <p>
-              No packaged extension is published. A release ships the container
-              image and GitHub's own source archives; there is no
-              <code>.crx</code> and no separate extension download, so the copy
-              you load is a copy of the repository's <code>extension/</code>
-              folder. Two ways to get one:
+              The extension is not on the Chrome Web Store, so whichever route
+              you take you end up with a folder on disk that Chrome loads
+              unpacked. There is no <code>.crx</code>. The quickest route is the
+              packed archive attached to a release.
+            </p>
+            <h3>Download the packed extension from a release</h3>
+            <p>
+              Each release on the
+              <a href="https://github.com/ptheofan/putiorr/releases">releases
+              page</a> carries <code>putiorr-grab-&lt;version&gt;.zip</code>
+              under <strong>Assets</strong> — the extension alone, already
+              stripped of everything that is not part of it. Download it and
+              unpack it into a folder you intend to keep; that folder, the one
+              holding <code>manifest.json</code>, is what you load.
+            </p>
+            <p>
+              The number on the archive is the <em>extension's</em> version, from
+              its own <code>manifest.json</code>, and it moves independently of
+              putiorr's: a putiorr release that changed nothing in the extension
+              re-attaches the same number. The asset is built by the release
+              workflow, so releases published before that workflow existed have
+              no such file under Assets — take it from the newest release.
             </p>
             <h3>Clone the repository</h3>
             <p>
@@ -109,21 +126,22 @@
 # the folder to load is putiorr/extension</code></pre>
             <h3>Download a source archive</h3>
             <p>
-              Best when the browser machine has no git. Every tag has a source
-              archive at a fixed URL — tags are named <code>vX.Y.Z</code>, and
-              <code>.tar.gz</code> works in place of <code>.zip</code>:
+              The fallback when the browser machine has no git and you want a
+              specific tag. Every tag has a source archive at a fixed URL — tags
+              are named <code>vX.Y.Z</code>, and <code>.tar.gz</code> works in
+              place of <code>.zip</code>:
             </p>
             <pre><code>https://github.com/ptheofan/putiorr/archive/refs/tags/&lt;tag&gt;.zip
 
 # for example
 https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
             <p>
-              The same archives are linked from each release on the
-              <a href="https://github.com/ptheofan/putiorr/releases">releases
-              page</a>, under <strong>Source code</strong>. The archive unpacks
-              to a folder named after the tag without its leading <code>v</code>
-              — <code>putiorr-2.0.3/</code> — and the folder to load is
-              <code>putiorr-2.0.3/extension</code>.
+              The same archives are linked from each release, under
+              <strong>Source code</strong>. Do not confuse the two: a source
+              archive is the whole repository and unpacks to a folder named after
+              the tag without its leading <code>v</code> —
+              <code>putiorr-2.0.3/</code> — and the folder to load is
+              <code>putiorr-2.0.3/extension</code>, not the folder above it.
             </p>
             <p class="doc-note">
               Take the extension from the same version of putiorr you run. An
@@ -167,7 +185,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
             <ol>
               <li>Open <code>chrome://extensions</code>.</li>
               <li>Turn on <strong>Developer mode</strong> with the toggle at the top right, and leave it on. Chrome 134 and later disable an unpacked extension whenever Developer mode is off, so this is a permanent setting rather than an install step.</li>
-              <li>Click <strong>Load unpacked</strong> and select the <code>extension/</code> folder itself — the one that contains <code>manifest.json</code> — not the repository root above it.</li>
+              <li>Click <strong>Load unpacked</strong> and select the folder that contains <code>manifest.json</code> itself — the folder the release archive unpacked to, or the clone's <code>extension/</code> directory — never the folder above it.</li>
               <li>Reload any tabs that were already open. Pages loaded before the extension have no content script, so clicks on them are not captured and the right-click menu answers "Reload the page, then try again" for <code>.torrent</code> links.</li>
             </ol>
             <p>
@@ -186,7 +204,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
             </p>
             <ol>
               <li>Enter the <strong>putiorr URL</strong>, such as <code>http://nas:9091</code>. It must be the root URL of the host, with no path, query, or fragment; putiorr cannot be served from a subpath, so a URL with one is refused rather than silently trimmed.</li>
-              <li>If putiorr sits behind Basic auth, fill in <strong>Username</strong> and <strong>Password</strong>. They are kept in local extension storage, not in the Google-account-synced storage that holds the rest of the settings.</li>
+              <li>If putiorr sits behind Basic auth, fill in <strong>Username</strong> and <strong>Password</strong>. They are kept in local extension storage, not in the Google-account-synced storage that holds the rest of the settings — the <a href="privacy.html">privacy policy</a> sets out exactly what is stored where, and the only two places the extension ever sends anything.</li>
               <li>Click <strong>Test connection &amp; load profiles</strong>. putiorr answers with its Putiorr Grab profiles only, and the card lists what each one takes, including which one takes the sites no profile claims.</li>
               <li>Press <strong>Save</strong>. Loading only fills the page; nothing is stored until you save.</li>
               <li>Leave <strong>Auto-capture magnet and .torrent clicks</strong> on, or switch it off to grab exclusively through the right-click menu.</li>
@@ -217,7 +235,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
               steps, and the second is the one that is easy to forget:
             </p>
             <ol>
-              <li>Refresh the files in place — <code>git pull</code> in the clone, or unpack the new archive over the same path so the path does not change.</li>
+              <li>Refresh the files in place — <code>git pull</code> in the clone, or unpack the new release archive over the same path so the path does not change.</li>
               <li>Open <code>chrome://extensions</code> and click the reload icon on the <strong>putiorr grab</strong> card. The manifest, the service worker, and the content scripts are only re-read then.</li>
               <li>Reload any tabs you had open, for the same reason as on a fresh install: their content script is the old one.</li>
             </ol>
@@ -255,6 +273,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
             </p>
             <div class="doc-actions">
               <a class="button primary" href="configuration.html#browser-grabs">Configure browser grabs</a>
+              <a class="button secondary" href="privacy.html">Privacy policy</a>
               <a class="button secondary" href="documentation.html">Back to docs</a>
             </div>
           </section>
@@ -274,6 +293,7 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
         <a href="configuration.html">Configuration</a>
         <a href="agent-setup.html">Agent guide</a>
         <a href="putio-oauth-relay.html">OAuth relay</a>
+        <a href="privacy.html">Privacy</a>
       </nav>
     </footer>
   </body>

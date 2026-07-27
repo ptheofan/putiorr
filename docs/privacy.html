@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0f766e">
+    <meta name="description" content="Privacy policy for the putiorr grab Chrome extension: what it stores, the only two places it sends anything, and why it needs access to every site.">
+    <title>Privacy policy - putiorr grab Chrome extension</title>
+    <link rel="canonical" href="https://ptheofan.github.io/putiorr/privacy.html">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="putiorr">
+    <meta property="og:title" content="Privacy policy - putiorr grab Chrome extension">
+    <meta property="og:description" content="Privacy policy for the putiorr grab Chrome extension: what it stores, the only two places it sends anything, and why it needs access to every site.">
+    <meta property="og:url" content="https://ptheofan.github.io/putiorr/privacy.html">
+    <meta property="og:image" content="https://ptheofan.github.io/putiorr/screenshots/dashboard-overview.png">
+    <meta property="og:image:width" content="1440">
+    <meta property="og:image:height" content="1200">
+    <meta property="og:image:alt" content="putiorr dashboard showing RR profile cards, download profile controls, and current downloads panel.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Privacy policy - putiorr grab Chrome extension">
+    <meta name="twitter:description" content="Privacy policy for the putiorr grab Chrome extension: what it stores, the only two places it sends anything, and why it needs access to every site.">
+    <meta name="twitter:image" content="https://ptheofan.github.io/putiorr/screenshots/dashboard-overview.png">
+    <meta name="twitter:image:alt" content="putiorr dashboard showing RR profile cards, download profile controls, and current downloads panel.">
+    <link rel="icon" href="favicon.ico?v=showcase" sizes="any">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32x32.png?v=showcase">
+    <link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png?v=showcase">
+    <link rel="stylesheet" href="showcase.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="putiorr home">
+        <img src="icons/putiorr-icon-64.png?v=showcase" alt="" width="40" height="40">
+        <span>putiorr</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="https://github.com/ptheofan/putiorr">GitHub</a>
+        <a href="documentation.html">Docs</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="doc-hero section">
+        <p class="doc-kicker">Privacy policy - putiorr grab</p>
+        <h1>The extension talks to your server and to the page you clicked. There is nowhere else.</h1>
+        <p>
+          I am ptheofan, and I write putiorr and its <strong>putiorr grab</strong>
+          Chrome extension on my own, as a personal project. There is no company
+          behind it and no service I run on your behalf: putiorr is software you
+          install on your own machine, and the extension is the browser half of
+          it. This page describes what the extension holds, where it sends
+          things, and why it asks for the permissions it asks for.
+        </p>
+        <p><strong>Last updated:</strong> 27 July 2026.</p>
+      </section>
+
+      <section class="doc-layout section">
+        <aside class="doc-toc" aria-label="Privacy policy sections">
+          <strong>On this page</strong>
+          <a href="#summary">The short version</a>
+          <a href="#stored">What it stores</a>
+          <a href="#sent">What it sends, and where</a>
+          <a href="#permissions">Why it needs each permission</a>
+          <a href="#not">What it does not do</a>
+          <a href="#removing">Removing what it holds</a>
+          <a href="#changes">Changes to this page</a>
+          <a href="#contact">Contact</a>
+        </aside>
+
+        <div class="doc-content">
+          <section id="summary" class="doc-section">
+            <h2>The short version</h2>
+            <ul>
+              <li>The extension sends what you grab to <strong>your own putiorr server</strong>, at the address you typed into its options. Nowhere else.</li>
+              <li>It also fetches the <code>.torrent</code> file you clicked <strong>from the site you clicked it on</strong> — the request your browser was about to make anyway.</li>
+              <li>Your putiorr username and password, if you set them, are kept in Chrome's <em>local</em> extension storage, deliberately, so they are not carried into your Google account.</li>
+              <li><strong>I receive nothing.</strong> There is no server of mine in the path, no analytics, no telemetry, no crash reporting, and no third party at all.</li>
+              <li>Nothing is sold, shared, or used to build a profile of you, because nothing ever reaches me to sell or share.</li>
+            </ul>
+            <p class="doc-note">
+              The whole extension is about 2,000 lines of JavaScript in the
+              <a href="https://github.com/ptheofan/putiorr/tree/main/extension">extension folder</a>
+              of the repository, under the AGPL. Everything on this page can be
+              checked against it — every network call it makes is a
+              <code>fetch</code> you can find by searching for one.
+            </p>
+          </section>
+
+          <section id="stored" class="doc-section">
+            <h2>What it stores</h2>
+            <p>
+              Everything the extension keeps lives in Chrome's extension storage
+              on your own computer. There are two areas, and the split between
+              them is deliberate.
+            </p>
+            <h3>Synced storage</h3>
+            <p>
+              Three settings live in <code>chrome.storage.sync</code>:
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr><th>What</th><th>Why it is there</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>baseUrl</code></td>
+                    <td>The address of your own putiorr, as you typed it — usually a private hostname like <code>http://nas:9091</code>. Without it the extension has nowhere to send a grab.</td>
+                  </tr>
+                  <tr>
+                    <td><code>autoCapture</code></td>
+                    <td>A single true/false: whether ordinary clicks on magnet and <code>.torrent</code> links are captured, or only right-click grabs.</td>
+                  </tr>
+                  <tr>
+                    <td><code>profiles</code></td>
+                    <td>The id and the name of each grab profile, copied from your putiorr the last time you pressed <strong>Test connection &amp; load profiles</strong> and saved. It is what fills the right-click menu when putiorr cannot be asked in time.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <strong>Be aware of what <code>sync</code> means.</strong> If you
+              have Chrome Sync switched on, Chrome may carry these three values
+              through your own Google account to your other Chrome
+              installations. That is Chrome's mechanism and your account, not
+              anything I run or can see — but it is real, and it is the reason
+              the next section exists. Of the three, only the profile
+              <em>names</em> say anything about you at all, and they say only
+              what you called your own folders.
+            </p>
+            <h3>Local storage</h3>
+            <p>
+              Two values live in <code>chrome.storage.local</code>, which Chrome
+              never synchronises:
+            </p>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr><th>What</th><th>Why it is there</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>username</code></td>
+                    <td rowspan="2">The optional HTTP Basic credentials for your own putiorr, for people who put one behind a password. They are sent to your putiorr as an <code>Authorization</code> header and used for nothing else. If your putiorr has no Basic auth, both stay empty and no such header is ever sent.</td>
+                  </tr>
+                  <tr>
+                    <td><code>password</code></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p class="doc-note">
+              These two are in <code>local</code> on purpose. A password does
+              not belong in storage that a browser may replicate through a cloud
+              account, even your own, so the credentials are kept where Chrome
+              will not carry them off the machine you typed them on. The cost of
+              that choice is that you type them again on each computer, and that
+              is the right trade.
+            </p>
+          </section>
+
+          <section id="sent" class="doc-section">
+            <h2>What it sends, and where</h2>
+            <p>
+              The extension makes requests to exactly two kinds of destination.
+              There is no third.
+            </p>
+
+            <h3>1. Your own putiorr, at the address you configured</h3>
+            <p>
+              Every request below goes to the <code>baseUrl</code> you typed and
+              to nowhere else. It is your server, on your network, holding your
+              data; I have no access to it.
+            </p>
+            <ul>
+              <li><strong>When you grab something</strong> — the magnet link, or the contents of the <code>.torrent</code> file, and its filename; the address of the page you were on and that page's hostname, so putiorr can work out which of your profiles the grab belongs to; and the profile id, when you picked one from the right-click menu.</li>
+              <li><strong>When you load profiles, or open the toolbar popup</strong> — a request asking putiorr to list your grab profiles, so the options page and the popup can show them.</li>
+              <li><strong>When you claim a site from the popup</strong> — the hostname shown in the popup's field, which you can edit before clicking, and the profile you picked for it. This adds the site to that profile in putiorr, which is the same edit you could make in the dashboard.</li>
+              <li><strong>With all of the above</strong> — your putiorr username and password as an <code>Authorization</code> header, if you set them.</li>
+            </ul>
+
+            <h3>2. The site you clicked the link on</h3>
+            <p>
+              A <code>.torrent</code> link has to be downloaded before it can be
+              handed to putiorr, and on a private tracker that download only
+              works while logged in. So the extension fetches the file from the
+              page you are already on, with that site's own cookies attached —
+              which is precisely the request your browser would have made had
+              the extension not been installed. It goes to the site you clicked,
+              it carries nothing the browser would not have carried, and the
+              file it returns goes to your putiorr and nowhere else.
+            </p>
+            <p class="doc-note">
+              A magnet link needs no such fetch: it is already the whole thing,
+              and it is read out of the link and sent straight to your putiorr.
+            </p>
+          </section>
+
+          <section id="permissions" class="doc-section">
+            <h2>Why it needs each permission</h2>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr><th>Permission</th><th>What it is for</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>storage</code></td>
+                    <td>To keep the settings described above. It is the only way an extension can remember your putiorr's address between clicks.</td>
+                  </tr>
+                  <tr>
+                    <td><code>notifications</code></td>
+                    <td>To tell you a grab was sent, or why it failed. A grab happens in the background with nothing on screen; without a notification a failure would be silent.</td>
+                  </tr>
+                  <tr>
+                    <td><code>contextMenus</code></td>
+                    <td>To put <strong>Send to putiorr</strong> in the right-click menu on a link, with your profiles under it. It is the only way to grab a link that Chrome would otherwise just download, and the only way to override the profile for one grab.</td>
+                  </tr>
+                  <tr>
+                    <td><code>&lt;all_urls&gt;</code> host access</td>
+                    <td>To fetch the <code>.torrent</code> from whichever tracker you clicked, and to reach your own putiorr, whose address is a private one only you know.</td>
+                  </tr>
+                  <tr>
+                    <td><code>&lt;all_urls&gt;</code> content script</td>
+                    <td>To notice a click on a magnet or <code>.torrent</code> link at all, and to draw the small acknowledgement in the corner of the page.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              <strong>Why it cannot ship a list of sites instead.</strong> Which
+              sites route to which profile is decided in <em>your</em> putiorr,
+              on your profiles, and can change at any time without the extension
+              being touched. The trackers people use are private and live on
+              domains only their members know; your putiorr lives on a hostname
+              only your network knows. Any list I could write into the manifest
+              would be a list of sites I guessed at — wrong for almost everyone,
+              and an odd thing to publish besides. So the extension asks for
+              every site and then does nothing on the overwhelming majority of
+              them: it watches for clicks on magnet and <code>.torrent</code>
+              links, and a page where you never click one is a page it never
+              acts on and never reports.
+            </p>
+            <p class="doc-note">
+              You can narrow this yourself. Chrome lets you set an extension's
+              site access to <strong>On click</strong> or to specific sites, from
+              <code>chrome://extensions</code> → <strong>Details</strong> →
+              <strong>Site access</strong>. The extension will then work only
+              where you allow it.
+            </p>
+          </section>
+
+          <section id="not" class="doc-section">
+            <h2>What it does not do</h2>
+            <ul>
+              <li><strong>There is no server of mine.</strong> The extension has no backend, no API of mine to call, no licence check, and no update channel other than Chrome's own.</li>
+              <li><strong>No analytics, no telemetry, no crash reporting.</strong> Not disabled by default — absent. There is no code in the extension that could send any.</li>
+              <li><strong>No third-party code, and no third-party requests.</strong> The extension bundles no libraries, loads no fonts, scripts, or images from anywhere, and contacts no service. Everything it runs ships inside the extension.</li>
+              <li><strong>It does not read the pages you visit.</strong> The content script watches for clicks on links and reads the link you clicked. It does not collect page content, form input, or your browsing history, and it sends nothing about a page you did not grab from.</li>
+              <li><strong>It does not touch your put.io account directly.</strong> Only putiorr talks to put.io; the extension talks only to putiorr.</li>
+              <li><strong>I receive nothing, so there is nothing for me to sell, share, or hand over.</strong> No data from the extension reaches me, and none can: there is no address in it that points at me.</li>
+            </ul>
+          </section>
+
+          <section id="removing" class="doc-section">
+            <h2>Removing what it holds</h2>
+            <p>
+              Everything is on your own machine, so removing it is entirely in
+              your hands:
+            </p>
+            <ul>
+              <li><strong>Clear the credentials</strong> by emptying the <strong>Username</strong> and <strong>Password</strong> fields in the options and pressing <strong>Save</strong>. Saving writes what is on screen, so empty fields overwrite what was stored.</li>
+              <li><strong>Remove everything</strong> by uninstalling the extension from <code>chrome://extensions</code>. Chrome deletes an extension's storage with the extension.</li>
+              <li><strong>If Chrome Sync carried the synced settings elsewhere,</strong> that copy is in your Google account and under your control there, alongside the rest of your Chrome data.</li>
+            </ul>
+            <p>
+              Whatever your grabs left behind on your putiorr is putiorr's, not
+              the extension's, and it is on your own hardware. This page covers
+              the extension.
+            </p>
+          </section>
+
+          <section id="changes" class="doc-section">
+            <h2>Changes to this page</h2>
+            <p>
+              If the extension starts storing or sending something not described
+              here, this page changes with it, in the same commit, and the date
+              at the top changes too. Its history is public: every revision is in
+              the <a href="https://github.com/ptheofan/putiorr/commits/main/docs/privacy.html">repository's
+              commit log</a>, so you can see for yourself what changed and when.
+            </p>
+          </section>
+
+          <section id="contact" class="doc-section">
+            <h2>Contact</h2>
+            <p>
+              Questions about this policy, or something in the code that does not
+              match what is written here, belong in the
+              <a href="https://github.com/ptheofan/putiorr/issues">issue tracker</a>.
+              Asking in the open is better for everyone: the answer stays where
+              the next person can find it, and a claim on this page that turns
+              out to be wrong should be corrected in public.
+            </p>
+            <div class="doc-actions">
+              <a class="button primary" href="extension.html">Extension guide</a>
+              <a class="button secondary" href="documentation.html">Back to docs</a>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <a class="brand small" href="./">
+        <img src="icons/putiorr-icon-32.png?v=showcase" alt="" width="28" height="28">
+        <span>putiorr</span>
+      </a>
+      <p>A stable put.io bridge for the *arr family.</p>
+      <nav aria-label="Footer navigation">
+        <a href="documentation.html">Docs</a>
+        <a href="setup.html">Setup</a>
+        <a href="configuration.html">Configuration</a>
+        <a href="extension.html">Extension</a>
+        <a href="agent-setup.html">Agent guide</a>
+        <a href="putio-oauth-relay.html">OAuth relay</a>
+      </nav>
+    </footer>
+  </body>
+</html>
