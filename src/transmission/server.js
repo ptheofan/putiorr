@@ -35,6 +35,10 @@ const UNIQUE_PROFILE_COLUMN = /UNIQUE constraint failed: profiles\.(\w+)/;
 // The shape of the endpoint grab profiles used to derive, kept as a static
 // route so an *arr still pointed at it gets a sentence rather than the SPA.
 const GRAB_RPC_PATH_PATTERN = /^\/grab\/[^/]+\/rpc$/;
+// The only two Sec-Fetch-Site values that mean "another site started this".
+// The rest are allowed on purpose: `same-origin` is the dashboard, `none` is a
+// direct navigation, and an absent header is a caller that is not a browser.
+const FOREIGN_FETCH_SITES = new Set(['cross-site', 'same-site']);
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -506,7 +510,11 @@ export class TransmissionRpcServer {
       return;
     }
 
+    // Below the RPC branch on purpose: whatever an *arr sends, and whatever a
+    // browser would have labelled it, /transmission/rpc has already been
+    // answered by the time the guard is reached.
     if (requestPath.startsWith('/api/')) {
+      if (this.refuseCrossSiteWrite(req, res, requestPath)) return;
       await this.handleApi(req, res, requestPath, url.searchParams);
       return;
     }
@@ -526,6 +534,40 @@ export class TransmissionRpcServer {
       result: 'This endpoint belonged to a Putiorr Grab profile and no longer accepts Transmission RPC;'
         + ' browser grabs reach a grab profile through the browser extension',
     }, this.sessionId);
+  }
+
+  // putiorr has no login, so a page the user visits can aim requests at their
+  // LAN putiorr and the browser will send them: no credentials to steal is not
+  // the same as nothing to lose. Every browser able to mount that labels the
+  // request with Sec-Fetch-Site, and only the two values meaning "another site
+  // started this" are refused. Everything else is let through, because the
+  // point is to keep working setups working:
+  //   - `same-origin` is the dashboard, served by putiorr itself;
+  //   - `none` is a direct navigation, and what some Chrome versions send for
+  //     an extension-initiated fetch;
+  //   - no header at all is curl, a script, a systemd timer — not a browser,
+  //     and nothing an attacker page can arrange;
+  //   - X-Putiorr-Grab is the browser extension, which its host permissions
+  //     exempt from CORS where an attacker page is not, so it can set a header
+  //     no cross-site simple request can. This is what keeps the extension
+  //     working if Chrome ever labels its fetches cross-site.
+  // GET is left alone: the reads it reaches change nothing, and a refusal
+  // there would only break embeds. Answers true when the request was refused.
+  refuseCrossSiteWrite(req, res, requestPath) {
+    if ((req.method ?? 'GET') === 'GET') return false;
+    if (req.headers['x-putiorr-grab']) return false;
+    const site = firstHeaderValue(req.headers['sec-fetch-site']).toLowerCase();
+    if (!FOREIGN_FETCH_SITES.has(site)) return false;
+    logger.warn('refused a cross-site request to a state-changing endpoint', {
+      requestPath,
+      requestMethod: req.method,
+      secFetchSite: site,
+    });
+    jsonResponse(res, 403, {
+      error: 'putiorr refused this request because another site started it; only putiorr\'s own pages'
+        + ' and non-browser callers may change its state',
+    }, this.sessionId);
+    return true;
   }
 
   async handleRpc(req, res, profile) {
