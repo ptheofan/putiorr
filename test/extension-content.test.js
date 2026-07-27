@@ -597,13 +597,13 @@ test('a .torrent the page is refused by CORS is fetched by the extension instead
     },
   });
 
-  const anchor = harness.anchor('https://onejav.test/torrent/1/download/2/name.torrent');
+  const anchor = harness.anchor('https://tracker.test/torrent/1/download/2/name.torrent');
   const event = harness.dispatch(anchor);
   await settle();
 
   assert.equal(event.prevented, true);
   assert.equal(attempts, 1, 'the page still gets the first attempt');
-  assert.deepEqual(harness.workerFetches, ['https://onejav.test/torrent/1/download/2/name.torrent']);
+  assert.deepEqual(harness.workerFetches, ['https://tracker.test/torrent/1/download/2/name.torrent']);
   assert.deepEqual(harness.sent, [{
     kind: 'grab',
     torrentBase64: Buffer.from(bytes).toString('base64'),
