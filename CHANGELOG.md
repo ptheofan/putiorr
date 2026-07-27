@@ -9,6 +9,25 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [3.0.3] — 2026-07-27
+
+### Fixed
+
+- **Changing a profile's download folder no longer destroys its downloads.**
+  Editing **Shared download folder** on a profile that owned downloads was
+  accepted silently, and the next poll then read every one of them as
+  user-deleted: it cancelled the put.io transfer, deleted the put.io file and
+  removed the row, leaving the files orphaned on disk. A download's path is
+  derived from its profile's current folder, so moving the folder pointed
+  putiorr at a location the files were never in.
+
+  The change is now refused while the profile owns downloads, naming how many
+  and what to do instead — let them finish and leave putiorr, or delete them
+  from the dashboard. Nothing is moved on disk. Saving a profile without
+  touching the folder still works, and `/downloads` and `/downloads/` count as
+  the same folder. The wizard offers to put the folder back so a refused value
+  cannot sit in the form blocking every later save.
+
 ## [3.0.2] — 2026-07-27
 
 ### Changed
