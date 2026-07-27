@@ -34,12 +34,14 @@ function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, se
   const tabMessages = [];
   const listeners = {};
   const values = syncSequence ?? [sync];
+  const liveMenuIds = new Set();
   let getCall = 0;
 
   const register = (name) => ({ addListener: (fn) => { listeners[name] = fn; } });
 
   const chrome = {
     runtime: {
+      lastError: undefined,
       id: 'putiorr-extension-id',
       onMessage: register('message'),
       onInstalled: register('installed'),
@@ -59,12 +61,36 @@ function createChromeStub({ sync = {}, syncSequence, local = {}, delays = {}, se
       local: { get: async (defaults) => onlyRequested(defaults, local) },
       onChanged: register('storage'),
     },
+    // Faithful to Chrome on the one point that matters: create() does not take
+    // effect when it returns. The item is registered a tick later, and a second
+    // create for an id that is already live fails through runtime.lastError
+    // rather than throwing — which is exactly how "Cannot create item with
+    // duplicate id putiorr-root" reaches the extension's error page. A stub
+    // that registered synchronously could never reproduce it.
     contextMenus: {
       onClicked: register('menu'),
-      create: (item) => log.push(`create:${item.id}`),
+      create: (item, callback) => {
+        log.push(`create:${item.id}`);
+        // Slower than removeAll on purpose. That asymmetry is the bug's whole
+        // mechanism: a pass that does not await its creates returns while they
+        // are still pending, the next pass clears the menu out from under them,
+        // and both passes' items then land on the same ids.
+        setTimeout(() => {
+          if (liveMenuIds.has(item.id)) {
+            log.push(`create-duplicate:${item.id}`);
+            chrome.runtime.lastError = { message: `Cannot create item with duplicate id ${item.id}` };
+          } else {
+            liveMenuIds.add(item.id);
+          }
+          if (callback) callback();
+          chrome.runtime.lastError = undefined;
+        }, delays.create ?? 10);
+        return item.id;
+      },
       removeAll: async () => {
         log.push('removeAll');
         await wait(delays.removeAll ?? 0);
+        liveMenuIds.clear();
       },
     },
     notifications: {
@@ -137,6 +163,33 @@ test('menu rebuilds are serialized so interleaved triggers cannot leave ghost en
   }
   // The queue must converge on the newest profile list, not the slow first read.
   assert.deepEqual(segments.at(-1), ['create:putiorr-root', 'create:putiorr-profile-7']);
+  assert.deepEqual(unhandled, []);
+});
+
+// Reported from a real install: the extension's error page filled with
+// "Cannot create item with duplicate id putiorr-root", and one per profile
+// beneath it — a whole rebuild's worth of items created twice. rebuildMenus
+// awaited removeAll but not its own create calls, so it resolved while those
+// were still in flight and the queue advanced into the next pass. The second
+// pass then cleared menus the first had not finished creating, and every id
+// collided. Serialising the triggers was never enough on its own.
+test('a rebuild waits for its own menu items before the next pass starts', async () => {
+  const harness = await loadWorker({
+    syncSequence: [
+      { profiles: [{ id: 9, name: 'Movies' }] },
+      { profiles: [{ id: 10, name: 'TV' }] },
+    ],
+  });
+
+  harness.listeners.storage({ profiles: {} }, 'sync');
+  harness.listeners.storage({ profiles: {} }, 'sync');
+  await settle(120);
+
+  assert.deepEqual(
+    harness.log.filter((entry) => entry.startsWith('create-duplicate:')),
+    [],
+    'no menu item may be created twice',
+  );
   assert.deepEqual(unhandled, []);
 });
 

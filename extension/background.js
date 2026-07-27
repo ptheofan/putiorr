@@ -183,12 +183,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+// chrome.contextMenus.create returns the id immediately and registers the item
+// a tick later, reporting failure through runtime.lastError rather than by
+// throwing. Awaiting the callback is what makes a rebuild finish when its menu
+// actually exists: without it rebuildMenus resolved with its creates still in
+// flight, the queue below advanced into the next pass, and that pass cleared
+// menus the first had not finished creating — every id then collided and the
+// extension's error page filled with "Cannot create item with duplicate id".
+// An unchecked lastError is also what made those failures silent.
+function createMenu(properties) {
+  return new Promise((resolve, reject) => {
+    chrome.contextMenus.create(properties, () => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve();
+    });
+  });
+}
+
 async function rebuildMenus() {
   await chrome.contextMenus.removeAll();
   const settings = await loadSettings();
-  chrome.contextMenus.create({ id: MENU_ROOT, title: 'Send to putiorr', contexts: ['link'] });
+  await createMenu({ id: MENU_ROOT, title: 'Send to putiorr', contexts: ['link'] });
   if (!settings.profiles.length) {
-    chrome.contextMenus.create({
+    await createMenu({
       id: MENU_CONFIGURE,
       parentId: MENU_ROOT,
       title: 'Configure putiorr…',
@@ -197,7 +215,10 @@ async function rebuildMenus() {
     return;
   }
   for (const profile of settings.profiles) {
-    chrome.contextMenus.create({
+    // Sequential on purpose: a child cannot be created before its parent, and
+    // the ordering of the profile list is the ordering of the menu.
+    // eslint-disable-next-line no-await-in-loop
+    await createMenu({
       id: `${MENU_PREFIX}${profile.id}`,
       parentId: MENU_ROOT,
       title: profile.name,
@@ -211,7 +232,7 @@ async function rebuildMenus() {
 // every rebuild onto one promise keeps the runs strictly sequential.
 let menuQueue = Promise.resolve();
 function queueRebuild() {
-  menuQueue = menuQueue.then(rebuildMenus).catch((error) => console.error('menu rebuild failed', error));
+  menuQueue = menuQueue.then(rebuildMenus).catch((error) => console.error('menu create failed', error));
 }
 
 chrome.runtime.onInstalled.addListener(async (details) => {
