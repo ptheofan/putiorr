@@ -1189,3 +1189,29 @@ test('unrelated runtime messages release the port instead of swallowing them', a
   assert.equal(held, undefined, 'another listener must be free to answer this');
   assert.equal(responded, false);
 });
+
+// Updating or reloading the extension orphans the content scripts already in
+// open tabs: chrome.runtime survives but answers nothing, and sendMessage
+// rejects with "Extension context invalidated". That is not a fetch failure and
+// the browser fallback is not the remedy — reloading the page is — yet the
+// acknowledgement was withdrawn without a word, so the click looked ignored and
+// the file simply downloaded. Once the extension is published this happens to
+// every open tab on every auto-update, silently.
+test('an orphaned content script says to reload the page instead of vanishing', async () => {
+  const harness = await loadContent({
+    sendMessage: async () => {
+      throw new Error('Extension context invalidated.');
+    },
+  });
+  // What Chrome actually leaves behind: the object is there, the id is not.
+  globalThis.chrome.runtime.id = undefined;
+
+  const anchor = harness.anchor('magnet:?xt=urn:btih:abc&dn=Example');
+  harness.dispatch(anchor);
+  await settle();
+
+  const [toast] = harness.toasts();
+  assert.equal(toast?.tone, 'failure');
+  assert.match(toast?.title ?? '', /reload this page/i);
+  assert.equal(anchor.clicks, 1, 'the browser still gets its turn at the link');
+});

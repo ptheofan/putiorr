@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "putiorr grab",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Send magnet links and .torrent files to putiorr",
   "permissions": ["storage", "notifications", "contextMenus"],
   "host_permissions": ["<all_urls>"],
