@@ -379,6 +379,50 @@ function profileTakeOverCatchAllFrom(input) {
 // what a caller acts on, because offering "make this the fallback instead" out
 // of prose means parsing a sentence for a profile name, and a client that
 // string-matches its server is a client that breaks on the next reword.
+export function pluralizeDownloads(count) {
+  return `${count} download${count === 1 ? '' : 's'}`;
+}
+
+// Two folders naming the same directory are not a change, and the wizard sends
+// the folder back on every save — so an unchanged value must never read as one.
+// Resolved on both sides rather than compared as text: `/downloads` and
+// `/downloads/` are one directory, and a caller that reaches writeProfilePatch
+// without going through updateProfile's normalization is compared on the same
+// terms as one that did. Nothing beyond that is followed: a symlink or a bind
+// mount naming the same directory counts as a different one, exactly as it does
+// for TransferService.reassignTargetsFor, and the refusal says so.
+function sameDownloadFolder(left, right) {
+  const from = String(left ?? '').trim();
+  const to = String(right ?? '').trim();
+  // path.resolve('') is the working directory, which would make "no folder at
+  // all" equal to whatever the process happens to be sitting in.
+  if (!from || !to) return from === to;
+  return path.resolve(from) === path.resolve(to);
+}
+
+function downloadFolderLockedError(profile, count, from, to) {
+  const error = new Error(
+    `RR profile ${profile.name} still owns ${pluralizeDownloads(count)} staged under`
+    + ` ${from || '(nothing)'}, and nothing here moves files: pointing it at ${to || '(nothing)'}`
+    + ' would leave their files where they are and putiorr looking somewhere else — a finished'
+    + ' download whose files are missing is deleted and cancelled on put.io. Let these downloads'
+    + ' finish and leave putiorr, or delete them from the dashboard — the delete dialog can take'
+    + ' their files with them — and the folder is free to change. The two folders are compared as'
+    + ' they are written, so a symlink or a bind mount naming the same directory counts as a'
+    + ' different one.',
+  );
+  // Not prose to be parsed: the wizard offers to put the folder back, and it
+  // needs the folder this profile still has and how many downloads are behind
+  // the refusal to say what that costs.
+  error.downloadFolderLock = {
+    profile: { id: profile.id, name: profile.name },
+    downloads: count,
+    from,
+    to,
+  };
+  return error;
+}
+
 function catchAllConflictError(holder) {
   const error = new Error(
     `${holder.name} already takes grabs from any site no other profile claims;`
@@ -1623,6 +1667,7 @@ export class StateStore {
   // the transaction a catch-all takeover needs. The allow-list is what keeps
   // takeOverCatchAll — an intent, not a column — out of the UPDATE.
   writeProfilePatch(id, normalizedPatch, existing) {
+    this.assertDownloadFolderNotHeldByDownloads(id, normalizedPatch, existing);
     const allowed = [
       'name',
       'type',
@@ -1652,6 +1697,55 @@ export class StateStore {
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE profiles SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
     return this.findProfileById(id);
+  }
+
+  // Issue #68. A download's files live at `<download_at>/<category>/<frozen
+  // staging folder>` and nothing here moves anything on disk, so moving the
+  // root points putiorr at a directory the files are not in — and the next
+  // poll reads a finished download whose files are missing as user-deleted:
+  // pruneProcessedTransfersMissingLocalData cancels the put.io transfer,
+  // deletes the put.io file and drops the row, leaving the files orphaned with
+  // nothing left to clean them up. Freezing the staging folder made a put.io
+  // rename safe; it says nothing about the root moving out from under it.
+  //
+  // The same rule TransferService.reassignTargetsFor enforces from the other
+  // side — there a download may not move to a profile with a different
+  // download_at — and refused rather than migrated for the reason that one is:
+  // putiorr does not move users' files.
+  //
+  // It sits on the column write rather than at the HTTP boundary, exactly as
+  // assertSingleCatchAll does, so every door pays it: the wizard, PUT
+  // /api/profiles/:id, and any seed or internal caller that updates an existing
+  // profile all arrive here. Inside updateProfile's transaction, too, so a
+  // refusal takes the catch-all clear back with it and no half-written profile
+  // survives the save.
+  //
+  // Only a change is refused; a patch that does not mention the folder, or
+  // sends back the one already stored, is an ordinary save.
+  assertDownloadFolderNotHeldByDownloads(id, normalizedPatch, existing) {
+    if (!Object.hasOwn(normalizedPatch, 'download_at')) return;
+    const from = String(existing?.download_at ?? '');
+    const to = String(normalizedPatch.download_at ?? '');
+    if (sameDownloadFolder(from, to)) return;
+    const held = this.countDownloadsForProfile(id);
+    if (held === 0) return;
+    throw downloadFolderLockedError(existing ?? { id, name: `#${id}` }, held, from, to);
+  }
+
+  // Every row that names this profile, tombstoned ones included: "remove from
+  // putiorr, keep the files" leaves the row removed and the folder full, and
+  // the staging claims (TransferService.downloadsStagingAt) still count it.
+  //
+  // Lifecycle is deliberately not a filter. 'remote' means putiorr has not
+  // started fetching, not that there is nothing on disk: the staging folder is
+  // claimed — and a part-file resumed from — while the row is still 'remote'
+  // (DownloadManager.prepareTransfer), the *arr has already been told the
+  // download-dir the current root derives, and nothing records the files a user
+  // put there themselves. A distinction that unreliable is not one to hand a
+  // user's files to.
+  countDownloadsForProfile(profileId) {
+    const row = this.db.prepare('SELECT COUNT(*) AS held FROM downloads WHERE profile_id = ?').get(profileId);
+    return Number(row?.held ?? 0);
   }
 
   deleteProfile(id) {

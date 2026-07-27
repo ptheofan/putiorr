@@ -312,6 +312,37 @@ export function renderCatchAllTakeover(element, holder, onTakeover) {
   return link;
 }
 
+// What the offer beside the download-folder refusal says, and what it costs.
+// The folder is named rather than implied: the field is still showing the one
+// the server would not take, and "put it back" is no answer to "back to what?".
+export const KEEP_DOWNLOAD_FOLDER_LABEL = 'Keep the folder this profile has';
+
+export function keepDownloadFolderConsequence(folder) {
+  return ` — the folder goes back to ${folder} and the rest of this profile is saved.`;
+}
+
+// The same offer as the takeover's, for the refusal that protects a profile's
+// downloads: the wizard is still showing the folder the server would not take,
+// so every later save is refused over it too until it goes back. One click puts
+// it back and re-submits everything else the user typed.
+export function renderKeepDownloadFolder(element, lock, onKeep) {
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'message-link';
+  link.dataset.testid = 'profile-download-folder-keep';
+  link.textContent = KEEP_DOWNLOAD_FOLDER_LABEL;
+  link.addEventListener('click', (event) => {
+    event.preventDefault();
+    onKeep(lock);
+  });
+  element.append(
+    document.createTextNode('\n\nOr: '),
+    link,
+    document.createTextNode(keepDownloadFolderConsequence(lock.from)),
+  );
+  return link;
+}
+
 // api() used to throw the reply's sentence and drop everything else, which left
 // callers matching prose to decide anything. The message is unchanged; the
 // status and every field the body carried come with it.
@@ -320,6 +351,7 @@ export function apiError(status, body = {}) {
   error.status = status;
   if (body.code) error.code = body.code;
   if (body.catchAllHolder) error.catchAllHolder = body.catchAllHolder;
+  if (body.downloadFolderLock) error.downloadFolderLock = body.downloadFolderLock;
   error.body = body;
   return error;
 }

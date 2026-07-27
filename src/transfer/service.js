@@ -18,6 +18,9 @@ import { calculateTransmissionProgress } from '../transmission/progress.js';
 // The preset the dashboard writes into a profile; plain data with no imports of
 // its own, so the one spelling serves both the browser and this process.
 import { GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
+// One spelling of "3 downloads" for every refusal that counts them, and the
+// store is where the count comes from.
+import { pluralizeDownloads } from '../state/store.js';
 
 function firstDefined(...values) {
   return values.find((value) => value !== undefined);
@@ -103,10 +106,6 @@ export function disabledProfileMessage(profile) {
   return `RR profile ${profile?.name ?? '(unnamed)'} is disabled and accepts no new downloads;`
     + ' enable it in the dashboard, or send this to a profile that is switched on.'
     + ' Its existing downloads are unaffected';
-}
-
-function pluralizeDownloads(count) {
-  return `${count} download${count === 1 ? '' : 's'}`;
 }
 
 // Everything already done, in the order it was done, so a half-finished delete

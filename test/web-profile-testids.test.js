@@ -468,3 +468,27 @@ test('the wizard offers the fallback takeover on the refusal that names another 
   assert.match(utilJs, /export const CATCH_ALL_TAKEOVER_LABEL = 'Make this the fallback grab profile';/);
   assert.match(formsCss, /\.message-link \{/);
 });
+
+// Issue #68. The refusal that protects a profile's downloads leaves the wizard
+// showing a folder the server would not take, so every later save is refused
+// too. Rendered like the takeover: the sentence stays, and the way out is one
+// click in the same paragraph.
+test('the wizard offers to put back the download folder its downloads still hold', () => {
+  const profilesJs = readFileSync(new URL('../src/web/profiles.js', import.meta.url), 'utf8');
+  const utilJs = readFileSync(new URL('../src/web/util.js', import.meta.url), 'utf8');
+
+  // Branched on the discriminator, never on the sentence.
+  assert.match(profilesJs, /if \(error\?\.code !== DOWNLOAD_FOLDER_LOCKED_CODE\) return false;/);
+  assert.doesNotMatch(profilesJs, /staged under|nothing here moves files/);
+  // Offered from both refusal paths, exactly as the takeover is: the save
+  // button's, and the plain save.
+  assert.equal(profilesJs.match(/^ +offerLockedDownloadFolderRestore\(error\);$/gm).length, 2);
+  // The field goes back to the folder the profile still has, and the same save
+  // is re-submitted with everything else the user typed.
+  assert.match(profilesJs, /setWizardField\(el\.wizardDownloadAt, lock\.from\)/);
+  assert.match(profilesJs, /saveAndTestClientSettings\(\)/);
+
+  assert.match(utilJs, /link\.textContent = KEEP_DOWNLOAD_FOLDER_LABEL;/);
+  assert.match(utilJs, /export const KEEP_DOWNLOAD_FOLDER_LABEL = 'Keep the folder this profile has';/);
+  assert.match(utilJs, /data-testid=["']profile-download-folder-keep["']|dataset\.testid = 'profile-download-folder-keep'/);
+});

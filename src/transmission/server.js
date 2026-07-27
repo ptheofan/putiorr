@@ -13,7 +13,12 @@ import { VersionChecker } from '../version.js';
 // on, so the two must spell it identically; constants.js is plain data with no
 // imports of its own, which is why the server can read the same file the
 // browser is served. WEB_DIR below already points at that directory.
-import { CATCH_ALL_CONFLICT_CODE, GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
+import {
+  CATCH_ALL_CONFLICT_CODE,
+  DOWNLOAD_FOLDER_LOCKED_CODE,
+  GRAB_PROFILE_TYPE,
+  SHARED_RPC_PATH,
+} from '../web/constants.js';
 
 const SESSION_HEADER = 'X-Transmission-Session-Id';
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -973,6 +978,12 @@ export class TransmissionRpcServer {
         // because deciding it from the prose would break on the next reword.
         ...(error.catchAllHolder
           ? { code: CATCH_ALL_CONFLICT_CODE, catchAllHolder: error.catchAllHolder }
+          : {}),
+        // And the refusal that keeps a profile's download folder where its
+        // downloads' files are: same shape, same reason. The wizard puts the
+        // folder back from the counts riding here, not from the sentence.
+        ...(error.downloadFolderLock
+          ? { code: DOWNLOAD_FOLDER_LOCKED_CODE, downloadFolderLock: error.downloadFolderLock }
           : {}),
         ...(error.downloadsReport ? { downloads: error.downloadsReport } : {}),
       }, this.sessionId);

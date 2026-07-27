@@ -10,6 +10,7 @@ import {
   DEFAULT_CLIENT_PORT,
   DEFAULT_HELP_FIELD,
   CATCH_ALL_CONFLICT_CODE,
+  DOWNLOAD_FOLDER_LOCKED_CODE,
 } from './constants.js';
 import {
   fieldChecked,
@@ -34,6 +35,7 @@ import {
   catchAllTakenFrom,
   catchAllTakeoverPayload,
   renderCatchAllTakeover,
+  renderKeepDownloadFolder,
   withCatchAllTakeoverNote,
   withoutCatchAllTakeover,
 } from './util.js';
@@ -161,11 +163,13 @@ export const WIZARD_HELP = {
       ? [
         'Give grab profiles their own folder when you want browser downloads kept apart from what the *arr apps import.',
         'If putiorr runs in Docker, this path must be mounted into the putiorr container.',
+        'While this profile owns downloads the folder cannot be changed: their files stay where they are, and putiorr would then look for them somewhere else. Let those downloads finish and leave putiorr, or delete them, first.',
       ]
       : [
         'Recommended shared setup: Directory is /putiorr and Category is sonarr, radarr, lidarr, or readarr.',
         'If you use separate folders per app, set Directory to that app mount and still keep Category consistent with the profile.',
         'If imports fail with a path-not-found error, compare the container volume mounts before changing this value.',
+        'While this profile owns downloads the folder cannot be changed: their files stay where they are, and putiorr would then look for them somewhere else. Let those downloads finish and leave putiorr, or delete them, first.',
       ],
     valueLabel: (profile) => isGrabProfile(profile) ? 'Grab download folder' : 'Final category folder',
     value: (profile, settings) => isGrabProfile(profile)
@@ -715,6 +719,7 @@ export async function saveProfileFromWizard({
     if (throwOnError) throw error;
     setWizardMessage(error.message, 'error');
     offerCatchAllTakeover(error);
+    offerLockedDownloadFolderRestore(error);
     return undefined;
   } finally {
     if (manageButton) el.saveProfileButton.disabled = false;
@@ -762,6 +767,7 @@ export async function saveAndTestClientSettings({ takeOverCatchAllFrom } = {}) {
       'warn',
     );
     offerCatchAllTakeover(error);
+    offerLockedDownloadFolderRestore(error);
   } finally {
     el.saveProfileButton.disabled = false;
   }
@@ -780,6 +786,24 @@ export function offerCatchAllTakeover(error) {
     // either drop the rest of the form or need a second round trip to carry it.
     saveAndTestClientSettings({ takeOverCatchAllFrom: target.id })
       .catch((takeoverError) => setWizardMessage(takeoverError.message, 'error'));
+  });
+  return true;
+}
+
+// The second refusal the dialog can act on. The sentence already says why the
+// folder cannot move and what to do about the downloads holding it; what it
+// cannot fix on its own is the wizard still showing the folder the server
+// refused, which would have every later save — a rename, a port, a checkbox —
+// refused over the same change. One click puts the folder back and re-submits
+// the rest of the form, so nothing typed before or after the refusal is lost.
+export function offerLockedDownloadFolderRestore(error) {
+  if (error?.code !== DOWNLOAD_FOLDER_LOCKED_CODE) return false;
+  const lock = error.downloadFolderLock;
+  if (!lock?.from) return false;
+  renderKeepDownloadFolder(el.profileWizardMessage, lock, () => {
+    setWizardField(el.wizardDownloadAt, lock.from);
+    saveAndTestClientSettings()
+      .catch((restoreError) => setWizardMessage(restoreError.message, 'error'));
   });
   return true;
 }

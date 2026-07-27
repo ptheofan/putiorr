@@ -8,6 +8,7 @@ import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
 import { TRANSMISSION_STATUS } from '../src/transmission/progress.js';
 import { TransmissionRpcServer } from '../src/transmission/server.js';
+import { DOWNLOAD_FOLDER_LOCKED_CODE } from '../src/web/constants.js';
 import { CURRENT_VERSION, parseSemver } from '../src/version.js';
 
 function magnetInfoHash(source) {
@@ -2124,6 +2125,55 @@ test('web API exposes settings and profile CRUD', async (t) => {
   assert.equal(updated.client_port, '9091');
   assert.equal(updated.client_use_ssl, false);
   assert.equal(updated.enabled, false);
+});
+
+// Issue #68: this used to answer 200 and no warning, and the next poll deleted
+// the downloads and cancelled them on put.io over files nothing had moved.
+test('web API refuses to move the download folder of a profile that owns downloads', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const profile = harness.store.findProfileBySlug('default');
+  harness.store.upsertDownload({
+    profile_id: profile.id,
+    putio_transfer_id: 771,
+    hash: 'lockedfolderhash',
+    name: 'Owned.Release',
+    lifecycle: 'processed',
+  });
+  const profileUrl = harness.url.replace('/transmission/rpc', `/api/profiles/${profile.id}`);
+
+  const moved = await fetch(profileUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ downloadAt: path.join(harness.config.targetDir, 'elsewhere') }),
+  });
+  assert.equal(moved.status, 400);
+  const body = await moved.json();
+  assert.match(body.error, /still owns 1 download staged under/);
+  // The discriminator and the counts ride alongside the sentence, so the wizard
+  // can act on the refusal without matching prose.
+  assert.equal(body.code, DOWNLOAD_FOLDER_LOCKED_CODE);
+  assert.equal(body.downloadFolderLock.downloads, 1);
+  assert.equal(body.downloadFolderLock.from, profile.download_at);
+  assert.equal(body.downloadFolderLock.to, path.join(harness.config.targetDir, 'elsewhere'));
+  assert.equal(body.downloadFolderLock.profile.id, profile.id);
+  assert.equal(harness.store.findProfileById(profile.id).download_at, profile.download_at);
+
+  // The same save with the folder left alone is still a save — trailing slash
+  // and all, since the wizard sends the folder back on every save.
+  const kept = await fetch(profileUrl, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Default Renamed', downloadAt: `${profile.download_at}/` }),
+  });
+  assert.equal(kept.status, 200);
+  const keptBody = await kept.json();
+  assert.equal(keptBody.name, 'Default Renamed');
+  assert.equal(keptBody.downloadAt, profile.download_at);
 });
 
 test('web API profile client settings test rejects an unusable download folder', async (t) => {
