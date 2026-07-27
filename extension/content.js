@@ -80,6 +80,13 @@
     }
   }
 
+  // Chrome leaves the runtime object in place and takes the id away, so this is
+  // the reliable signal — steadier than matching the wording of an error
+  // message, which is Chrome's to change.
+  function isOrphaned() {
+    return !chrome?.runtime?.id;
+  }
+
   function withdrawFeedback(handle) {
     try {
       handle?.dismiss();
@@ -198,10 +205,25 @@
         const result = await chrome.runtime.sendMessage(payload);
         settleFeedback(feedback, result);
       } catch (error) {
-        // The click is about to be replayed, so the browser is going to do what
-        // it would have done unaided; leaving the acknowledgement up would
-        // claim a grab that never happened.
-        withdrawFeedback(feedback);
+        // An update or a reload orphans every content script already in a page:
+        // chrome.runtime survives with no id, and sendMessage rejects with
+        // "Extension context invalidated". Nothing is wrong with the link, the
+        // network or putiorr, and the browser fallback below is not the remedy
+        // — reloading the page is. Withdrawing in silence made that look like a
+        // click the extension ignored, and once published this happens to every
+        // open tab on every auto-update, so it is the failure users will meet
+        // most often and the one worth naming.
+        if (isOrphaned()) {
+          settleFeedback(feedback, {
+            ok: false,
+            error: 'putiorr was updated — reload this page, then click again',
+          });
+        } else {
+          // The click is about to be replayed, so the browser is going to do
+          // what it would have done unaided; leaving the acknowledgement up
+          // would claim a grab that never happened.
+          withdrawFeedback(feedback);
+        }
         // The grab never reached putiorr: the .torrent fetch failed or timed
         // out, or an extension reload orphaned this content script and
         // sendMessage has nothing left to talk to. Refire the click so the
