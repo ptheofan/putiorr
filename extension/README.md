@@ -83,8 +83,15 @@ auto-capture can be switched off entirely in the options.
 
 ## Install
 
-The extension is not on the Chrome Web Store, so it is installed by loading it
-unpacked. There are two ways to get the folder to load.
+The short way is the
+[Chrome Web Store listing](https://chromewebstore.google.com/detail/putiorr-grab/pjkfcgchfgiilhjgdabdgclnmeljjngb),
+which installs in one click and updates itself. It carries the version Google
+has reviewed, so it can sit behind this directory for a few days after a
+release.
+
+Load it unpacked instead when you want to read what you are running, pin a
+version, or run a change the store has not reviewed yet. There are two ways to
+get the folder to load.
 
 **From a release.** Each release on the
 [releases page](https://github.com/ptheofan/putiorr/releases) carries

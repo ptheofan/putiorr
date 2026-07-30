@@ -77,7 +77,7 @@ export const WIZARD_HELP = {
       ? [
         'Putiorr Grab is the preset for the putiorr browser extension. The extension captures the magnet links and .torrent downloads you click in the browser and sends them to putiorr, which queues them on put.io and downloads them into this profile.',
         'The sites listed on this profile route to it: a grab from one of them lands here, and one profile can additionally be set to take the grabs no site claims. Only Putiorr Grab profiles are offered to the extension, and a grab aimed at any other preset is refused.',
-        'The extension is distributed from the putiorr repository: copy its extension/ folder to the machine running Chrome, then open chrome://extensions, turn on Developer mode, choose Load unpacked, and pick that folder.',
+        'Install putiorr grab from the Chrome Web Store on the machine you browse from, or from the putiorr repository if you would rather load it unpacked or pin a particular version.',
         'Then open the extension options and set the putiorr URL. Where a grab lands is decided here, on these profiles; the extension only holds the connection and whether clicks are captured.',
       ]
       : [

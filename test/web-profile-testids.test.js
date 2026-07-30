@@ -314,14 +314,20 @@ test('the field guide explains the browser extension and how to install it', () 
   assert.match(appPreset, /magnet/);
   assert.match(appPreset, /\.torrent/);
   assert.match(appPreset, /sites listed on this profile/);
-  // Loading unpacked is how the extension is installed, not a stopgap: there is
-  // no store listing to wait for, so the help must not promise one.
-  assert.doesNotMatch(appPreset, /Chrome Web Store/);
-  assert.match(appPreset, /distributed from the putiorr repository/);
-  assert.match(appPreset, /chrome:\/\/extensions/);
-  assert.match(appPreset, /Developer mode/);
-  assert.match(appPreset, /Load unpacked/);
-  assert.match(appPreset, /extension\/ folder/);
+  // The listing exists now, so the store is the way in and the help says so.
+  // What it still may not do is promise one as though it were pending, which is
+  // what this assertion was inverted from: "once it is published" and "not yet"
+  // were the wording that had to go when the fee made a listing not worth it,
+  // and they must not come back now that there is nothing to wait for.
+  assert.match(appPreset, /Chrome Web Store/);
+  assert.doesNotMatch(appPreset, /not on the Chrome Web Store|once it is published|not yet/i);
+  // The repository stays offered as the alternative, for reading the source or
+  // pinning a version — it is no longer the only route.
+  assert.match(appPreset, /putiorr repository/);
+  // That the alternative exists, not how to carry it out: the chrome://extensions
+  // steps this used to pin belong to the extension guide, which is where a
+  // sentence in a field guide should send someone rather than reproducing them.
+  assert.match(appPreset, /unpacked/);
   assert.match(appPreset, /putiorr URL/);
 
   // Every field the grab wizard shows reads as a grab field. The put.io folder

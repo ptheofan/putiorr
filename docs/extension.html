@@ -45,10 +45,10 @@
         <h1>Install the grab extension on the machine you browse from.</h1>
         <p>
           The extension captures the magnet links and <code>.torrent</code>
-          downloads you click and hands them to putiorr. It is distributed from
-          the putiorr repository — packed onto each release, or taken from a
-          clone — and loaded unpacked, so the first job is getting the files
-          onto the computer running Chrome, not onto the NAS running putiorr.
+          downloads you click and hands them to putiorr. Install it from the
+          Chrome Web Store in one click, or from GitHub if you would rather load
+          it unpacked or pin a particular version. Either way it goes on the
+          computer running Chrome, not on the NAS running putiorr.
         </p>
       </section>
 
@@ -56,7 +56,8 @@
         <aside class="doc-toc" aria-label="Extension sections">
           <strong>On this page</strong>
           <a href="#before">Before you start</a>
-          <a href="#get-files">Get the files</a>
+          <a href="#install">Install from the Chrome Web Store</a>
+          <a href="#get-files">Install from GitHub instead</a>
           <a href="#where">Where to keep the folder</a>
           <a href="#load">Load it in Chrome</a>
           <a href="#connect">Point it at putiorr</a>
@@ -84,20 +85,43 @@
             </p>
             <p class="doc-note">
               putiorr normally runs in a container on a NAS, and Chrome runs on
-              your laptop or desktop. Chrome reads an unpacked extension from a
-              folder on its own disk; it cannot load one over the network or out
-              of the putiorr container. The steps below all happen on the machine
-              with the browser.
+              your laptop or desktop. Everything below happens on the machine
+              with the browser: the extension is installed into Chrome, and it
+              reaches putiorr over your network like any other client.
+            </p>
+          </section>
+
+          <section id="install" class="doc-section">
+            <h2>Install from the Chrome Web Store</h2>
+            <p>
+              The short path, and the one to take unless you have a reason not
+              to. Chrome installs it, keeps it up to date on its own, and no
+              folder has to stay anywhere on your disk.
+            </p>
+            <div class="doc-actions">
+              <a class="button primary" href="https://chromewebstore.google.com/detail/putiorr-grab/pjkfcgchfgiilhjgdabdgclnmeljjngb">Get putiorr grab on the Chrome Web Store</a>
+            </div>
+            <p>
+              Then carry on at <a href="#connect">Point it at putiorr</a> — the
+              two sections between here and there are about the unpacked route
+              and do not apply to a store install.
+            </p>
+            <p class="doc-note">
+              The store carries the version Google has reviewed, which can sit
+              behind the repository for a few days after a release. If you need a
+              change that has just landed, take it from GitHub below rather than
+              waiting.
             </p>
           </section>
 
           <section id="get-files" class="doc-section">
-            <h2>Get the files</h2>
+            <h2>Install from GitHub instead</h2>
             <p>
-              The extension is not on the Chrome Web Store, so whichever route
-              you take you end up with a folder on disk that Chrome loads
-              unpacked. There is no <code>.crx</code>. The quickest route is the
-              packed archive attached to a release.
+              Worth doing when you want to read what you are running, pin a
+              particular version, or run a change the store has not reviewed yet.
+              Every route here ends with a folder on disk that Chrome loads
+              unpacked; there is no <code>.crx</code>. The quickest is the packed
+              archive attached to a release.
             </p>
             <h3>Download the packed extension from a release</h3>
             <p>
@@ -230,9 +254,20 @@ https://github.com/ptheofan/putiorr/archive/refs/tags/v2.0.3.zip</code></pre>
           <section id="updating" class="doc-section">
             <h2>Updating</h2>
             <p>
-              Chrome never updates an unpacked extension for you, and it does not
-              notice the folder changing while it runs. Updating is therefore two
-              steps, and the second is the one that is easy to forget:
+              <strong>A store install updates itself.</strong> Chrome fetches new
+              versions on its own schedule and there is nothing to do — which is
+              also why the first click in a tab that was already open may answer
+              <em>putiorr was updated — reload this page, then click again</em>.
+              An update replaces the extension but not the copies of its content
+              script already sitting in open pages, so those pages have to be
+              reloaded before they can capture anything. That message is the
+              extension telling you so rather than failing silently; the file
+              still downloads normally in the meantime.
+            </p>
+            <p>
+              <strong>An unpacked install never updates itself</strong>, and Chrome
+              does not notice the folder changing while it runs. Updating that one
+              is two steps, and the second is the one that is easy to forget:
             </p>
             <ol>
               <li>Refresh the files in place — <code>git pull</code> in the clone, or unpack the new release archive over the same path so the path does not change.</li>
