@@ -165,6 +165,10 @@ untouched.
 
 ## Browser Extension
 
+**Install:** [putiorr grab on the Chrome Web Store](https://chromewebstore.google.com/detail/putiorr-grab/pjkfcgchfgiilhjgdabdgclnmeljjngb),
+or load it unpacked from a release asset or this repository — see the
+[extension guide](https://ptheofan.github.io/putiorr/extension.html).
+
 The [`extension/`](extension) directory holds a Chrome (Manifest V3) extension
 that captures `magnet:` links, `.torrent` downloads, and the `http(s)` links
 that carry a magnet in their query — a site's "send to put.io" link, a
