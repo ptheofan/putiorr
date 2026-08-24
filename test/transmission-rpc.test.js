@@ -6,7 +6,7 @@ import path from 'node:path';
 import { loadConfig } from '../src/config.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
-import { TRANSMISSION_STATUS } from '../src/transmission/progress.js';
+import { TRANSMISSION_STATUS, TRANSMISSION_ERROR } from '../src/transmission/progress.js';
 import { TransmissionRpcServer } from '../src/transmission/server.js';
 import { DOWNLOAD_FOLDER_LOCKED_CODE } from '../src/web/constants.js';
 import { CURRENT_VERSION, parseSemver } from '../src/version.js';
@@ -249,6 +249,96 @@ test('torrent-add persists category and torrent-get returns Transmission shape',
     path.join(getBody.arguments.torrents[0].downloadDir, getBody.arguments.torrents[0].name),
     harness.service.requireStagingRoot(harness.store.findProfileById(row.profile_id), row),
   );
+});
+
+test('torrent-get reports error as the integer 0 (TR_STAT_OK) for a healthy torrent', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+
+  await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: { filename: 'magnet:?xt=urn:btih:feedface&dn=Example.Release' },
+    }),
+  });
+
+  const getResponse = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-get',
+      arguments: { fields: ['id', 'error', 'errorString'] },
+    }),
+  });
+  const getBody = await getResponse.json();
+  assert.equal(getBody.result, 'success');
+  assert.equal(getBody.arguments.torrents.length, 1);
+  // The Transmission RPC spec defines `error` as an integer (0 = TR_STAT_OK).
+  // Emitting boolean false here breaks *arr clients that distinguish 0 from false.
+  assert.equal(getBody.arguments.torrents[0].error, TRANSMISSION_ERROR.ok);
+  assert.equal(typeof getBody.arguments.torrents[0].error, 'number');
+  assert.equal(getBody.arguments.torrents[0].errorString, '');
+});
+
+test('torrent-get reports a local error as the integer 3 (TR_STAT_LOCAL_ERROR)', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+
+  await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: { filename: 'magnet:?xt=urn:btih:feedface&dn=Example.Release' },
+    }),
+  });
+
+  // A download that failed to stage carries a local error (TR_STAT_LOCAL_ERROR),
+  // the nonzero integer 3 — never a boolean true.
+  harness.store.updateDownload(1, {
+    error: 3,
+    error_string: 'put.io 500: temporary failure',
+  });
+
+  const getResponse = await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-get',
+      arguments: { fields: ['id', 'error', 'errorString'] },
+    }),
+  });
+  const getBody = await getResponse.json();
+  assert.equal(getBody.result, 'success');
+  assert.equal(getBody.arguments.torrents[0].error, TRANSMISSION_ERROR.localError);
+  assert.equal(typeof getBody.arguments.torrents[0].error, 'number');
+  assert.equal(getBody.arguments.torrents[0].errorString, 'put.io 500: temporary failure');
 });
 
 test('failed RPC surfaces the real error in the Transmission result field', async (t) => {

@@ -13,6 +13,7 @@ import {
   normalizeRelativePath,
   resolveInside,
 } from './paths.js';
+import { TRANSMISSION_ERROR } from '../transmission/progress.js';
 
 const READY_REMOTE_STATUSES = new Set(['COMPLETED', 'SEEDING']);
 const SLOW_RESET_PAUSE_MS = 500;
@@ -206,7 +207,7 @@ export class DownloadManager {
   recordTransferStartFailure(transfer, error, message) {
     if (transfer?.id) {
       this.store.updateDownload(transfer.id, {
-        error: true,
+        error: TRANSMISSION_ERROR.localError,
         error_string: error.message,
         download_speed: 0,
         eta: -1,
@@ -252,7 +253,7 @@ export class DownloadManager {
     const downloadRoot = this.service.claimStagingRoot(profile, transfer);
     const updated = this.store.updateDownload(transfer.id, {
       lifecycle: 'downloading',
-      error: false,
+      error: TRANSMISSION_ERROR.ok,
       error_string: '',
     });
     const remoteFileIds = [];

@@ -8,6 +8,16 @@ export const TRANSMISSION_STATUS = {
   seed: 6,
 };
 
+// The Transmission RPC `error` field on a torrent is an integer (0 = TR_STAT_OK),
+// never a boolean: *arr clients distinguish 0 from false. PutioRR only has "no
+// error" or "a local error", so the tracker codes stay unused but defined.
+export const TRANSMISSION_ERROR = {
+  ok: 0,
+  trackerWarning: 1,
+  trackerError: 2,
+  localError: 3,
+};
+
 export function mapPutioStatus(status) {
   switch (status) {
     case 'IN_QUEUE':

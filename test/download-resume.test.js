@@ -7,6 +7,7 @@ import { loadConfig } from '../src/config.js';
 import { DownloadManager } from '../src/download/manager.js';
 import { StateStore } from '../src/state/store.js';
 import { TransferService } from '../src/transfer/service.js';
+import { TRANSMISSION_ERROR } from '../src/transmission/progress.js';
 
 class FakePutio {
   constructor({ remoteFiles = [], remoteTransfers = [] } = {}) {
@@ -232,7 +233,7 @@ test('a put.io name too long for the filesystem fails on the download, loudly', 
     await manager.prepareTransferSafely(harness.store.findDownloadById(transfer.id));
 
     const row = harness.store.findDownloadById(transfer.id);
-    assert.equal(row.error, true);
+    assert.equal(row.error, TRANSMISSION_ERROR.localError);
     assert.match(row.error_string, /at most 255/);
     assert.match(row.error_string, /rename it on put\.io/);
     assert.deepEqual(harness.store.listFilesForDownload(transfer.id), []);
@@ -288,7 +289,7 @@ test('a refused staging claim survives a restart with its remedy intact', async 
       // Nothing was written for it, so it is not a staged download and must not
       // be recorded as one.
       const row = before.store.findDownloadById(refusedId);
-      assert.equal(row.error, true, variant);
+      assert.equal(row.error, TRANSMISSION_ERROR.localError, variant);
       assert.equal(row.staging_folder, '', variant);
       assert.equal(row.lifecycle, 'remote', variant);
     } finally {
@@ -748,7 +749,7 @@ test('manual start stores the failure reason on the download', async () => {
     );
 
     const updated = harness.store.findDownloadById(transfer.id);
-    assert.equal(updated.error, true);
+    assert.equal(updated.error, TRANSMISSION_ERROR.localError);
     assert.equal(updated.error_string, 'put.io 500: temporary failure');
   } finally {
     harness.store.close();

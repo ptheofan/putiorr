@@ -286,7 +286,7 @@ function normalizeDownloadRow(row) {
   if (!row) return undefined;
   return {
     ...row,
-    error: toBool(row.error),
+    error: Number(row.error) || 0,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -2127,7 +2127,7 @@ export class StateStore {
         input.download_speed ?? 0,
         input.upload_speed ?? 0,
         input.eta ?? -1,
-        input.error ? 1 : 0,
+        Number(input.error) || 0,
         input.error_string ?? '',
         input.retry_count ?? 0,
         timestamp,
@@ -2186,7 +2186,7 @@ export class StateStore {
       input.download_speed ?? existing.download_speed,
       input.upload_speed ?? existing.upload_speed,
       input.eta ?? existing.eta,
-      (input.error ?? existing.error) ? 1 : 0,
+      Number(input.error ?? existing.error) || 0,
       input.error_string ?? existing.error_string,
       input.retry_count ?? existing.retry_count,
       input.reactivate !== false ? 1 : 0,
@@ -2227,7 +2227,7 @@ export class StateStore {
     const keys = allowed.filter((key) => Object.hasOwn(patch, key));
     if (keys.length === 0) return existing;
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
-    const values = keys.map((key) => (key === 'error' ? (patch[key] ? 1 : 0) : patch[key]));
+    const values = keys.map((key) => (key === 'error' ? (Number(patch[key]) || 0) : patch[key]));
     values.push(nowIso(), id);
     this.db.prepare(`UPDATE downloads SET ${assignments}, updated_at = ? WHERE id = ?`).run(...values);
     return this.findDownloadById(id);

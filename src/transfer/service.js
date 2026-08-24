@@ -14,7 +14,7 @@ import {
 } from '../download/paths.js';
 import { logger } from '../logger.js';
 import { PutioClient } from '../putio/client.js';
-import { calculateTransmissionProgress } from '../transmission/progress.js';
+import { calculateTransmissionProgress, TRANSMISSION_ERROR } from '../transmission/progress.js';
 // The preset the dashboard writes into a profile; plain data with no imports of
 // its own, so the one spelling serves both the browser and this process.
 import { GRAB_PROFILE_TYPE, SHARED_RPC_PATH } from '../web/constants.js';
@@ -177,7 +177,7 @@ function putioTransferToStoreInput(transfer, fallback = {}) {
     eta: useLocalMetrics
       ? fallback.eta ?? -1
       : transfer.estimatedTime,
-    error: Boolean(transfer.errorMessage),
+    error: transfer.errorMessage ? TRANSMISSION_ERROR.localError : TRANSMISSION_ERROR.ok,
     error_string: transfer.errorMessage ?? '',
     reactivate: fallback.reactivate,
   };
