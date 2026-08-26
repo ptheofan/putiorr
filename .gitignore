@@ -22,3 +22,4 @@ putiorr-compose/data/**
 *.sqlite-shm
 *.sqlite-wal
 .DS_Store
+graphify-out/

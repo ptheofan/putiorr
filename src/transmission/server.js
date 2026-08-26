@@ -804,7 +804,7 @@ export class TransmissionRpcServer {
         // Presets are stored lowercase wherever they enter putiorr, so the
         // filter that reads them back normalizes the same way.
         const type = (searchParams.get('type') ?? '').trim().toLowerCase();
-        const profiles = this.service.store.listProfiles();
+        const profiles = this.service.store.listProfiles().map(redactProfile);
         jsonResponse(
           res,
           200,
@@ -1759,9 +1759,21 @@ function claimedElsewhereRefusal(holder, site) {
 
 // Warnings are advice about what was just typed, not profile data: they ride
 // along on the reply that answered for them and are never stored.
+// Issue #111. The *arr API key is write-only over HTTP. GET /api/profiles is
+// what the browser extension reads, and the dashboard has no login in front of
+// it, so the secret leaves the database exactly never. The wizard needs to know
+// whether one is stored, not what it is, so a boolean goes in its place — and a
+// blank submission means "leave it alone" rather than "clear it".
+function redactProfile(profile) {
+  if (!profile) return profile;
+  const { arr_api_key: key, arrApiKey: _camelKey, ...rest } = profile;
+  return { ...rest, arr_api_key_set: Boolean(key) };
+}
+
 function profileResponse(profile, input) {
   const warnings = input.browser_domain_warnings;
-  return warnings?.length ? { ...profile, browser_domain_warnings: warnings } : profile;
+  const redacted = redactProfile(profile);
+  return warnings?.length ? { ...redacted, browser_domain_warnings: warnings } : redacted;
 }
 
 function normalizeProfileInput(input, { partial = false } = {}) {
@@ -1781,6 +1793,10 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
   const browserDomains = input.browser_domains ?? input.browserDomains;
   const browserCatchAll = input.browser_catch_all ?? input.browserCatchAll;
+  const arrBaseUrl = input.arr_base_url ?? input.arrBaseUrl;
+  const arrApiKey = input.arr_api_key ?? input.arrApiKey;
+  const rejectUnimportable = input.reject_unimportable ?? input.rejectUnimportable;
+  const rejectMinSize = input.reject_min_size ?? input.rejectMinSize;
   const takeOverCatchAll = input.take_over_catch_all ?? input.takeOverCatchAll;
   const takeOverCatchAllFrom = input.take_over_catch_all_from ?? input.takeOverCatchAllFrom;
 
@@ -1816,6 +1832,34 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   // never come through here have to be checked too.
   if (browserCatchAll !== undefined) {
     output.browser_catch_all = normalizeBooleanInput(browserCatchAll);
+  }
+  // Issue #111. Refused rather than silently dropped: a base URL putiorr cannot
+  // build a request from would leave the profile looking configured to reject
+  // releases while every call throws at download time, which is the one moment
+  // nobody is watching.
+  if (arrBaseUrl !== undefined) {
+    const value = String(arrBaseUrl ?? '').trim().replace(/\/+$/, '');
+    if (value && !/^https?:\/\/.+/i.test(value)) {
+      throw new Error(`"${value}" is not a usable *arr URL; it must start with http:// or https://`);
+    }
+    output.arr_base_url = value;
+  }
+  // Blank means "keep what is stored", because the wizard cannot render the key
+  // back into the field to resubmit it. Turning the feature off is the
+  // reject_unimportable toggle, not clearing this.
+  if (arrApiKey !== undefined) {
+    const value = String(arrApiKey ?? '').trim();
+    if (value) output.arr_api_key = value;
+  }
+  if (rejectUnimportable !== undefined) {
+    output.reject_unimportable = normalizeBooleanInput(rejectUnimportable);
+  }
+  if (rejectMinSize !== undefined) {
+    const size = Number(rejectMinSize);
+    if (rejectMinSize !== '' && rejectMinSize != null && (!Number.isFinite(size) || size < 0)) {
+      throw new Error(`"${rejectMinSize}" is not a usable minimum release size; use a whole number of bytes, or 0 for no minimum`);
+    }
+    output.reject_min_size = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
   }
   // Not a column, and the store is where it is answered — same reason the flag
   // itself is: only that layer sees the other rows, and the clear and the

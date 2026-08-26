@@ -25,6 +25,9 @@ import {
   setProfileFact,
   browserDomainsPayload,
   browserCatchAllPayload,
+  rejectionPayload,
+  supportsRejection,
+  minSizeBytesToMb,
   grabProfileSummary,
   presetDisplayName,
   setCheckboxChecked,
@@ -539,6 +542,16 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   ));
   setWizardField(el.wizardBrowserDomains, browserDomainsList(profile).join(', '));
   setWizardChecked(el.wizardBrowserCatchAll, browserCatchAll(profile));
+  setWizardChecked(el.wizardRejectUnimportable, Boolean(
+    profile.reject_unimportable ?? profile.rejectUnimportable,
+  ));
+  setWizardField(el.wizardArrBaseUrl, profile.arr_base_url ?? profile.arrBaseUrl ?? '');
+  // Never populated: the server does not send the key back. Blank means "keep
+  // the stored one", and the placeholder is what says so.
+  setWizardField(el.wizardArrApiKey, '');
+  setWizardField(el.wizardRejectMinSize, minSizeBytesToMb(
+    profile.reject_min_size ?? profile.rejectMinSize,
+  ));
   el.deleteProfileButton.hidden = !isExisting;
   setText(el.saveProfileButton, saveButtonLabel(type));
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
@@ -610,6 +623,10 @@ export function applyProfileTypeLayout(type = fieldValue(el.wizardProfileType)) 
   const isGrab = type === GRAB_PROFILE_TYPE;
   setHidden(el.wizardRpcStep, isGrab);
   setHidden(el.wizardBrowserStep, !isGrab);
+  // Only Sonarr and Radarr expose the queue blocklist API this drives. Showing
+  // the step for Lidarr, Readarr or a custom profile would offer a setting that
+  // silently never fires.
+  setHidden(el.wizardRejectStep, !supportsRejection(type));
   setHidden(el.copyClientSettingsButton, isGrab);
   setText(el.profileWizardIntro, isGrab ? GRAB_WIZARD_INTRO : ARR_WIZARD_INTRO);
   setText(el.wizardAppStepHelp, isGrab ? GRAB_APP_STEP_HELP : ARR_APP_STEP_HELP);
@@ -672,6 +689,12 @@ export function getWizardPayload() {
     // Only the presets that show the step send it at all.
     ...browserDomainsPayload(el.wizardBrowserStep.hidden, fieldValue(el.wizardBrowserDomains).trim()),
     ...browserCatchAllPayload(el.wizardBrowserStep.hidden, fieldChecked(el.wizardBrowserCatchAll)),
+    ...rejectionPayload(el.wizardRejectStep.hidden, {
+      enabled: fieldChecked(el.wizardRejectUnimportable),
+      baseUrl: fieldValue(el.wizardArrBaseUrl),
+      apiKey: fieldValue(el.wizardArrApiKey),
+      minSizeMb: fieldValue(el.wizardRejectMinSize),
+    }),
   };
 }
 

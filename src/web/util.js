@@ -247,6 +247,41 @@ export function browserCatchAllPayload(hidden, checked) {
   return hidden ? {} : { browserCatchAll: Boolean(checked) };
 }
 
+// Issue #111. Only the presets whose blocklist API putiorr speaks show the
+// step, and only a visible step sends its fields — a hidden control must never
+// write a setting nobody saw, which is the same rule the browser fields follow.
+export const ARR_REJECTION_TYPES = new Set(['sonarr', 'radarr']);
+
+export function supportsRejection(type) {
+  return ARR_REJECTION_TYPES.has(String(type ?? '').trim().toLowerCase());
+}
+
+// The field is MB because nobody reasons about a release in bytes; the column
+// is bytes because every size putiorr compares it against is. Anything
+// unreadable becomes 0, which is "no minimum" — the harmless direction, where
+// a NaN floor would reject every release.
+export function minSizeMbToBytes(value) {
+  const mb = Number(String(value ?? '').trim());
+  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : 0;
+}
+
+export function minSizeBytesToMb(bytes) {
+  const size = Number(bytes ?? 0);
+  return Number.isFinite(size) && size > 0 ? String(Math.round(size / (1024 * 1024))) : '';
+}
+
+export function rejectionPayload(hidden, { enabled, baseUrl, apiKey, minSizeMb }) {
+  if (hidden) return {};
+  return {
+    reject_unimportable: Boolean(enabled),
+    arr_base_url: String(baseUrl ?? '').trim(),
+    // Blank is "keep the stored key" all the way down: the wizard never reads
+    // one back, so it cannot resubmit what it was not given.
+    arr_api_key: String(apiKey ?? '').trim(),
+    reject_min_size: minSizeMbToBytes(minSizeMb),
+  };
+}
+
 // What the takeover offer says, and what it costs. The consequence is stated
 // next to the action rather than behind it: the profile it clears may not even
 // be on screen, and "it worked" is no answer to "what did it do?".

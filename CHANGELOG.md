@@ -9,6 +9,45 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [Unreleased]
+
+### Added
+
+- **Sonarr and Radarr profiles can reject a release put.io delivered as junk,
+  before downloading it.** ([#111](https://github.com/ptheofan/putiorr/issues/111))
+  When put.io finishes a transfer, putiorr already knows every filename and size
+  in it — and until now it downloaded a passworded archive, a folder of `.exe`
+  and `.txt`, or a release that arrived a fraction of its announced size just
+  like any other. The import then failed and the queue item sat in Activity
+  blocking that episode or movie until someone clicked blocklist by hand.
+
+  Put an app URL and API key on a Sonarr or Radarr profile, tick **Reject
+  releases put.io delivers with nothing importable**, and putiorr calls the
+  app's queue API to blocklist the release and search again, then drops it from
+  put.io. Nothing is ever staged or downloaded.
+
+  This cannot be done over Transmission. putiorr already sets the torrent's
+  `errorString`, and Sonarr maps that to a *warning*, never a failure — so
+  Failed Download Handling never fires and the item stays in the queue. The
+  blocklist only exists in the REST API, which is why it needs a key.
+
+  **Off by default, and it stays off after upgrading.** Three things count as
+  junk: nothing importable in the release at all, put.io delivering less than
+  half the announced size, and an optional per-profile minimum size. The
+  minimum is off by default on purpose — a half-hour SD episode is 150–250 MB
+  and 720p anime runs 200–350 MB, so any figure safe for movies would silently
+  blocklist a whole anime library.
+
+  The rule for "nothing importable" is deliberately conservative: rar'd scene
+  releases, `VIDEO_TS`/`BDMV` disc rips, and multipart archives all pass. A
+  wrongly blocklisted release is invisible and permanent; a missed bad one
+  costs the one manual click that happens today.
+
+  Only Sonarr and Radarr — Lidarr and Readarr serve a different API version
+  putiorr does not speak, so the step is not offered there. The API key is
+  write-only over HTTP: `GET /api/profiles` reports only whether one is stored,
+  never its value.
+
 ## [3.0.6] — 2026-07-27
 
 ### Changed

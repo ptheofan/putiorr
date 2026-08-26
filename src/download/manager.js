@@ -4,6 +4,8 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { logger } from '../logger.js';
 import { downloadPolicyForContext, isSlowSpeedResetEnabled } from './policy.js';
+import { ArrClient, supportsArrRejection } from '../arr/client.js';
+import { inspectRelease } from './release-check.js';
 import {
   downloadLocalRoot,
   fileExistsWithSize,
@@ -56,12 +58,16 @@ export class DownloadManager {
     service,
     fetchImpl = globalThis.fetch,
     now = Date.now,
+    // Issue #111. Injected so a test can stand in for the *arr without a
+    // network, the same way fetchImpl stands in for put.io.
+    arrClientFactory = (options) => new ArrClient(options),
   }) {
     this.config = config;
     this.store = store;
     this.service = service;
     this.fetch = fetchImpl;
     this.now = now;
+    this.arrClientFactory = arrClientFactory;
     this.controller = new AbortController();
     this.running = false;
     this.pollTimer = undefined;
@@ -218,6 +224,12 @@ export class DownloadManager {
       throw new Error('ready transfer has no downloadable files on put.io');
     }
 
+    // Issue #111. The last moment this is free: put.io has listed the files, and
+    // nothing has been staged or fetched yet. A release that cannot be imported
+    // is rejected here rather than downloaded, imported-and-failed, and left
+    // blocking the *arr queue.
+    if (await this.rejectUnimportableTransfer(transfer, profile, remoteFiles)) return;
+
     // Claimed before the row is moved on, because claiming is the step that can
     // refuse — a staging collision, or a put.io name too long to be a folder.
     // Flipping lifecycle first left a refused download sitting at 'downloading'
@@ -265,6 +277,91 @@ export class DownloadManager {
 
     this.store.updateDownload(updated.id, { total_size: totalSize });
     await this.finalizeTransferIfComplete(updated.id);
+  }
+
+  // Issue #111. Returns true when the release was rejected and prepareTransfer
+  // must stop. Every failure path returns false: a profile with no *arr
+  // configured, an *arr that cannot be reached, or a queue it does not hold
+  // this hash in all mean putiorr downloads the release as it always did.
+  // Rejecting is the exceptional branch, and it never runs on a guess.
+  async rejectUnimportableTransfer(transfer, profile, remoteFiles) {
+    if (!profile?.reject_unimportable) return false;
+    if (!supportsArrRejection(profile)) return false;
+    if (!profile.arr_base_url || !profile.arr_api_key) return false;
+
+    const verdict = inspectRelease({
+      files: remoteFiles,
+      announcedSize: Number(transfer.total_size ?? 0),
+      minSize: Number(profile.reject_min_size ?? 0),
+    });
+    if (!verdict.reject) return false;
+
+    const hash = transfer.hash;
+    if (!hash) {
+      logger.warn('cannot reject unimportable release without a torrent hash', {
+        transferId: transfer.id,
+        name: transfer.name,
+        reason: verdict.reason,
+      });
+      return false;
+    }
+
+    let accepted;
+    try {
+      const client = this.arrClientFactory({
+        baseUrl: profile.arr_base_url,
+        apiKey: profile.arr_api_key,
+        fetchImpl: this.fetch,
+      });
+      accepted = await client.rejectByHash(hash);
+    } catch (error) {
+      // Downloading a bad release is recoverable by hand; silently dropping one
+      // the *arr still has queued is not, because nothing would ever search
+      // again for it. So a failure here falls through to the normal download.
+      logger.warn('failed to tell the *arr to blocklist an unimportable release', {
+        transferId: transfer.id,
+        name: transfer.name,
+        profile: profile.name,
+        reason: verdict.reason,
+        error: error.message,
+      });
+      return false;
+    }
+
+    if (!accepted) {
+      logger.warn('the *arr has no queue item for this release; downloading it anyway', {
+        transferId: transfer.id,
+        name: transfer.name,
+        profile: profile.name,
+        hash,
+        reason: verdict.reason,
+      });
+      return false;
+    }
+
+    logger.info('rejected unimportable release; told the *arr to blocklist and search again', {
+      transferId: transfer.id,
+      name: transfer.name,
+      profile: profile.name,
+      reason: verdict.reason,
+    });
+
+    // Nothing has been staged yet, so there is nothing local to delete. The
+    // remote copy goes because keeping junk on put.io is the whole cost this
+    // avoids.
+    try {
+      await this.service.deleteDownloadBucket(transfer.id, {
+        deleteRemote: Boolean(this.service.getPutioToken()),
+        deleteLocal: false,
+      });
+    } catch (error) {
+      logger.warn('failed to remove a rejected release from putiorr', {
+        transferId: transfer.id,
+        name: transfer.name,
+        error: error.message,
+      });
+    }
+    return true;
   }
 
   async pruneProcessedTransfersMissingLocalData() {
