@@ -229,8 +229,8 @@ test('the summary hides itself at zero and never buries an undelivered rejection
   // The mixed case has to state both numbers: a total alone would read as three
   // successful rejections when one release is still sitting in the *arr queue.
   const mixed = rejectedReleasesSummary({ total: 3, blocklisted: 2, downloaded: 1 });
-  assert.match(mixed, /2 blocklisted/);
-  assert.match(mixed, /1 downloaded anyway/);
+  assert.match(mixed, /2 blacklisted/);
+  assert.match(mixed, /1 downloaded because/);
   assert.match(
     rejectedReleasesSummary({ total: 1, blocklisted: 0, downloaded: 1 }),
     /never told/,

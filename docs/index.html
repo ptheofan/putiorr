@@ -220,7 +220,7 @@
           <p>
             When put.io finishes a transfer, putiorr can read what is actually in it
             before copying a single byte. A release Sonarr or Radarr could never
-            import is blocklisted, searched again, and dropped from put.io — instead
+            import is blacklisted, searched again, and dropped from put.io — instead
             of downloading, failing to import, and blocking that episode or movie in
             Activity until someone clears it by hand.
           </p>
@@ -245,8 +245,8 @@
         <div class="reject-notes">
           <p>
             <strong>Off by default, and off after upgrading.</strong> It needs the app's
-            URL and API key, because blocklisting exists only in the Sonarr and Radarr
-            REST API — a download client cannot ask for it. putiorr runs the replacement
+            URL and API key, because this lives only in the Sonarr and Radarr REST API
+            (they call it the blocklist) — a download client cannot ask for it. putiorr runs the replacement
             search itself, so it works whether or not <em>Redownload Failed</em> is enabled.
           </p>
           <p>
@@ -397,7 +397,7 @@
           <article>
             <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 4.75 19.25 12 12 19.25 4.75 12 12 4.75ZM9.5 9.5l5 5M14.5 9.5l-5 5"></path></svg>
             <h3>Unimportable releases refused</h3>
-            <p>Sonarr and Radarr profiles can blocklist a junk release and search again before it is ever downloaded.</p>
+            <p>Sonarr and Radarr profiles can blacklist a junk release and search again before it is ever downloaded.</p>
           </article>
         </div>
       </section>
