@@ -814,6 +814,19 @@ p {
   font-size: 14px;
 }
 
+/* Closing caveats under the rejection grid: the caveats matter as much as the
+   feature, so they read as prose rather than as another card. */
+.reject-notes {
+  display: grid;
+  gap: 12px;
+  max-width: 720px;
+  margin: 26px auto 0;
+  text-align: center;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+
 .setup {
   display: grid;
   gap: 28px;
