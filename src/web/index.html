@@ -471,7 +471,7 @@
               <wa-input id="wizardArrBaseUrl" label="App URL" type="text" autocomplete="off" placeholder="http://sonarr:8989" data-testid="profile-arr-base-url"></wa-input>
               <wa-input id="wizardArrApiKey" label="App API key" type="password" autocomplete="off" placeholder="leave blank to keep the stored key" data-testid="profile-arr-api-key"></wa-input>
               <wa-input id="wizardRejectMinSize" label="Minimum release size (MB)" type="number" min="0" step="1" autocomplete="off" placeholder="0 for no minimum" data-testid="profile-reject-min-size"></wa-input>
-              <p class="field-help">Only Sonarr and Radarr expose the blocklist API this uses. A minimum size is off by default on purpose: half-hour SD episodes and 720p anime sit well under any figure that is safe for movies, and a blocklist cannot be undone from putiorr.</p>
+              <p class="field-help">Only Sonarr and Radarr expose the blocklist API this uses. Neither can extract archives from a torrent, so a release that arrives packed as .rar is rejected too — <strong>leave this off if you run Unpackerr or another extractor</strong>, which makes those releases importable after all. A minimum size is off by default on purpose: half-hour SD episodes and 720p anime sit well under any figure that is safe for movies, and a blocklist cannot be undone from putiorr.</p>
             </section>
 
             <section class="wizard-step" id="wizardOptionsStep">

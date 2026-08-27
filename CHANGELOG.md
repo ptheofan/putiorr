@@ -39,12 +39,17 @@ their notes — GitHub's generated list of merged pull requests — remain on th
   blocklist a whole anime library.
 
   What counts as importable is decided by the preset, not by one list shared
-  across all of them: on a Sonarr or Radarr profile a release of nothing but
-  `.flac`, or a lone `.pdf`, is rejected too — importable to *some* app, and to
-  these two exactly as useless as a folder of `.exe`. Within that, the rule is
-  deliberately conservative: rar'd scene releases, `VIDEO_TS`/`BDMV` disc rips,
-  and multipart archives all pass. A wrongly blocklisted release is invisible
-  and permanent; a missed bad one costs the one manual click that happens today.
+  across all of them. On a Sonarr or Radarr profile that means a release of
+  nothing but `.flac`, or a lone `.pdf` — importable to *some* app, and to these
+  two exactly as useless as a folder of `.exe` — and it also means **a release
+  that arrives packed as `.rar`**: neither app extracts archives from a torrent
+  download, which is why a packed release imports as "no files found are
+  eligible for import" today. `VIDEO_TS`/`BDMV` disc rips and `.iso` still pass.
+
+  **Leave this off if you run Unpackerr** or another extractor, which makes
+  packed releases importable after all and would turn every one of them into a
+  wrongly blocklisted release. A wrong blocklist is invisible and permanent; a
+  missed bad release costs the one manual click that happens today.
 
   Only Sonarr and Radarr — Lidarr and Readarr serve a different API version
   putiorr does not speak, so the step is not offered there. The API key is

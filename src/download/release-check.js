@@ -2,36 +2,47 @@
 // downloading at all. Pure: it is handed the file list put.io already returned
 // in prepareTransfer() and answers before a single byte crosses the wire.
 //
-// The rule is deliberately NEGATIVE — reject only when nothing here could
-// possibly be imported — rather than positive ("must contain a video file").
-// A positive rule trashes rar'd scene releases, VIDEO_TS/BDMV rips, and every
-// legitimate Lidarr or Readarr download. Getting this wrong is not symmetric:
-// a wrongly blocklisted release is invisible and permanent, while a missed bad
-// one costs the one manual click that already happens today.
+// The rule is NEGATIVE — reject only when nothing here could be imported by the
+// app that asked for it — rather than positive ("must contain a video file").
+// A positive rule would trash VIDEO_TS/BDMV rips and every legitimate Lidarr or
+// Readarr download. Getting this wrong is not symmetric: a wrongly blocklisted
+// release is invisible and permanent, while a missed bad one costs the one
+// manual click that already happens today, so every ambiguity resolves toward
+// downloading.
+//
+// "Could be imported" is per preset, because it genuinely differs: a rar'd
+// release is a normal delivery to a Lidarr and dead weight to a Sonarr, which
+// cannot unpack it.
 
 const VIDEO = /\.(mkv|mp4|avi|m4v|ts|m2ts|mov|wmv|mpg|mpeg|webm|vob|iso|img|flv|ogm|divx|rmvb)$/i;
 const AUDIO = /\.(flac|mp3|m4a|m4b|ogg|opus|wav|aac|ape|wma|alac|dsf|dff|mka)$/i;
 const BOOK = /\.(epub|mobi|azw|azw3|pdf|cbz|cbr|djvu|fb2)$/i;
-// Every multipart naming scheme in the wild. Archives belong to every preset:
-// an *arr unpacks before it imports, so a rar'd release is valid whatever it is.
+// Every multipart naming scheme in the wild.
 const ARCHIVE = [
   /\.(rar|zip|7z|tar|gz|bz2|xz|tgz)$/i,
   /\.r\d{2}$/i,
   /\.\d{3}$/,
 ];
 
-// What each preset can actually import. A union list would let a release of
-// nothing but .flac — or a lone .pdf — through on a Sonarr profile, get it
-// downloaded, and fail the import anyway: the stuck queue item this exists to
-// prevent. Only the presets whose blocklist API putiorr speaks are listed; a
-// preset with no entry is checked against everything, which is the permissive
-// direction and so the safe one.
+// What each preset can actually import.
+//
+// Sonarr and Radarr do NOT extract archives from a torrent download — that is a
+// usenet client's job, and for torrents it needs an external unpacker. A rar'd
+// release handed to either of them is precisely what produces "no files found
+// are eligible for import", so it is junk by the same standard as a folder of
+// .exe and is rejected here.
+//
+// A preset with no entry is checked against everything, archives included. That
+// permissive fallback is the safe direction: a preset nobody has written a rule
+// for must not start rejecting every release.
 const IMPORTABLE_BY_PRESET = {
-  sonarr: [VIDEO, ...ARCHIVE],
-  radarr: [VIDEO, ...ARCHIVE],
+  sonarr: [VIDEO],
+  radarr: [VIDEO],
 };
 
 const IMPORTABLE_ANY = [VIDEO, ...ARCHIVE, AUDIO, BOOK];
+
+const ANY_ARCHIVE = (relativePath) => ARCHIVE.some((pattern) => pattern.test(relativePath));
 
 // A disc rip's payload is inside these directories, and the files themselves
 // (.BUP, .IFO, .CLPI) would not otherwise read as importable.
@@ -112,9 +123,15 @@ export function inspectRelease({
 
   const patterns = importablePatterns(preset);
   if (!paths.some((relativePath) => isImportable(relativePath, patterns))) {
+    // Worth naming, because "nothing importable" reads like putiorr is broken
+    // when the folder plainly holds the release. It holds it in a form this app
+    // cannot open, and the fix is a tool putiorr is not.
+    const archivesOnly = paths.some(ANY_ARCHIVE);
     return {
       reject: true,
-      reason: `nothing ${presetLabel(preset)} can import in ${paths.length} file(s): ${paths.slice(0, 3).join(', ')}`,
+      reason: archivesOnly
+        ? `${presetLabel(preset)} cannot extract archives, and this release is packed: ${paths.slice(0, 3).join(', ')}`
+        : `nothing ${presetLabel(preset)} can import in ${paths.length} file(s): ${paths.slice(0, 3).join(', ')}`,
     };
   }
 

@@ -14,9 +14,9 @@ test('accepts an ordinary video release', () => {
   assert.equal(verdict.reason, '');
 });
 
-// The whole reason the rule is negative rather than positive. Each of these has
-// no video extension anywhere and every one of them is legitimate.
-test('accepts releases with no video extension that an *arr can still import', () => {
+// The whole reason the rule is negative rather than positive. With no preset the
+// check falls back to the permissive union, so every one of these passes.
+test('the unknown-preset fallback accepts anything some *arr could import', () => {
   const legitimate = [
     ['rar\'d scene release', [file('release.rar'), file('release.r00'), file('release.r01')]],
     ['multipart numeric split', [file('release.001'), file('release.002')]],
@@ -28,6 +28,44 @@ test('accepts releases with no video extension that an *arr can still import', (
   for (const [label, files] of legitimate) {
     assert.equal(inspectRelease({ files }).reject, false, `${label} must not be rejected`);
   }
+});
+
+// Sonarr and Radarr do not extract archives from a torrent download. A packed
+// release is what produces "no files found are eligible for import", so it is
+// junk to them by the same standard as a folder of .exe.
+test('a packed release is rejected on sonarr and radarr', () => {
+  const packed = [
+    ['rar set', [file('release.rar'), file('release.r00'), file('release.r01')]],
+    ['multipart numeric split', [file('release.001'), file('release.002')]],
+    ['single zip', [file('Show.S01E01.zip')]],
+    ['7z', [file('Movie.7z')]],
+  ];
+  for (const preset of ['sonarr', 'radarr']) {
+    for (const [label, files] of packed) {
+      const verdict = inspectRelease({ files, preset });
+      assert.equal(verdict.reject, true, `${preset} must reject a ${label}`);
+      assert.match(verdict.reason, /cannot extract archives/);
+    }
+  }
+});
+
+// The other presets keep archives: nothing here has verified they cannot handle
+// one, and the whole design leans toward downloading when unsure.
+test('presets without a rule still accept a packed release', () => {
+  for (const preset of ['lidarr', 'readarr', 'custom', '']) {
+    const verdict = inspectRelease({ files: [file('release.rar'), file('release.r00')], preset });
+    assert.equal(verdict.reject, false, `${preset || '(none)'} must accept a packed release`);
+  }
+});
+
+// A packed release that also ships the playable file is fine: the video is
+// there to import, whatever else sits beside it.
+test('an archive alongside a video file is not a rejection', () => {
+  const verdict = inspectRelease({
+    files: [file('Show.S01E01.mkv'), file('subs.rar', 2 * MB)],
+    preset: 'sonarr',
+  });
+  assert.equal(verdict.reject, false);
 });
 
 test('rejects a release with nothing importable in it', () => {
@@ -52,14 +90,13 @@ test('rejects an audio-only or book-only release on a video preset', () => {
   }
 });
 
-test('a video preset still accepts archives and disc structures', () => {
+test('a video preset still accepts playable files and disc structures', () => {
   for (const preset of ['sonarr', 'radarr']) {
     const cases = [
-      [file('release.rar'), file('release.r00')],
-      [file('release.001'), file('release.002')],
       [file('Movie/VIDEO_TS/VTS_01_1.VOB')],
       [file('Movie/BDMV/STREAM/00000.m2ts')],
       [file('Show.S01E01.mkv')],
+      [file('Movie.iso')],
     ];
     for (const files of cases) {
       assert.equal(inspectRelease({ files, preset }).reject, false, `${preset}: ${files[0].relativePath}`);

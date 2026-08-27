@@ -282,6 +282,37 @@ test('an audio-only release is rejected on a sonarr profile', async () => {
   }
 });
 
+// Sonarr does not extract archives from a torrent download, so a packed release
+// imports as "no files found are eligible for import" — the stuck queue item.
+test('a packed release is rejected on a sonarr profile', async () => {
+  const files = [
+    { relativePath: 'Show.S01E01/release.rar', size: 700 * MB, id: 5, name: 'a' },
+    { relativePath: 'Show.S01E01/release.r00', size: 700 * MB, id: 6, name: 'b' },
+  ];
+  const harness = await createHarness(new FakePutio(files));
+  const arr = createFakeArr();
+  try {
+    const profile = createSonarrProfile(harness);
+    const transfer = seedReadyTransfer(harness, profile, { total_size: 1400 * MB });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: arr.fetchImpl,
+    });
+    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+
+    assert.equal(arr.calls[1].method, 'DELETE');
+    assert.equal(arr.calls[1].query.blocklist, 'true');
+    assert.equal(arr.calls[1].query.skipRedownload, 'false');
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
+    assert.deepEqual(harness.store.listFilesForDownload(transfer.id), []);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('a lidarr profile never rejects, because putiorr does not speak its API', async () => {
   const harness = await createHarness(new FakePutio(JUNK_FILES));
   const arr = createFakeArr();
