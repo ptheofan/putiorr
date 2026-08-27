@@ -57,6 +57,7 @@
           <a href="#download-profiles">Download profiles</a>
           <a href="#download-client">Download clients</a>
           <a href="#prowlarr">Prowlarr</a>
+          <a href="#reject-unimportable">Rejecting junk releases</a>
           <a href="#browser-grabs">Browser grabs</a>
           <a href="#progress">Progress model</a>
         </aside>
@@ -313,6 +314,110 @@
             <pre><code>Radarr URL: http://radarr:7878
 Sonarr URL: http://sonarr:8989
 Lidarr URL: http://lidarr:8686</code></pre>
+          </section>
+
+          <section id="reject-unimportable" class="doc-section">
+            <h2>Rejecting junk releases</h2>
+            <p>
+              A Sonarr or Radarr profile can check what put.io actually produced
+              before putiorr downloads any of it. A release the app could never
+              import is blacklisted, searched again, and removed from put.io —
+              rather than downloaded, failed at import, and left blocking that
+              episode or movie in Activity.
+            </p>
+            <p>
+              This needs the app's URL and API key. Blacklisting a release — Sonarr and
+              Radarr call it the blocklist — exists only in their REST API: a download client speaking Transmission
+              has no way to ask for it, which is why putiorr sets a torrent error
+              today and the item still sits in the queue.
+            </p>
+            <p>
+              Open the profile wizard on a Sonarr or Radarr profile and fill in the
+              <strong>Reject bad releases</strong> step.
+            </p>
+            <figure class="dashboard-capture">
+              <img src="screenshots/reject-wizard-step.png" alt="The putiorr profile wizard on a Sonarr profile, showing the Reject bad releases step with the rejection switch ticked, an App URL of http://sonarr:8989, a blank API key field, a zero minimum release size, and a 90 day rejection log retention.">
+            </figure>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr><th>Field</th><th>What it does</th></tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Reject releases…</td>
+                    <td>The switch for the whole feature. Off by default, and off after upgrading.</td>
+                  </tr>
+                  <tr>
+                    <td>App URL</td>
+                    <td>Where the app answers, for example <code>http://sonarr:8989</code> or <code>http://radarr:7878</code>.</td>
+                  </tr>
+                  <tr>
+                    <td>App API key</td>
+                    <td>From the app's Settings → General. Stored write-only: putiorr never sends it back to the browser, and leaving the field blank keeps the stored one.</td>
+                  </tr>
+                  <tr>
+                    <td>Minimum release size</td>
+                    <td>Optional floor in MB. <code>0</code> disables it.</td>
+                  </tr>
+                  <tr>
+                    <td>Keep the rejection log for</td>
+                    <td>Days to keep this profile's rejections. <code>0</code> keeps them forever.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <h3>What counts as junk</h3>
+            <ul class="doc-list">
+              <li><strong>Nothing the app can import.</strong> Decided per app rather than by one shared list, so an audio-only release or a lone PDF is refused by Sonarr and Radarr even though some other app could import it.</li>
+              <li><strong>Still packed.</strong> Neither Sonarr nor Radarr extracts an archive from a torrent download, so a <code>.rar</code> set is exactly the "no files found are eligible for import" case.</li>
+              <li><strong>Far short of what was announced.</strong> put.io finished but produced less than half the size the torrent claimed.</li>
+              <li><strong>Below the minimum size</strong>, when one is set.</li>
+            </ul>
+            <p>
+              Disc structures — <code>VIDEO_TS</code>, <code>BDMV</code> — and <code>.iso</code>
+              files still pass, and so does anything sitting next to a playable file.
+            </p>
+            <div class="doc-note">
+              <strong>Leave this off if you run Unpackerr</strong> or any other extractor.
+              It makes packed releases importable after all, so putiorr would blacklist
+              perfectly good ones. A blacklisting cannot be undone from putiorr.
+            </div>
+            <h3>The minimum size is off on purpose</h3>
+            <p>
+              A figure that is safe for movies is not safe for television. A half-hour
+              SD episode is 150–250&nbsp;MB and 720p anime runs 200–350&nbsp;MB, so a
+              shipped default would quietly blacklist entire libraries. Set it per
+              profile if you want it, and set it low on Sonarr.
+            </p>
+            <h3>Searching again</h3>
+            <p>
+              putiorr asks the app to search for a replacement itself rather than
+              relying on the app to do it. Sonarr only re-searches after a failure when
+              its own <em>Redownload Failed</em> setting is on, so leaving that decision
+              to the app meant releases were blacklisted and then never replaced, with
+              nothing saying why. However that setting is configured, exactly one search
+              runs.
+            </p>
+            <h3>The rejection log</h3>
+            <p>
+              Every rejection is recorded on the dashboard's <strong>Rejected releases</strong>
+              screen: what was thrown away, why, on which profile, and when. It is paged,
+              searchable, and filterable by outcome, and unread rejections raise a badge in
+              the sidebar until <strong>Read all</strong> clears them. A blacklisting is
+              invisible and permanent, so this is the only place a wrong one can be found
+              after the fact.
+            </p>
+            <p>
+              Releases putiorr judged unimportable but could not report to the app — it was
+              unreachable, or its queue never held the release — are listed separately as
+              <strong>Not blacklisted</strong>. Those were downloaded as usual, and their
+              queue item may still need attention.
+            </p>
+            <p>
+              Lidarr and Readarr are not offered this step. They serve a different API
+              version that putiorr does not implement.
+            </p>
           </section>
 
           <section id="browser-grabs" class="doc-section">

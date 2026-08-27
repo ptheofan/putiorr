@@ -312,7 +312,7 @@ export function rejectedReleasesSummary({ total = 0, blocklisted = 0, downloaded
   if (!blocklisted) {
     return `${releases} judged unimportable, but the app was never told — ${downloaded === 1 ? 'it was' : 'they were'} downloaded as usual and may still be stuck in its queue.`;
   }
-  return `${releases} judged unimportable: ${blocklisted} blocklisted and searched again, ${downloaded} downloaded anyway because the app could not be told.`;
+  return `${releases} judged unimportable: ${blocklisted} blacklisted and searched again, ${downloaded} downloaded because the app could not be told.`;
 }
 
 // What the takeover offer says, and what it costs. The consequence is stated

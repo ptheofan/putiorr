@@ -801,7 +801,7 @@
 }
 
 /* Unread rows are the ones nobody has looked at yet, which is the entire point
-   of keeping the log: a wrong blocklist is invisible until someone reads it. */
+   of keeping the log: a wrong blacklisting is invisible until someone reads it. */
 .rejected-release.rejected-release-unread {
   border-left-width: 5px;
 }

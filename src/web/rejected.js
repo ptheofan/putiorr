@@ -1,6 +1,6 @@
 // Issue #111. The rejection log's own screen.
 //
-// A blocklist is permanent, invisible, and made without asking. This is the only
+// A blacklisting is permanent, invisible, and made without asking. This is the only
 // place a wrong one can be noticed after the fact, which is why it gets a page
 // rather than a strip under the downloads list, and why unread rows raise a
 // badge in the sidebar: the whole point is that someone looks.
@@ -108,7 +108,9 @@ export function renderRejectedReleases() {
     setText(card.querySelector('[data-role="name"]'), row.name || '(unnamed)');
     setText(
       card.querySelector('[data-role="outcome"]'),
-      undelivered ? 'Downloaded anyway' : 'Blocklisted',
+      // The stored value stays 'blocklisted' — that is Sonarr's wire vocabulary.
+      // What a person reads here is their word for it.
+      undelivered ? 'Not blacklisted — app not told' : 'Blacklisted',
     );
     setText(card.querySelector('[data-role="reason"]'), row.reason || 'No reason recorded');
     setText(

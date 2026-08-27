@@ -60,6 +60,7 @@
           <a href="#compose">Compose changes</a>
           <a href="#seed-json">Initial JSON setup</a>
           <a href="#profiles">putiorr profiles</a>
+          <a href="#reject-junk">Rejecting junk releases</a>
           <a href="#arr-values">*arr values</a>
           <a href="#validation">Validation</a>
           <a href="#troubleshooting">Troubleshooting</a>
@@ -128,6 +129,7 @@ Validate with each *arr Test button and a small completed grab.</code></pre>
                 <li>Do not add custom Remote Path Mapping when the same host download folder can be mounted at the same container path.</li>
                 <li>Do not use local development port remaps such as <code>17010:9091</code> unless the user explicitly wants that host port.</li>
                 <li>Keep the putiorr service on the same Docker network as Radarr, Sonarr, and Lidarr so the *arr apps can use host <code>putiorr</code> and port <code>9091</code>.</li>
+                <li>Never switch on rejection of unimportable releases without asking. It blacklists releases in Sonarr or Radarr, which putiorr cannot undo, and it is wrong for anyone running Unpackerr or another extractor. Leave it off unless the user asks for it and confirms they do not extract archives.</li>
                 <li>After editing Compose or app settings, run the validation checklist and report exactly what passed or what remains blocked.</li>
               </ul>
             </div>
@@ -393,6 +395,82 @@ Validate with each *arr Test button and a small completed grab.</code></pre>
               Link each RR profile to a download profile after creating custom
               download profiles. The default download profile is acceptable for
               a first setup.
+            </p>
+          </section>
+
+          <section id="reject-junk" class="doc-section">
+            <h2>Rejecting junk releases</h2>
+            <p>
+              Optional, off by default, and Sonarr and Radarr only. When enabled,
+              putiorr checks what put.io produced before downloading it and, if
+              the app could never import it, has the app blacklist the release
+              and search again. Lidarr and Readarr serve a different API version
+              and are not offered the setting.
+            </p>
+            <div class="doc-note">
+              <strong>Do not enable this on the user's behalf.</strong> A
+              blacklisting cannot be undone from putiorr, and it is the wrong
+              setting for anyone running Unpackerr or another extractor, which
+              makes packed releases importable after all. Ask first, and confirm
+              they do not extract archives.
+            </div>
+            <p>
+              It needs the app's own URL and API key — blacklisting exists only in
+              the Sonarr and Radarr REST API, where it is called the blocklist, so
+              a Transmission download client cannot ask for it. These fields can be
+              seeded alongside the rest of the profile:
+            </p>
+            <pre><code>{
+  "name": "Sonarr",
+  "rpc_path": "/sonarr/transmission/rpc",
+  "arr_base_url": "http://sonarr:8989",
+  "arr_api_key": "&lt;from Sonarr Settings -&gt; General&gt;",
+  "reject_unimportable": true,
+  "reject_min_size": 0,
+  "reject_log_retention_days": 90
+}</code></pre>
+            <div class="doc-table-wrap">
+              <table class="doc-table">
+                <thead>
+                  <tr>
+                    <th>Key</th>
+                    <th>Meaning</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><code>arr_base_url</code></td>
+                    <td>Where the app answers on the compose network, such as <code>http://sonarr:8989</code> or <code>http://radarr:7878</code>. Must include the scheme.</td>
+                  </tr>
+                  <tr>
+                    <td><code>arr_api_key</code></td>
+                    <td>The app's API key. Never read back over HTTP: <code>GET /api/profiles</code> reports only whether one is stored.</td>
+                  </tr>
+                  <tr>
+                    <td><code>reject_unimportable</code></td>
+                    <td>The switch. Leave <code>false</code> unless the user asked for it.</td>
+                  </tr>
+                  <tr>
+                    <td><code>reject_min_size</code></td>
+                    <td>Bytes. <code>0</code> disables the floor, which is the safe default — any figure safe for movies blacklists half-hour episodes and 720p anime wholesale.</td>
+                  </tr>
+                  <tr>
+                    <td><code>reject_log_retention_days</code></td>
+                    <td>How long this profile's rejection log is kept. <code>0</code> keeps it forever.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Nothing in Sonarr or Radarr needs changing. putiorr issues the
+              replacement search itself, so the app's own <em>Redownload Failed</em>
+              setting does not matter either way.
+            </p>
+            <p>
+              Verify it by opening <strong>Rejected releases</strong> in the putiorr
+              sidebar. Every refusal is recorded there with its reason, and anything
+              putiorr judged unimportable but could not report to the app is listed
+              separately as <strong>Not blacklisted — app not told</strong>.
             </p>
           </section>
 
