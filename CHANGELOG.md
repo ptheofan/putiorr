@@ -57,10 +57,11 @@ their notes — GitHub's generated list of merged pull requests — remain on th
   rejections raise a badge on the sidebar link until **Read all** clears them,
   because the whole point of the log is that someone looks. Rows are kept for
   90 days by default, per profile and configurable on the same wizard step; set
-  it to 0 to keep them forever. A blocklist cannot be undone from putiorr and leaves no trace in the
-  download list, so this is the only place a wrong rejection can be noticed
-  after the fact. Releases putiorr judged unimportable but could not report to
-  the app — it was unreachable, or its queue had no matching item — are
+  it to 0 to keep them forever.
+
+  A blocklist cannot be undone from putiorr and leaves no trace in the download
+  list, so this is the only place a wrong rejection can be noticed after the
+  fact. Releases putiorr judged unimportable but could not report to the app — it was unreachable, or its queue had no matching item — are
   recorded too and called out separately: those were downloaded as usual and
   their queue item may still be stuck, which a single total would have hidden.
 
