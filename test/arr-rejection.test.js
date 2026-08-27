@@ -47,7 +47,9 @@ class FakePutio {
 // Answers the two *arr calls and records what it was asked. Anything else is a
 // hard failure rather than a silent default, so an unexpected request shows up
 // as the test failing instead of as a passing test proving nothing.
-function createFakeArr({ queueRecords = [{ id: 77, downloadId: HASH.toUpperCase() }] } = {}) {
+function createFakeArr({
+  queueRecords = [{ id: 77, downloadId: HASH.toUpperCase(), episodeId: 501, seriesId: 9 }],
+} = {}) {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     const target = new URL(url);
@@ -56,6 +58,7 @@ function createFakeArr({ queueRecords = [{ id: 77, downloadId: HASH.toUpperCase(
       pathname: target.pathname,
       query: Object.fromEntries(target.searchParams),
       apiKey: options.headers?.['X-Api-Key'],
+      body: options.body ? JSON.parse(options.body) : undefined,
     });
     if (target.pathname === '/api/v3/queue' && (options.method ?? 'GET') === 'GET') {
       return { ok: true, status: 200, async text() { return JSON.stringify({ records: queueRecords }); } };
@@ -63,9 +66,22 @@ function createFakeArr({ queueRecords = [{ id: 77, downloadId: HASH.toUpperCase(
     if (/^\/api\/v3\/queue\/\d+$/.test(target.pathname) && options.method === 'DELETE') {
       return { ok: true, status: 200, async text() { return ''; } };
     }
+    if (target.pathname === '/api/v3/command' && options.method === 'POST') {
+      return { ok: true, status: 201, async text() { return JSON.stringify({ id: 1 }); } };
+    }
     throw new Error(`unexpected *arr request: ${options.method ?? 'GET'} ${target.pathname}`);
   };
   return { calls, fetchImpl };
+}
+
+// prepareTransfer is called once per poll, so a deferred rejection is retried by
+// calling it again on the same manager — which is what the poll loop does.
+async function pollTimes(manager, harness, transferId, times) {
+  for (let i = 0; i < times; i += 1) {
+    const row = harness.store.findDownloadById(transferId);
+    if (!row) return;
+    await manager.prepareTransfer(row);
+  }
 }
 
 async function createHarness(putio) {
@@ -144,13 +160,20 @@ test('an unimportable release is blocklisted, searched again, and never download
     assert.equal(arr.calls[0].pathname, '/api/v3/queue');
     assert.equal(arr.calls[0].apiKey, 'secret-key');
 
-    // ...and then told to blocklist AND search again for the matched item.
+    // ...and then told to blocklist it.
     assert.equal(arr.calls[1].method, 'DELETE');
     assert.equal(arr.calls[1].pathname, '/api/v3/queue/77');
     assert.equal(arr.calls[1].query.blocklist, 'true');
-    assert.equal(arr.calls[1].query.skipRedownload, 'false');
+    // putiorr runs the search itself, so the *arr is kept out of that decision:
+    // its own Redownload Failed setting would otherwise silently skip it.
+    assert.equal(arr.calls[1].query.skipRedownload, 'true');
     // putiorr removes the download itself, so the *arr must not call back in.
     assert.equal(arr.calls[1].query.removeFromClient, 'false');
+
+    // ...and finally asked to search again for the episode that grab covered.
+    assert.equal(arr.calls[2].method, 'POST');
+    assert.equal(arr.calls[2].pathname, '/api/v3/command');
+    assert.deepEqual(arr.calls[2].body, { name: 'EpisodeSearch', episodeIds: [501] });
 
     // Nothing was staged: no file rows, and the download is gone from putiorr.
     assert.deepEqual(harness.store.listFilesForDownload(transfer.id), []);
@@ -212,7 +235,7 @@ test('a profile with the feature off downloads junk exactly as before', async ()
 
 // Dropping a download the *arr still has queued is worse than downloading a bad
 // one: nothing would ever search for a replacement again.
-test('an unreachable *arr leaves the download alone rather than dropping it', async () => {
+test('an unreachable *arr eventually downloads rather than dropping the release', async () => {
   const harness = await createHarness(new FakePutio(JUNK_FILES));
   try {
     const profile = createSonarrProfile(harness);
@@ -224,16 +247,25 @@ test('an unreachable *arr leaves the download alone rather than dropping it', as
       service: harness.service,
       fetchImpl: async () => { throw new Error('connect ECONNREFUSED'); },
     });
-    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
 
+    // The first look is not the last word: the *arr may simply not have
+    // refreshed its queue yet, so nothing is downloaded and nothing recorded.
+    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+    assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'remote');
+    assert.equal(harness.store.countRejectedReleases().total, 0);
+
+    // Once waiting has stopped being plausible it downloads, rather than
+    // dropping a release the *arr still has queued.
+    await pollTimes(manager, harness, transfer.id, 4);
     assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'downloading');
     assert.deepEqual(harness.putio.deletedTransfers, []);
+    assert.equal(harness.store.countRejectedReleases().downloaded, 1);
   } finally {
     harness.store.close();
   }
 });
 
-test('a hash the *arr has no queue item for is downloaded rather than dropped', async () => {
+test('a hash the *arr never queues is downloaded rather than dropped', async () => {
   const harness = await createHarness(new FakePutio(JUNK_FILES));
   const arr = createFakeArr({ queueRecords: [{ id: 5, downloadId: 'SOMEOTHERHASH' }] });
   try {
@@ -246,10 +278,17 @@ test('a hash the *arr has no queue item for is downloaded rather than dropped', 
       service: harness.service,
       fetchImpl: arr.fetchImpl,
     });
+    // Deferred at first — this is the race that produced two log rows for one
+    // release: the *arr had not yet rebuilt its queue from putiorr.
     await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+    assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'remote');
+    assert.equal(harness.store.countRejectedReleases().total, 0);
 
-    assert.equal(arr.calls.length, 1, 'the queue is read but nothing is deleted');
+    await pollTimes(manager, harness, transfer.id, 4);
+    assert.ok(arr.calls.every((call) => call.method === 'GET'), 'nothing is ever deleted');
     assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'downloading');
+    // Exactly one row for one release, not one per attempt.
+    assert.equal(harness.store.countRejectedReleases().total, 1);
   } finally {
     harness.store.close();
   }
@@ -305,7 +344,8 @@ test('a packed release is rejected on a sonarr profile', async () => {
 
     assert.equal(arr.calls[1].method, 'DELETE');
     assert.equal(arr.calls[1].query.blocklist, 'true');
-    assert.equal(arr.calls[1].query.skipRedownload, 'false');
+    assert.equal(arr.calls[1].query.skipRedownload, 'true');
+    assert.deepEqual(arr.calls[2].body, { name: 'EpisodeSearch', episodeIds: [501] });
     assert.equal(harness.store.findDownloadById(transfer.id), undefined);
     assert.deepEqual(harness.store.listFilesForDownload(transfer.id), []);
   } finally {

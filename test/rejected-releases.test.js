@@ -30,7 +30,9 @@ class FakePutio {
   async deleteTransfer() {}
 }
 
-function createFakeArr({ queueRecords = [{ id: 77, downloadId: HASH.toUpperCase() }] } = {}) {
+function createFakeArr({
+  queueRecords = [{ id: 77, downloadId: HASH.toUpperCase(), episodeId: 501 }],
+} = {}) {
   return async (url, options = {}) => {
     const target = new URL(url);
     if (target.pathname === '/api/v3/queue' && (options.method ?? 'GET') === 'GET') {
@@ -108,7 +110,8 @@ test('a blocklisted release leaves a row naming what was thrown away and why', a
 });
 
 // The rejection that did NOT happen is the one worth surfacing: that release
-// was downloaded and the *arr queue item is still stuck.
+// was downloaded and the *arr queue item is still stuck. It is only recorded
+// once putiorr has stopped waiting — one row per release, not one per attempt.
 test('a rejection the *arr was never told about is recorded as downloaded', async () => {
   const harness = await createHarness(new FakePutio(JUNK));
   try {
@@ -130,7 +133,11 @@ test('a rejection the *arr was never told about is recorded as downloaded', asyn
       service: harness.service,
       fetchImpl: async () => { throw new Error('connect ECONNREFUSED'); },
     });
-    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+    // Deferred while waiting for the *arr, then conceded once.
+    for (let i = 0; i < 5; i += 1) {
+      const row = harness.store.findDownloadById(transfer.id);
+      if (row) await manager.prepareTransfer(row);
+    }
 
     assert.deepEqual(harness.store.countRejectedReleases(), {
       total: 1, blocklisted: 0, downloaded: 1,
