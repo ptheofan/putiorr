@@ -797,6 +797,38 @@ export class TransmissionRpcServer {
         return;
       }
 
+      if (method === 'GET' && requestPath === '/api/rejected-releases') {
+        const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize')) || 25));
+        // Pages are 1-based because that is what the control shows; an
+        // unreadable or out-of-range page reads as the first rather than
+        // producing an empty screen the user cannot navigate out of.
+        const page = Math.max(1, Number(searchParams.get('page')) || 1);
+        const { rows, total } = this.service.store.listRejectedReleases({
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+          search: searchParams.get('search') ?? '',
+          outcome: searchParams.get('outcome') ?? '',
+        });
+        jsonResponse(res, 200, {
+          rows,
+          total,
+          page,
+          pageSize,
+          pages: Math.max(1, Math.ceil(total / pageSize)),
+          unread: this.service.store.countUnreadRejectedReleases(),
+          counts: this.service.store.countRejectedReleases(),
+        }, this.sessionId);
+        return;
+      }
+
+      if (method === 'POST' && requestPath === '/api/rejected-releases/read-all') {
+        const marked = this.service.store.markAllRejectedReleasesRead();
+        logger.info('marked rejected releases as read', { count: marked });
+        this.scheduleWebSocketDownloadsBroadcast('rejected:read-all');
+        jsonResponse(res, 200, { ok: true, marked, unread: 0 }, this.sessionId);
+        return;
+      }
+
       if (method === 'GET' && requestPath === '/api/profiles') {
         // The browser extension asks for `?type=grab` so it never has to know
         // the preset vocabulary. An absent or empty value is a caller with no
@@ -1296,7 +1328,7 @@ export class TransmissionRpcServer {
       // the whole of it, the list is what makes the count checkable.
       rejected: {
         ...this.service.store.countRejectedReleases(),
-        recent: this.service.store.listRejectedReleases(),
+        unread: this.service.store.countUnreadRejectedReleases(),
       },
     };
   }
@@ -1805,6 +1837,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const arrApiKey = input.arr_api_key ?? input.arrApiKey;
   const rejectUnimportable = input.reject_unimportable ?? input.rejectUnimportable;
   const rejectMinSize = input.reject_min_size ?? input.rejectMinSize;
+  const rejectRetention = input.reject_log_retention_days ?? input.rejectLogRetentionDays;
   const takeOverCatchAll = input.take_over_catch_all ?? input.takeOverCatchAll;
   const takeOverCatchAllFrom = input.take_over_catch_all_from ?? input.takeOverCatchAllFrom;
 
@@ -1868,6 +1901,13 @@ function normalizeProfileInput(input, { partial = false } = {}) {
       throw new Error(`"${rejectMinSize}" is not a usable minimum release size; use a whole number of bytes, or 0 for no minimum`);
     }
     output.reject_min_size = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
+  }
+  if (rejectRetention !== undefined) {
+    const days = Number(rejectRetention);
+    if (rejectRetention !== '' && rejectRetention != null && (!Number.isFinite(days) || days < 0)) {
+      throw new Error(`"${rejectRetention}" is not a usable retention; use a whole number of days, or 0 to keep the log forever`);
+    }
+    output.reject_log_retention_days = Number.isFinite(days) && days > 0 ? Math.floor(days) : 0;
   }
   // Not a column, and the store is where it is answered — same reason the flag
   // itself is: only that layer sees the other rows, and the clear and the

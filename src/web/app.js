@@ -66,6 +66,7 @@ import {
 } from './downloads.js';
 import { initTheme } from './theme.js';
 import { initRouter } from './router.js';
+import { initRejectedReleases, loadRejectedReleases, renderRejectedBadge } from './rejected.js';
 import { initSectionActionOverflow } from './section-actions.js';
 
 export async function loadAll() {
@@ -80,6 +81,10 @@ export async function loadAll() {
   state.downloadProfiles = downloadProfiles;
   applyDownloadsPayload(downloads);
   render();
+  // Its own request, because it is paged and filtered and does not belong in the
+  // downloads payload. A failure here must not take the dashboard down with it —
+  // the badge simply stays at whatever the downloads payload last reported.
+  loadRejectedReleases().catch(() => renderRejectedBadge());
   if (!consumeOAuthLanding()) promptForMissingPutioConnection();
 }
 
@@ -384,6 +389,7 @@ el.deleteConfirmDialog.addEventListener('click', (event) => {
 
 initTheme();
 initRouter();
+initRejectedReleases();
 initSectionActionOverflow();
 
 loadAll().catch((error) => setMessage(error.message, 'error'));

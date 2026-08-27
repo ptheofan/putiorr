@@ -553,6 +553,9 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   setWizardField(el.wizardRejectMinSize, minSizeBytesToMb(
     profile.reject_min_size ?? profile.rejectMinSize,
   ));
+  setWizardField(el.wizardRejectRetention, String(
+    profile.reject_log_retention_days ?? profile.rejectLogRetentionDays ?? 90,
+  ));
   el.deleteProfileButton.hidden = !isExisting;
   setText(el.saveProfileButton, saveButtonLabel(type));
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
@@ -698,6 +701,7 @@ export function getWizardPayload() {
       baseUrl: fieldValue(el.wizardArrBaseUrl),
       apiKey: fieldValue(el.wizardArrApiKey),
       minSizeMb: fieldValue(el.wizardRejectMinSize),
+      retentionDays: fieldValue(el.wizardRejectRetention),
     }),
   };
 }

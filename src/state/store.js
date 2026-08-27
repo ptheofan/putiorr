@@ -138,6 +138,8 @@ const PROFILES_DDL = `
     -- would silently blocklist half-hour SD episodes and 720p anime, which sit
     -- well under any figure that is safe for movies.
     reject_min_size INTEGER NOT NULL DEFAULT 0,
+    -- Days to keep this profile's rejection log. 0 keeps it forever.
+    reject_log_retention_days INTEGER NOT NULL DEFAULT 90,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -168,11 +170,18 @@ const REJECTED_RELEASES_DDL = `
     -- the release was fetched as usual. The second is the one worth seeing: it
     -- is a rejection that did not happen.
     outcome TEXT NOT NULL DEFAULT 'blocklisted',
-    rejected_at TEXT NOT NULL
+    rejected_at TEXT NOT NULL,
+    -- NULL until someone has seen it. Drives the sidebar badge: a blocklist is
+    -- silent and permanent, so the point of the badge is that a wrong one gets
+    -- looked at rather than discovered months later.
+    read_at TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_rejected_releases_rejected_at
     ON rejected_releases(rejected_at DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_rejected_releases_read_at
+    ON rejected_releases(read_at);
 `;
 
 const PROFILES_RPC_PATH_INDEX_DDL = `
@@ -323,6 +332,8 @@ function normalizeProfileRow(row) {
     rejectUnimportable,
     reject_min_size: Number(row.reject_min_size ?? 0),
     rejectMinSize: Number(row.reject_min_size ?? 0),
+    reject_log_retention_days: Number(row.reject_log_retention_days ?? 90),
+    rejectLogRetentionDays: Number(row.reject_log_retention_days ?? 90),
     download_at: downloadAt,
     downloadAt,
     downloadProfileId: row.download_profile_id,
@@ -533,6 +544,15 @@ function profileRejectMinSize(input) {
   return Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
 }
 
+// Days. 0 keeps the log forever, which is the honest reading of "no retention"
+// rather than the most destructive one — an unparseable value keeps rows too.
+function profileRejectLogRetentionDays(input) {
+  const value = input.reject_log_retention_days ?? input.rejectLogRetentionDays;
+  if (value === undefined) return undefined;
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? Math.floor(days) : 0;
+}
+
 function profileAutoRemoveCompleted(input) {
   const value = input.auto_remove_completed ?? input.autoRemoveCompleted;
   if (value === undefined) return undefined;
@@ -643,6 +663,10 @@ export class StateStore {
     this.ensureColumn('profiles', 'arr_api_key', "TEXT NOT NULL DEFAULT ''");
     this.ensureColumn('profiles', 'reject_unimportable', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('profiles', 'reject_min_size', 'INTEGER NOT NULL DEFAULT 0');
+    // 0 keeps rows forever. The default matches what an operator would expect to
+    // still be able to look back at without the table growing without bound.
+    this.ensureColumn('profiles', 'reject_log_retention_days', 'INTEGER NOT NULL DEFAULT 90');
+    this.ensureColumn('rejected_releases', 'read_at', 'TEXT');
     // Everything below only exists on a database written by an older putiorr.
     // A fresh database never creates these tables, and PRAGMA table_info on a
     // table that is not there answers with an empty list rather than an error —
@@ -1673,9 +1697,9 @@ export class StateStore {
           name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
           download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains,
           browser_catch_all, arr_base_url, arr_api_key, reject_unimportable, reject_min_size,
-          enabled, created_at, updated_at
+          reject_log_retention_days, enabled, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.name,
         type,
@@ -1695,6 +1719,7 @@ export class StateStore {
         profileArrApiKey(input) ?? '',
         profileRejectUnimportable(input) ? 1 : 0,
         profileRejectMinSize(input) ?? 0,
+        profileRejectLogRetentionDays(input) ?? 90,
         input.enabled === false ? 0 : 1,
         timestamp,
         timestamp,
@@ -1733,6 +1758,8 @@ export class StateStore {
     if (nextRejectUnimportable !== undefined) normalizedPatch.reject_unimportable = nextRejectUnimportable;
     const nextRejectMinSize = profileRejectMinSize(patch);
     if (nextRejectMinSize !== undefined) normalizedPatch.reject_min_size = nextRejectMinSize;
+    const nextRetention = profileRejectLogRetentionDays(patch);
+    if (nextRetention !== undefined) normalizedPatch.reject_log_retention_days = nextRetention;
     // Both writes land in the same column and every read compares it exactly,
     // so an update normalizes the preset the way createProfile does. A patch
     // that does not mention it leaves the stored one alone.
@@ -1781,6 +1808,7 @@ export class StateStore {
       'arr_api_key',
       'reject_unimportable',
       'reject_min_size',
+      'reject_log_retention_days',
       'enabled',
     ];
     const keys = allowed.filter((key) => Object.hasOwn(normalizedPatch, key));
@@ -2472,14 +2500,67 @@ export class StateStore {
 
   // Newest first: the dashboard shows a short head of this, and the interesting
   // rejection is always the one that just happened.
-  listRejectedReleases(limit = 20) {
-    return this.db.prepare(
-      'SELECT * FROM rejected_releases ORDER BY id DESC LIMIT ?',
-    ).all(Math.max(1, Number(limit) || 20));
+  // One page of the log plus the total the filter matched, because a pager
+  // cannot render without knowing how many pages there are. Search is a plain
+  // substring over the three fields a person would actually type into: the
+  // release, the profile it came from, and why it was thrown away.
+  listRejectedReleases({ limit = 25, offset = 0, search = '', outcome = '' } = {}) {
+    const clauses = [];
+    const params = [];
+    const term = String(search ?? '').trim();
+    if (term) {
+      clauses.push('(name LIKE ? OR profile_name LIKE ? OR reason LIKE ?)');
+      const like = `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+      params.push(like, like, like);
+    }
+    const wantedOutcome = String(outcome ?? '').trim();
+    if (wantedOutcome) {
+      clauses.push('outcome = ?');
+      params.push(wantedOutcome);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const total = Number(this.db.prepare(
+      `SELECT COUNT(*) AS total FROM rejected_releases ${where}`,
+    ).get(...params).total);
+    const rows = this.db.prepare(
+      `SELECT * FROM rejected_releases ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    ).all(...params, Math.max(1, Number(limit) || 25), Math.max(0, Number(offset) || 0));
+    return { rows: rows.map((row) => ({ ...row })), total };
+  }
+
+  markAllRejectedReleasesRead() {
+    // Only the unread ones, so re-reading does not rewrite the whole table and
+    // the timestamp keeps meaning "when this was first seen".
+    const result = this.db.prepare(
+      'UPDATE rejected_releases SET read_at = ? WHERE read_at IS NULL',
+    ).run(nowIso());
+    return Number(result.changes ?? 0);
+  }
+
+  // Retention is per profile because that is where it is configured, and the
+  // row remembers the profile by name. A profile set to 0 keeps its rows.
+  pruneRejectedReleases(now = new Date()) {
+    let removed = 0;
+    for (const profile of this.listProfiles()) {
+      const days = Number(profile.reject_log_retention_days ?? 0);
+      if (!Number.isFinite(days) || days <= 0) continue;
+      const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+      const result = this.db.prepare(
+        'DELETE FROM rejected_releases WHERE profile_name = ? AND rejected_at < ?',
+      ).run(profile.name, cutoff);
+      removed += Number(result.changes ?? 0);
+    }
+    return removed;
   }
 
   // Split by outcome, because "putiorr wanted to reject 12 and managed 10" is
   // the operational question a single total cannot answer.
+  countUnreadRejectedReleases() {
+    return Number(this.db.prepare(
+      'SELECT COUNT(*) AS unread FROM rejected_releases WHERE read_at IS NULL',
+    ).get().unread);
+  }
+
   countRejectedReleases() {
     // Spread: node:sqlite hands back a null-prototype row, and this value is
     // compared and serialised by callers that reasonably expect a plain object.

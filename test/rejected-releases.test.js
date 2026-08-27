@@ -98,7 +98,7 @@ test('a blocklisted release leaves a row naming what was thrown away and why', a
     assert.deepEqual(harness.store.countRejectedReleases(), {
       total: 1, blocklisted: 1, downloaded: 0,
     });
-    const [row] = harness.store.listRejectedReleases();
+    const [row] = harness.store.listRejectedReleases().rows;
     assert.equal(row.name, 'Show.S01E01.JUNK');
     assert.equal(row.profile_name, 'Sonarr');
     assert.equal(row.outcome, 'blocklisted');
@@ -142,7 +142,7 @@ test('a rejection the *arr was never told about is recorded as downloaded', asyn
     assert.deepEqual(harness.store.countRejectedReleases(), {
       total: 1, blocklisted: 0, downloaded: 1,
     });
-    assert.equal(harness.store.listRejectedReleases()[0].outcome, 'downloaded');
+    assert.equal(harness.store.listRejectedReleases().rows[0].outcome, 'downloaded');
     // ...and the release really was downloaded rather than dropped.
     assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'downloading');
   } finally {
@@ -190,13 +190,31 @@ test('the history reads newest first and the counts split by outcome', async () 
     harness.store.recordRejectedRelease({ name: 'third', outcome: 'blocklisted' });
 
     assert.deepEqual(
-      harness.store.listRejectedReleases().map((row) => row.name),
+      harness.store.listRejectedReleases().rows.map((row) => row.name),
       ['third', 'second', 'first'],
     );
     assert.deepEqual(harness.store.countRejectedReleases(), {
       total: 3, blocklisted: 2, downloaded: 1,
     });
-    assert.equal(harness.store.listRejectedReleases(2).length, 2);
+    assert.equal(harness.store.listRejectedReleases({ limit: 2 }).rows.length, 2);
+    assert.equal(harness.store.listRejectedReleases({ limit: 2 }).total, 3, 'total is the filter match, not the page');
+
+    // Paging walks the whole log without repeating or skipping a row.
+    const page2 = harness.store.listRejectedReleases({ limit: 2, offset: 2 });
+    assert.deepEqual(page2.rows.map((row) => row.name), ['first']);
+
+    // Search covers release, profile and reason; the outcome filter narrows it.
+    assert.deepEqual(
+      harness.store.listRejectedReleases({ search: 'seco' }).rows.map((row) => row.name),
+      ['second'],
+    );
+    assert.equal(harness.store.listRejectedReleases({ outcome: 'downloaded' }).total, 1);
+
+    // Unread until someone says otherwise, and marking is idempotent.
+    assert.equal(harness.store.countUnreadRejectedReleases(), 3);
+    assert.equal(harness.store.markAllRejectedReleasesRead(), 3);
+    assert.equal(harness.store.countUnreadRejectedReleases(), 0);
+    assert.equal(harness.store.markAllRejectedReleasesRead(), 0);
   } finally {
     harness.store.close();
   }
@@ -218,4 +236,53 @@ test('the summary hides itself at zero and never buries an undelivered rejection
     /never told/,
   );
   assert.match(rejectedReleasesSummary({ total: 1, blocklisted: 1 }), /1 release rejected/);
+});
+
+test('retention prunes a profile\'s old rows and keeps everyone else\'s', async () => {
+  const harness = await createHarness(new FakePutio(JUNK));
+  try {
+    harness.store.createProfile({
+      name: 'Sonarr', type: 'sonarr', slug: 'sonarr', putio_folder_name: 'putiorr',
+      downloadAt: path.join(harness.config.targetDir, 'sonarr'),
+      rpc_path: '/sonarr/transmission/rpc', reject_log_retention_days: 30,
+    });
+    // 0 means keep forever, which is what an operator who cleared the field meant.
+    harness.store.createProfile({
+      name: 'Radarr', type: 'radarr', slug: 'radarr', putio_folder_name: 'putiorr',
+      downloadAt: path.join(harness.config.targetDir, 'radarr'),
+      rpc_path: '/radarr/transmission/rpc', reject_log_retention_days: 0,
+    });
+
+    const old = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString();
+    for (const profileName of ['Sonarr', 'Radarr']) {
+      harness.store.recordRejectedRelease({ profileName, name: `${profileName}.fresh` });
+      const row = harness.store.recordRejectedRelease({ profileName, name: `${profileName}.old` });
+      harness.store.db.prepare('UPDATE rejected_releases SET rejected_at = ? WHERE id = ?').run(old, row.id);
+    }
+
+    assert.equal(harness.store.pruneRejectedReleases(), 1, 'only the retained profile loses a row');
+    assert.deepEqual(
+      harness.store.listRejectedReleases().rows.map((row) => row.name).sort(),
+      ['Radarr.fresh', 'Radarr.old', 'Sonarr.fresh'],
+    );
+    // Running it again removes nothing: retention is a cutoff, not a countdown.
+    assert.equal(harness.store.pruneRejectedReleases(), 0);
+  } finally {
+    harness.store.close();
+  }
+});
+
+test('the default retention is three months, and it is per profile', async () => {
+  const harness = await createHarness(new FakePutio(JUNK));
+  try {
+    const profile = createSonarrProfile(harness);
+    assert.equal(profile.reject_log_retention_days, 90);
+    const patched = harness.store.updateProfile(profile.id, { reject_log_retention_days: 14 });
+    assert.equal(patched.reject_log_retention_days, 14);
+    // Anything unreadable or negative reads as "keep forever" rather than as
+    // "delete everything", which is the harmless direction to be wrong in.
+    assert.equal(harness.store.updateProfile(profile.id, { reject_log_retention_days: -5 }).reject_log_retention_days, 0);
+  } finally {
+    harness.store.close();
+  }
 });

@@ -770,3 +770,52 @@
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }
+
+/* Issue #111. The rejection log's own screen. */
+.rejected-filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.rejected-filters wa-input { flex: 1 1 260px; }
+.rejected-filters wa-select { flex: 0 1 200px; }
+
+.rejected-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.rejected-empty {
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+}
+
+/* Unread rows are the ones nobody has looked at yet, which is the entire point
+   of keeping the log: a wrong blocklist is invisible until someone reads it. */
+.rejected-release.rejected-release-unread {
+  border-left-width: 5px;
+}
+
+.nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nav-badge[hidden] { display: none; }

@@ -120,6 +120,12 @@ export class DownloadManager {
       logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
     }
     await this.removeProcessedAutoRemoveTransfers();
+    // Issue #111. The rejection log is append-only and nothing else trims it, so
+    // it is pruned on the poll rather than growing without bound.
+    const prunedRejections = this.store.pruneRejectedReleases();
+    if (prunedRejections > 0) {
+      logger.info('pruned rejected releases past their retention', { count: prunedRejections });
+    }
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {

@@ -51,9 +51,13 @@ their notes — GitHub's generated list of merged pull requests — remain on th
   wrongly blocklisted release. A wrong blocklist is invisible and permanent; a
   missed bad release costs the one manual click that happens today.
 
-  **Every rejection is recorded**, and the dashboard grows a **Rejected
-  releases** section listing what was thrown away, why, on which profile and
-  when. A blocklist cannot be undone from putiorr and leaves no trace in the
+  **Every rejection is recorded**, on its own **Rejected releases** screen in
+  the sidebar: what was thrown away, why, on which profile and when, paged and
+  searchable by release, profile or reason, and filterable by outcome. Unread
+  rejections raise a badge on the sidebar link until **Read all** clears them,
+  because the whole point of the log is that someone looks. Rows are kept for
+  90 days by default, per profile and configurable on the same wizard step; set
+  it to 0 to keep them forever. A blocklist cannot be undone from putiorr and leaves no trace in the
   download list, so this is the only place a wrong rejection can be noticed
   after the fact. Releases putiorr judged unimportable but could not report to
   the app — it was unreachable, or its queue had no matching item — are

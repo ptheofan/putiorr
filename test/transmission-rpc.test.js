@@ -793,7 +793,7 @@ test('dashboard can delete multiple selected buckets through mocked put.io', asy
   assert.deepEqual(await downloadsResponse.json(), {
     downloads: [],
     orphaned: [],
-    rejected: { total: 0, blocklisted: 0, downloaded: 0, recent: [] },
+    rejected: { total: 0, blocklisted: 0, downloaded: 0, unread: 0 },
   });
 });
 

@@ -276,8 +276,9 @@ export function minSizeBytesToMb(bytes) {
   return Number.isFinite(size) && size > 0 ? String(Math.round(size / (1024 * 1024))) : '';
 }
 
-export function rejectionPayload(hidden, { enabled, baseUrl, apiKey, minSizeMb }) {
+export function rejectionPayload(hidden, { enabled, baseUrl, apiKey, minSizeMb, retentionDays }) {
   if (hidden) return {};
+  const days = Number(String(retentionDays ?? '').trim());
   return {
     reject_unimportable: Boolean(enabled),
     arr_base_url: String(baseUrl ?? '').trim(),
@@ -285,6 +286,8 @@ export function rejectionPayload(hidden, { enabled, baseUrl, apiKey, minSizeMb }
     // one back, so it cannot resubmit what it was not given.
     arr_api_key: String(apiKey ?? '').trim(),
     reject_min_size: minSizeMbToBytes(minSizeMb),
+    // A cleared field is "keep the log forever", not "delete it all".
+    reject_log_retention_days: Number.isFinite(days) && days > 0 ? Math.floor(days) : 0,
   };
 }
 
