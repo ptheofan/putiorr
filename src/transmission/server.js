@@ -1296,7 +1296,7 @@ export class TransmissionRpcServer {
       // the whole of it, the list is what makes the count checkable.
       rejected: {
         ...this.service.store.countRejectedReleases(),
-        recent: this.service.store.listRejectedReleases(20),
+        recent: this.service.store.listRejectedReleases(),
       },
     };
   }
@@ -1846,7 +1846,7 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   // releases while every call throws at download time, which is the one moment
   // nobody is watching.
   if (arrBaseUrl !== undefined) {
-    const value = String(arrBaseUrl ?? '').trim().replace(/\/+$/, '');
+    const value = String(arrBaseUrl ?? '').trim();
     if (value && !/^https?:\/\/.+/i.test(value)) {
       throw new Error(`"${value}" is not a usable *arr URL; it must start with http:// or https://`);
     }

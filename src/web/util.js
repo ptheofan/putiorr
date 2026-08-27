@@ -247,15 +247,10 @@ export function browserCatchAllPayload(hidden, checked) {
   return hidden ? {} : { browserCatchAll: Boolean(checked) };
 }
 
-// Issue #111. Only the presets whose blocklist API putiorr speaks show the
-// step, and only a visible step sends its fields — a hidden control must never
-// write a setting nobody saw, which is the same rule the browser fields follow.
-export const ARR_REJECTION_TYPES = new Set(['sonarr', 'radarr']);
-
-export function supportsRejection(type) {
-  return ARR_REJECTION_TYPES.has(String(type ?? '').trim().toLowerCase());
-}
-
+// Issue #111. Only a visible step sends its fields — a hidden control must
+// never write a setting nobody saw, which is the same rule the browser fields
+// follow. Which presets show the step lives in constants.js, shared with the
+// downloader that has to act on it.
 // The field is MB because nobody reasons about a release in bytes; the column
 // is bytes because every size putiorr compares it against is. Anything
 // unreadable becomes 0, which is "no minimum" — the harmless direction, where

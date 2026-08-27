@@ -9,6 +9,7 @@ import {
   DEFAULT_CLIENT_HOST,
   DEFAULT_CLIENT_PORT,
   DEFAULT_HELP_FIELD,
+  supportsArrRejection,
   CATCH_ALL_CONFLICT_CODE,
   DOWNLOAD_FOLDER_LOCKED_CODE,
 } from './constants.js';
@@ -26,7 +27,6 @@ import {
   browserDomainsPayload,
   browserCatchAllPayload,
   rejectionPayload,
-  supportsRejection,
   minSizeBytesToMb,
   grabProfileSummary,
   presetDisplayName,
@@ -626,7 +626,7 @@ export function applyProfileTypeLayout(type = fieldValue(el.wizardProfileType)) 
   // Only Sonarr and Radarr expose the queue blocklist API this drives. Showing
   // the step for Lidarr, Readarr or a custom profile would offer a setting that
   // silently never fires.
-  setHidden(el.wizardRejectStep, !supportsRejection(type));
+  setHidden(el.wizardRejectStep, !supportsArrRejection(type));
   setHidden(el.copyClientSettingsButton, isGrab);
   setText(el.profileWizardIntro, isGrab ? GRAB_WIZARD_INTRO : ARR_WIZARD_INTRO);
   setText(el.wizardAppStepHelp, isGrab ? GRAB_APP_STEP_HELP : ARR_APP_STEP_HELP);

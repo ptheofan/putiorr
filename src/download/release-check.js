@@ -14,6 +14,9 @@
 // release is a normal delivery to a Lidarr and dead weight to a Sonarr, which
 // cannot unpack it.
 
+import { PROFILE_TYPES } from '../web/constants.js';
+import { formatBytes } from '../web/util.js';
+
 const VIDEO = /\.(mkv|mp4|avi|m4v|ts|m2ts|mov|wmv|mpg|mpeg|webm|vob|iso|img|flv|ogm|divx|rmvb)$/i;
 const AUDIO = /\.(flac|mp3|m4a|m4b|ogg|opus|wav|aac|ape|wma|alac|dsf|dff|mka)$/i;
 const BOOK = /\.(epub|mobi|azw|azw3|pdf|cbz|cbr|djvu|fb2)$/i;
@@ -42,8 +45,6 @@ const IMPORTABLE_BY_PRESET = {
 
 const IMPORTABLE_ANY = [VIDEO, ...ARCHIVE, AUDIO, BOOK];
 
-const ANY_ARCHIVE = (relativePath) => ARCHIVE.some((pattern) => pattern.test(relativePath));
-
 // A disc rip's payload is inside these directories, and the files themselves
 // (.BUP, .IFO, .CLPI) would not otherwise read as importable.
 const DISC_STRUCTURE = /(^|\/)(VIDEO_TS|BDMV|AUDIO_TS)(\/|$)/i;
@@ -54,10 +55,9 @@ function importablePatterns(preset) {
 
 // The blocklist reason is read by a human in the *arr, so it names the app that
 // could not import the release rather than saying "importable" and leaving them
-// to work out for what.
+// to work out for what. PROFILE_TYPES already carries every preset's label.
 function presetLabel(preset) {
-  const value = String(preset ?? '').trim().toLowerCase();
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : 'this app';
+  return PROFILE_TYPES[String(preset ?? '').trim().toLowerCase()]?.label ?? 'this app';
 }
 
 // ponytail: put.io's `size` on a transfer it only partially satisfied is not
@@ -65,22 +65,11 @@ function presetLabel(preset) {
 // delivered bytes instead, this check is a no-op rather than a false positive,
 // which is the safe direction to be wrong in. Half is far below any plausible
 // legitimate shortfall, so it only fires on unambiguous junk.
-export const SHORT_DELIVERY_RATIO = 0.5;
+const SHORT_DELIVERY_RATIO = 0.5;
 
 function isImportable(relativePath, patterns) {
   if (DISC_STRUCTURE.test(relativePath)) return true;
   return patterns.some((pattern) => pattern.test(relativePath));
-}
-
-function formatBytes(bytes) {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let value = Number(bytes ?? 0);
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }
 
 /**
@@ -126,7 +115,7 @@ export function inspectRelease({
     // Worth naming, because "nothing importable" reads like putiorr is broken
     // when the folder plainly holds the release. It holds it in a form this app
     // cannot open, and the fix is a tool putiorr is not.
-    const archivesOnly = paths.some(ANY_ARCHIVE);
+    const archivesOnly = paths.some((p) => ARCHIVE.some((pattern) => pattern.test(p)));
     return {
       reject: true,
       reason: archivesOnly

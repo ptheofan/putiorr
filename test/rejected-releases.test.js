@@ -98,9 +98,7 @@ test('a blocklisted release leaves a row naming what was thrown away and why', a
     });
     const [row] = harness.store.listRejectedReleases();
     assert.equal(row.name, 'Show.S01E01.JUNK');
-    assert.equal(row.hash, HASH);
     assert.equal(row.profile_name, 'Sonarr');
-    assert.equal(row.profile_type, 'sonarr');
     assert.equal(row.outcome, 'blocklisted');
     assert.match(row.reason, /can import/);
     assert.ok(row.rejected_at, 'the row is timestamped');

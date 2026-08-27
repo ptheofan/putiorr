@@ -125,7 +125,7 @@ test('rejects a release put.io delivered far short of what the torrent announced
     announcedSize: 4200 * MB,
   });
   assert.equal(verdict.reject, true);
-  assert.match(verdict.reason, /40 MB of the 4\.1 GB/);
+  assert.match(verdict.reason, /40\.0 MB of the 4\.1 GB/);
 });
 
 test('a shortfall inside the ratio is not a rejection', () => {

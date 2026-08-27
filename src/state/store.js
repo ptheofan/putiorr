@@ -161,11 +161,8 @@ const REJECTED_RELEASES_DDL = `
   CREATE TABLE IF NOT EXISTS rejected_releases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     profile_name TEXT NOT NULL DEFAULT '',
-    profile_type TEXT NOT NULL DEFAULT '',
     name TEXT NOT NULL DEFAULT '',
-    hash TEXT NOT NULL DEFAULT '',
     reason TEXT NOT NULL DEFAULT '',
-    total_size INTEGER NOT NULL DEFAULT 0,
     -- 'blocklisted' when the *arr accepted it and will search again;
     -- 'downloaded' when putiorr judged it junk but could not tell the *arr, so
     -- the release was fetched as usual. The second is the one worth seeing: it
@@ -2465,16 +2462,11 @@ export class StateStore {
   // Issue #111. The record of every release putiorr judged unimportable, kept
   // because a blocklist is permanent and invisible: this is the only place a
   // false positive can be noticed after the fact.
-  recordRejectedRelease({
-    profileName = '', profileType = '', name = '', hash = '', reason = '',
-    totalSize = 0, outcome = 'blocklisted',
-  } = {}) {
+  recordRejectedRelease({ profileName = '', name = '', reason = '', outcome = 'blocklisted' } = {}) {
     const result = this.db.prepare(`
-      INSERT INTO rejected_releases (
-        profile_name, profile_type, name, hash, reason, total_size, outcome, rejected_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(profileName, profileType, name, hash, reason, Number(totalSize ?? 0), outcome, nowIso());
+      INSERT INTO rejected_releases (profile_name, name, reason, outcome, rejected_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(profileName, name, reason, outcome, nowIso());
     return this.db.prepare('SELECT * FROM rejected_releases WHERE id = ?').get(result.lastInsertRowid);
   }
 
@@ -2489,15 +2481,14 @@ export class StateStore {
   // Split by outcome, because "putiorr wanted to reject 12 and managed 10" is
   // the operational question a single total cannot answer.
   countRejectedReleases() {
-    const rows = this.db.prepare(
-      'SELECT outcome, COUNT(*) AS total FROM rejected_releases GROUP BY outcome',
-    ).all();
-    const byOutcome = Object.fromEntries(rows.map((row) => [row.outcome, Number(row.total)]));
-    return {
-      total: rows.reduce((sum, row) => sum + Number(row.total), 0),
-      blocklisted: byOutcome.blocklisted ?? 0,
-      downloaded: byOutcome.downloaded ?? 0,
-    };
+    // Spread: node:sqlite hands back a null-prototype row, and this value is
+    // compared and serialised by callers that reasonably expect a plain object.
+    return { ...this.db.prepare(`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(outcome = 'blocklisted'), 0) AS blocklisted,
+             COALESCE(SUM(outcome = 'downloaded'), 0) AS downloaded
+      FROM rejected_releases
+    `).get() };
   }
 
   // The quarantine: rows the collapse could not represent, parked where the

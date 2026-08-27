@@ -51,6 +51,16 @@ export const DEFAULT_PROFILE_TYPE = 'sonarr';
 // Mirrors the server's GRAB_PROFILE_TYPE: the only preset the browser
 // extension may send grabs to.
 export const GRAB_PROFILE_TYPE = 'grab';
+// Issue #111. The presets whose queue blocklist API putiorr speaks. It decides
+// both whether the wizard offers the rejection step and whether the downloader
+// will act on it, and those two must never disagree — a step offered for a
+// preset the downloader skips is a setting that silently does nothing. Lidarr
+// and Readarr serve a v1 API this does not implement.
+export const ARR_REJECTION_PRESETS = new Set(['sonarr', 'radarr']);
+
+export function supportsArrRejection(type) {
+  return ARR_REJECTION_PRESETS.has(String(type ?? '').trim().toLowerCase());
+}
 // What a refused profile save says when another grab profile already takes the
 // grabs no site claims. It rides on `code` in the error body, next to the
 // sentence and the holder, so the wizard can offer the takeover without

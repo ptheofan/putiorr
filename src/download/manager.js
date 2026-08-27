@@ -4,7 +4,8 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { logger } from '../logger.js';
 import { downloadPolicyForContext, isSlowSpeedResetEnabled } from './policy.js';
-import { ArrClient, supportsArrRejection } from '../arr/client.js';
+import { rejectRelease } from '../arr/client.js';
+import { supportsArrRejection } from '../web/constants.js';
 import { inspectRelease } from './release-check.js';
 import {
   downloadLocalRoot,
@@ -58,16 +59,12 @@ export class DownloadManager {
     service,
     fetchImpl = globalThis.fetch,
     now = Date.now,
-    // Issue #111. Injected so a test can stand in for the *arr without a
-    // network, the same way fetchImpl stands in for put.io.
-    arrClientFactory = (options) => new ArrClient(options),
   }) {
     this.config = config;
     this.store = store;
     this.service = service;
     this.fetch = fetchImpl;
     this.now = now;
-    this.arrClientFactory = arrClientFactory;
     this.controller = new AbortController();
     this.running = false;
     this.pollTimer = undefined;
@@ -286,7 +283,7 @@ export class DownloadManager {
   // Rejecting is the exceptional branch, and it never runs on a guess.
   async rejectUnimportableTransfer(transfer, profile, remoteFiles) {
     if (!profile?.reject_unimportable) return false;
-    if (!supportsArrRejection(profile)) return false;
+    if (!supportsArrRejection(profile.type)) return false;
     if (!profile.arr_base_url || !profile.arr_api_key) return false;
 
     const verdict = inspectRelease({
@@ -306,11 +303,8 @@ export class DownloadManager {
       try {
         this.store.recordRejectedRelease({
           profileName: profile.name,
-          profileType: profile.type,
           name: transfer.name,
-          hash: transfer.hash ?? '',
           reason: verdict.reason,
-          totalSize: Number(transfer.total_size ?? 0),
           outcome,
         });
       } catch (error) {
@@ -335,12 +329,12 @@ export class DownloadManager {
 
     let accepted;
     try {
-      const client = this.arrClientFactory({
+      accepted = await rejectRelease({
         baseUrl: profile.arr_base_url,
         apiKey: profile.arr_api_key,
+        hash,
         fetchImpl: this.fetch,
       });
-      accepted = await client.rejectByHash(hash);
     } catch (error) {
       // Downloading a bad release is recoverable by hand; silently dropping one
       // the *arr still has queued is not, because nothing would ever search
