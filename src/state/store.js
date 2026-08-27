@@ -156,9 +156,9 @@ const PROFILES_DDL = `
 // has to survive the profile being deleted, and it is a historical fact about
 // what happened, not a live link.
 //
-// ponytail: never pruned. Rejections are rare enough that COUNT(*) stays exact
-// and the table stays small; add a retention cap if a real install ever grows
-// one worth trimming.
+// Pruned on the poll against each profile's reject_log_retention_days — see
+// pruneRejectedReleases. The retention is per profile because that is where it
+// is configured, and the row remembers its profile by name.
 const REJECTED_RELEASES_DDL = `
   CREATE TABLE IF NOT EXISTS rejected_releases (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
