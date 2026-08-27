@@ -9,7 +9,7 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
-## [Unreleased]
+## [3.1.0] — 2026-08-27
 
 ### Added
 
