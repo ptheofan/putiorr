@@ -38,6 +38,15 @@ const ARCHIVE = [
 // A preset with no entry is checked against everything, archives included. That
 // permissive fallback is the safe direction: a preset nobody has written a rule
 // for must not start rejecting every release.
+//
+// These keys look like a duplicate of ARR_REJECTION_PRESETS and must NOT be
+// derived from it. That set answers "can putiorr speak this app's blocklist
+// API"; this map answers "what can this app import". They happen to hold the
+// same two presets today, and folding them would mean the day Lidarr's API is
+// supported, adding it to that set silently gives it a video-only rule and
+// blocklists every album in the library. Kept apart, the same edit under-rejects
+// instead — junk gets downloaded, which is the direction this whole check is
+// built to fail in.
 const IMPORTABLE_BY_PRESET = {
   sonarr: [VIDEO],
   radarr: [VIDEO],
