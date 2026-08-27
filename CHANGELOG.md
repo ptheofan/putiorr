@@ -70,6 +70,22 @@ their notes — GitHub's generated list of merged pull requests — remain on th
   write-only over HTTP: `GET /api/profiles` reports only whether one is stored,
   never its value.
 
+### Fixed
+
+- **The Transmission `error` field was a boolean where the spec says number.**
+  ([#110](https://github.com/ptheofan/putiorr/pull/110))
+  `torrent-get` reported `error` as `false` while all was well and `true` after a
+  failure, but the RPC spec declares the field a number, sourced from
+  Transmission's `tr_stat_errtype` enum. A client that reads it as the integer it
+  is documented to be sees `false` instead of `0`: Shelfarr raised
+  `undefined method 'to_i' for false` on every poll and never marked the download
+  complete, so a download that had finished sat unimported.
+
+  putiorr now emits `0` for no error and `3` (`TR_STAT_LOCAL_ERROR`) for one —
+  the only two of the four codes it can mean, since there is no tracker behind a
+  put.io transfer for the tracker warning and tracker error codes to describe.
+  `errorString` carried the message all along and is unchanged.
+
 ## [3.0.6] — 2026-07-27
 
 ### Changed
