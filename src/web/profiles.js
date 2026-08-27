@@ -9,6 +9,7 @@ import {
   DEFAULT_CLIENT_HOST,
   DEFAULT_CLIENT_PORT,
   DEFAULT_HELP_FIELD,
+  supportsArrRejection,
   CATCH_ALL_CONFLICT_CODE,
   DOWNLOAD_FOLDER_LOCKED_CODE,
 } from './constants.js';
@@ -25,6 +26,9 @@ import {
   setProfileFact,
   browserDomainsPayload,
   browserCatchAllPayload,
+  rejectionPayload,
+  arrBaseUrlPlaceholder,
+  minSizeBytesToMb,
   grabProfileSummary,
   presetDisplayName,
   setCheckboxChecked,
@@ -539,6 +543,19 @@ export function openProfileWizard(profile = createDefaultProfile(DEFAULT_PROFILE
   ));
   setWizardField(el.wizardBrowserDomains, browserDomainsList(profile).join(', '));
   setWizardChecked(el.wizardBrowserCatchAll, browserCatchAll(profile));
+  setWizardChecked(el.wizardRejectUnimportable, Boolean(
+    profile.reject_unimportable ?? profile.rejectUnimportable,
+  ));
+  setWizardField(el.wizardArrBaseUrl, profile.arr_base_url ?? profile.arrBaseUrl ?? '');
+  // Never populated: the server does not send the key back. Blank means "keep
+  // the stored one", and the placeholder is what says so.
+  setWizardField(el.wizardArrApiKey, '');
+  setWizardField(el.wizardRejectMinSize, minSizeBytesToMb(
+    profile.reject_min_size ?? profile.rejectMinSize,
+  ));
+  setWizardField(el.wizardRejectRetention, String(
+    profile.reject_log_retention_days ?? profile.rejectLogRetentionDays ?? 90,
+  ));
   el.deleteProfileButton.hidden = !isExisting;
   setText(el.saveProfileButton, saveButtonLabel(type));
   el.profileWizard.dataset.activeHelpField = DEFAULT_HELP_FIELD;
@@ -610,6 +627,13 @@ export function applyProfileTypeLayout(type = fieldValue(el.wizardProfileType)) 
   const isGrab = type === GRAB_PROFILE_TYPE;
   setHidden(el.wizardRpcStep, isGrab);
   setHidden(el.wizardBrowserStep, !isGrab);
+  // Only Sonarr and Radarr expose the queue blocklist API this drives. Showing
+  // the step for Lidarr, Readarr or a custom profile would offer a setting that
+  // silently never fires.
+  setHidden(el.wizardRejectStep, !supportsArrRejection(type));
+  // The hint is a real URL someone will copy, so it has to follow the preset
+  // rather than sit in the markup naming whichever app was written there first.
+  el.wizardArrBaseUrl.setAttribute('placeholder', arrBaseUrlPlaceholder(type));
   setHidden(el.copyClientSettingsButton, isGrab);
   setText(el.profileWizardIntro, isGrab ? GRAB_WIZARD_INTRO : ARR_WIZARD_INTRO);
   setText(el.wizardAppStepHelp, isGrab ? GRAB_APP_STEP_HELP : ARR_APP_STEP_HELP);
@@ -672,6 +696,13 @@ export function getWizardPayload() {
     // Only the presets that show the step send it at all.
     ...browserDomainsPayload(el.wizardBrowserStep.hidden, fieldValue(el.wizardBrowserDomains).trim()),
     ...browserCatchAllPayload(el.wizardBrowserStep.hidden, fieldChecked(el.wizardBrowserCatchAll)),
+    ...rejectionPayload(el.wizardRejectStep.hidden, {
+      enabled: fieldChecked(el.wizardRejectUnimportable),
+      baseUrl: fieldValue(el.wizardArrBaseUrl),
+      apiKey: fieldValue(el.wizardArrApiKey),
+      minSizeMb: fieldValue(el.wizardRejectMinSize),
+      retentionDays: fieldValue(el.wizardRejectRetention),
+    }),
   };
 }
 

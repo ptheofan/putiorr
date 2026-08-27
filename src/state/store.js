@@ -127,10 +127,68 @@ const PROFILES_DDL = `
     -- that rather than a unique index, because the refusal has to name the
     -- profile that already holds it and a constraint failure names a column.
     browser_catch_all INTEGER NOT NULL DEFAULT 0,
+    -- Issue #111. How to reach the *arr that owns this profile, so putiorr can
+    -- tell it to blocklist a release put.io delivered as junk. Only sonarr and
+    -- radarr presets use these; everything defaults to off, so an upgrade
+    -- changes no existing install's behaviour.
+    arr_base_url TEXT NOT NULL DEFAULT '',
+    arr_api_key TEXT NOT NULL DEFAULT '',
+    reject_unimportable INTEGER NOT NULL DEFAULT 0,
+    -- Bytes. 0 disables the floor, which is the default: a shipped constant
+    -- would silently blocklist half-hour SD episodes and 720p anime, which sit
+    -- well under any figure that is safe for movies.
+    reject_min_size INTEGER NOT NULL DEFAULT 0,
+    -- Days to keep this profile's rejection log. 0 keeps it forever.
+    reject_log_retention_days INTEGER NOT NULL DEFAULT 90,
     enabled INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
+`;
+
+// Issue #111. Blocklisting is invisible and cannot be undone from putiorr, so
+// every rejection leaves a record of what was thrown away and why. A bare count
+// would answer "how many" and none of the questions that follow it — which
+// release, on which profile, for what reason — which are the ones asked when a
+// good release goes missing.
+//
+// The profile is denormalised to a name rather than a foreign key: the record
+// has to survive the profile being deleted, and it is a historical fact about
+// what happened, not a live link.
+//
+// Pruned on the poll against each profile's reject_log_retention_days — see
+// pruneRejectedReleases. The retention is per profile because that is where it
+// is configured, and the row remembers its profile by name.
+const REJECTED_RELEASES_DDL = `
+  CREATE TABLE IF NOT EXISTS rejected_releases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    profile_name TEXT NOT NULL DEFAULT '',
+    name TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    -- 'blocklisted' when the *arr accepted it and will search again;
+    -- 'downloaded' when putiorr judged it junk but could not tell the *arr, so
+    -- the release was fetched as usual. The second is the one worth seeing: it
+    -- is a rejection that did not happen.
+    outcome TEXT NOT NULL DEFAULT 'blocklisted',
+    rejected_at TEXT NOT NULL,
+    -- NULL until someone has seen it. Drives the sidebar badge: a blocklist is
+    -- silent and permanent, so the point of the badge is that a wrong one gets
+    -- looked at rather than discovered months later.
+    read_at TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rejected_releases_rejected_at
+    ON rejected_releases(rejected_at DESC);
+`;
+
+// Indexed on a column added by ensureColumn, so it can only be built once that
+// has run. Creating it alongside the table killed every upgrade from a build
+// that shipped rejected_releases without read_at: CREATE INDEX resolves its
+// column immediately, so migrate() threw before it reached the ALTER that would
+// have added it, and the process crash-looped on boot.
+const REJECTED_RELEASES_READ_AT_INDEX_DDL = `
+  CREATE INDEX IF NOT EXISTS idx_rejected_releases_read_at
+    ON rejected_releases(read_at);
 `;
 
 const PROFILES_RPC_PATH_INDEX_DDL = `
@@ -260,6 +318,7 @@ function normalizeProfileRow(row) {
   const autoRemoveCompleted = toBool(row.auto_remove_completed);
   const browserDomains = profileBrowserDomains(row);
   const browserCatchAll = toBool(row.browser_catch_all);
+  const rejectUnimportable = toBool(row.reject_unimportable);
   const {
     local_path: _localPath,
     download_at: _downloadAt,
@@ -272,6 +331,16 @@ function normalizeProfileRow(row) {
     browserDomains,
     browser_catch_all: browserCatchAll,
     browserCatchAll,
+    arr_base_url: row.arr_base_url ?? '',
+    arrBaseUrl: row.arr_base_url ?? '',
+    arr_api_key: row.arr_api_key ?? '',
+    arrApiKey: row.arr_api_key ?? '',
+    reject_unimportable: rejectUnimportable,
+    rejectUnimportable,
+    reject_min_size: Number(row.reject_min_size ?? 0),
+    rejectMinSize: Number(row.reject_min_size ?? 0),
+    reject_log_retention_days: Number(row.reject_log_retention_days ?? 90),
+    rejectLogRetentionDays: Number(row.reject_log_retention_days ?? 90),
     download_at: downloadAt,
     downloadAt,
     downloadProfileId: row.download_profile_id,
@@ -452,6 +521,45 @@ function profileClientUseSsl(input) {
   return input.client_use_ssl ?? input.clientUseSsl;
 }
 
+// Issue #111. Trimmed rather than passed through: a trailing slash or stray
+// whitespace in a pasted URL would otherwise reach URL construction, and an
+// all-whitespace key would read as configured while failing every call.
+function profileArrBaseUrl(input) {
+  const value = input.arr_base_url ?? input.arrBaseUrl;
+  if (value === undefined) return undefined;
+  return String(value ?? '').trim().replace(/\/+$/, '');
+}
+
+function profileArrApiKey(input) {
+  const value = input.arr_api_key ?? input.arrApiKey;
+  if (value === undefined) return undefined;
+  return String(value ?? '').trim();
+}
+
+function profileRejectUnimportable(input) {
+  const value = input.reject_unimportable ?? input.rejectUnimportable;
+  if (value === undefined) return undefined;
+  return value === true || value === 1 || value === '1' || value === 'true';
+}
+
+function profileRejectMinSize(input) {
+  const value = input.reject_min_size ?? input.rejectMinSize;
+  if (value === undefined) return undefined;
+  const size = Number(value);
+  // A negative or unparseable floor would reject every release, so it reads as
+  // "no floor" rather than as the most destructive possible setting.
+  return Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
+}
+
+// Days. 0 keeps the log forever, which is the honest reading of "no retention"
+// rather than the most destructive one — an unparseable value keeps rows too.
+function profileRejectLogRetentionDays(input) {
+  const value = input.reject_log_retention_days ?? input.rejectLogRetentionDays;
+  if (value === undefined) return undefined;
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? Math.floor(days) : 0;
+}
+
 function profileAutoRemoveCompleted(input) {
   const value = input.auto_remove_completed ?? input.autoRemoveCompleted;
   if (value === undefined) return undefined;
@@ -547,6 +655,8 @@ export class StateStore {
       ${PROFILES_DDL}
 
       ${DOWNLOADS_DDL}
+
+      ${REJECTED_RELEASES_DDL}
     `);
     this.migrateProfileDownloadAt();
     this.migrateProfileAutoRemoveCompleted();
@@ -556,6 +666,15 @@ export class StateStore {
     this.ensureColumn('profiles', 'client_use_ssl', 'INTEGER NOT NULL DEFAULT 0');
     this.ensureColumn('profiles', 'browser_domains', 'TEXT');
     this.ensureColumn('profiles', 'browser_catch_all', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('profiles', 'arr_base_url', "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn('profiles', 'arr_api_key', "TEXT NOT NULL DEFAULT ''");
+    this.ensureColumn('profiles', 'reject_unimportable', 'INTEGER NOT NULL DEFAULT 0');
+    this.ensureColumn('profiles', 'reject_min_size', 'INTEGER NOT NULL DEFAULT 0');
+    // 0 keeps rows forever. The default matches what an operator would expect to
+    // still be able to look back at without the table growing without bound.
+    this.ensureColumn('profiles', 'reject_log_retention_days', 'INTEGER NOT NULL DEFAULT 90');
+    this.ensureColumn('rejected_releases', 'read_at', 'TEXT');
+    this.db.exec(REJECTED_RELEASES_READ_AT_INDEX_DDL);
     // Everything below only exists on a database written by an older putiorr.
     // A fresh database never creates these tables, and PRAGMA table_info on a
     // table that is not there answers with an empty list rather than an error —
@@ -1585,9 +1704,10 @@ export class StateStore {
         INSERT INTO profiles (
           name, type, slug, download_profile_id, auto_remove_completed, putio_folder_name, putio_folder_id,
           download_at, rpc_path, client_host, client_port, client_use_ssl, browser_domains,
-          browser_catch_all, enabled, created_at, updated_at
+          browser_catch_all, arr_base_url, arr_api_key, reject_unimportable, reject_min_size,
+          reject_log_retention_days, enabled, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.name,
         type,
@@ -1603,6 +1723,11 @@ export class StateStore {
         profileClientUseSsl(input) ? 1 : 0,
         profileBrowserDomainsPatch(input) ?? null,
         browserCatchAll ? 1 : 0,
+        profileArrBaseUrl(input) ?? '',
+        profileArrApiKey(input) ?? '',
+        profileRejectUnimportable(input) ? 1 : 0,
+        profileRejectMinSize(input) ?? 0,
+        profileRejectLogRetentionDays(input) ?? 90,
         input.enabled === false ? 0 : 1,
         timestamp,
         timestamp,
@@ -1633,6 +1758,16 @@ export class StateStore {
     if (nextBrowserDomains !== undefined) normalizedPatch.browser_domains = JSON.stringify(nextBrowserDomains);
     const nextBrowserCatchAll = profileBrowserCatchAll(patch);
     if (nextBrowserCatchAll !== undefined) normalizedPatch.browser_catch_all = nextBrowserCatchAll;
+    const nextArrBaseUrl = profileArrBaseUrl(patch);
+    if (nextArrBaseUrl !== undefined) normalizedPatch.arr_base_url = nextArrBaseUrl;
+    const nextArrApiKey = profileArrApiKey(patch);
+    if (nextArrApiKey !== undefined) normalizedPatch.arr_api_key = nextArrApiKey;
+    const nextRejectUnimportable = profileRejectUnimportable(patch);
+    if (nextRejectUnimportable !== undefined) normalizedPatch.reject_unimportable = nextRejectUnimportable;
+    const nextRejectMinSize = profileRejectMinSize(patch);
+    if (nextRejectMinSize !== undefined) normalizedPatch.reject_min_size = nextRejectMinSize;
+    const nextRetention = profileRejectLogRetentionDays(patch);
+    if (nextRetention !== undefined) normalizedPatch.reject_log_retention_days = nextRetention;
     // Both writes land in the same column and every read compares it exactly,
     // so an update normalizes the preset the way createProfile does. A patch
     // that does not mention it leaves the stored one alone.
@@ -1677,6 +1812,11 @@ export class StateStore {
       'client_use_ssl',
       'browser_domains',
       'browser_catch_all',
+      'arr_base_url',
+      'arr_api_key',
+      'reject_unimportable',
+      'reject_min_size',
+      'reject_log_retention_days',
       'enabled',
     ];
     const keys = allowed.filter((key) => Object.hasOwn(normalizedPatch, key));
@@ -1684,7 +1824,7 @@ export class StateStore {
     const assignments = keys.map((key) => `${key} = ?`).join(', ');
     const values = keys.map((key) => (
       key === 'enabled' || key === 'client_use_ssl' || key === 'auto_remove_completed'
-      || key === 'browser_catch_all'
+      || key === 'browser_catch_all' || key === 'reject_unimportable'
         ? (normalizedPatch[key] ? 1 : 0)
         : normalizedPatch[key]
     ));
@@ -2353,6 +2493,91 @@ export class StateStore {
       status: 'deleted',
       error_string: '',
     });
+  }
+
+  // Issue #111. The record of every release putiorr judged unimportable, kept
+  // because a blocklist is permanent and invisible: this is the only place a
+  // false positive can be noticed after the fact.
+  recordRejectedRelease({ profileName = '', name = '', reason = '', outcome = 'blocklisted' } = {}) {
+    const result = this.db.prepare(`
+      INSERT INTO rejected_releases (profile_name, name, reason, outcome, rejected_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(profileName, name, reason, outcome, nowIso());
+    return this.db.prepare('SELECT * FROM rejected_releases WHERE id = ?').get(result.lastInsertRowid);
+  }
+
+  // Newest first: the dashboard shows a short head of this, and the interesting
+  // rejection is always the one that just happened.
+  // One page of the log plus the total the filter matched, because a pager
+  // cannot render without knowing how many pages there are. Search is a plain
+  // substring over the three fields a person would actually type into: the
+  // release, the profile it came from, and why it was thrown away.
+  listRejectedReleases({ limit = 25, offset = 0, search = '', outcome = '' } = {}) {
+    const clauses = [];
+    const params = [];
+    const term = String(search ?? '').trim();
+    if (term) {
+      clauses.push('(name LIKE ? OR profile_name LIKE ? OR reason LIKE ?)');
+      const like = `%${term.replace(/[\\%_]/g, '\\$&')}%`;
+      params.push(like, like, like);
+    }
+    const wantedOutcome = String(outcome ?? '').trim();
+    if (wantedOutcome) {
+      clauses.push('outcome = ?');
+      params.push(wantedOutcome);
+    }
+    const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const total = Number(this.db.prepare(
+      `SELECT COUNT(*) AS total FROM rejected_releases ${where}`,
+    ).get(...params).total);
+    const rows = this.db.prepare(
+      `SELECT * FROM rejected_releases ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    ).all(...params, Math.max(1, Number(limit) || 25), Math.max(0, Number(offset) || 0));
+    return { rows: rows.map((row) => ({ ...row })), total };
+  }
+
+  markAllRejectedReleasesRead() {
+    // Only the unread ones, so re-reading does not rewrite the whole table and
+    // the timestamp keeps meaning "when this was first seen".
+    const result = this.db.prepare(
+      'UPDATE rejected_releases SET read_at = ? WHERE read_at IS NULL',
+    ).run(nowIso());
+    return Number(result.changes ?? 0);
+  }
+
+  // Retention is per profile because that is where it is configured, and the
+  // row remembers the profile by name. A profile set to 0 keeps its rows.
+  pruneRejectedReleases(now = new Date()) {
+    let removed = 0;
+    for (const profile of this.listProfiles()) {
+      const days = Number(profile.reject_log_retention_days ?? 0);
+      if (!Number.isFinite(days) || days <= 0) continue;
+      const cutoff = new Date(now.getTime() - days * 24 * 60 * 60 * 1000).toISOString();
+      const result = this.db.prepare(
+        'DELETE FROM rejected_releases WHERE profile_name = ? AND rejected_at < ?',
+      ).run(profile.name, cutoff);
+      removed += Number(result.changes ?? 0);
+    }
+    return removed;
+  }
+
+  // Split by outcome, because "putiorr wanted to reject 12 and managed 10" is
+  // the operational question a single total cannot answer.
+  countUnreadRejectedReleases() {
+    return Number(this.db.prepare(
+      'SELECT COUNT(*) AS unread FROM rejected_releases WHERE read_at IS NULL',
+    ).get().unread);
+  }
+
+  countRejectedReleases() {
+    // Spread: node:sqlite hands back a null-prototype row, and this value is
+    // compared and serialised by callers that reasonably expect a plain object.
+    return { ...this.db.prepare(`
+      SELECT COUNT(*) AS total,
+             COALESCE(SUM(outcome = 'blocklisted'), 0) AS blocklisted,
+             COALESCE(SUM(outcome = 'downloaded'), 0) AS downloaded
+      FROM rejected_releases
+    `).get() };
   }
 
   // The quarantine: rows the collapse could not represent, parked where the

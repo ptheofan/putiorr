@@ -797,6 +797,38 @@ export class TransmissionRpcServer {
         return;
       }
 
+      if (method === 'GET' && requestPath === '/api/rejected-releases') {
+        const pageSize = Math.min(100, Math.max(1, Number(searchParams.get('pageSize')) || 25));
+        // Pages are 1-based because that is what the control shows; an
+        // unreadable or out-of-range page reads as the first rather than
+        // producing an empty screen the user cannot navigate out of.
+        const page = Math.max(1, Number(searchParams.get('page')) || 1);
+        const { rows, total } = this.service.store.listRejectedReleases({
+          limit: pageSize,
+          offset: (page - 1) * pageSize,
+          search: searchParams.get('search') ?? '',
+          outcome: searchParams.get('outcome') ?? '',
+        });
+        jsonResponse(res, 200, {
+          rows,
+          total,
+          page,
+          pageSize,
+          pages: Math.max(1, Math.ceil(total / pageSize)),
+          unread: this.service.store.countUnreadRejectedReleases(),
+          counts: this.service.store.countRejectedReleases(),
+        }, this.sessionId);
+        return;
+      }
+
+      if (method === 'POST' && requestPath === '/api/rejected-releases/read-all') {
+        const marked = this.service.store.markAllRejectedReleasesRead();
+        logger.info('marked rejected releases as read', { count: marked });
+        this.scheduleWebSocketDownloadsBroadcast('rejected:read-all');
+        jsonResponse(res, 200, { ok: true, marked, unread: 0 }, this.sessionId);
+        return;
+      }
+
       if (method === 'GET' && requestPath === '/api/profiles') {
         // The browser extension asks for `?type=grab` so it never has to know
         // the preset vocabulary. An absent or empty value is a caller with no
@@ -804,7 +836,7 @@ export class TransmissionRpcServer {
         // Presets are stored lowercase wherever they enter putiorr, so the
         // filter that reads them back normalizes the same way.
         const type = (searchParams.get('type') ?? '').trim().toLowerCase();
-        const profiles = this.service.store.listProfiles();
+        const profiles = this.service.store.listProfiles().map(redactProfile);
         jsonResponse(
           res,
           200,
@@ -1290,6 +1322,14 @@ export class TransmissionRpcServer {
     return {
       downloads: this.service.listDownloads(),
       orphaned: this.service.listOrphanedDownloads(),
+      // Issue #111. Rides along on the payload the dashboard already fetches
+      // and the WebSocket already broadcasts, so a rejection appears without a
+      // second request or a reload. Only a head of the history: the count is
+      // the whole of it, the list is what makes the count checkable.
+      rejected: {
+        ...this.service.store.countRejectedReleases(),
+        unread: this.service.store.countUnreadRejectedReleases(),
+      },
     };
   }
 
@@ -1759,9 +1799,21 @@ function claimedElsewhereRefusal(holder, site) {
 
 // Warnings are advice about what was just typed, not profile data: they ride
 // along on the reply that answered for them and are never stored.
+// Issue #111. The *arr API key is write-only over HTTP. GET /api/profiles is
+// what the browser extension reads, and the dashboard has no login in front of
+// it, so the secret leaves the database exactly never. The wizard needs to know
+// whether one is stored, not what it is, so a boolean goes in its place — and a
+// blank submission means "leave it alone" rather than "clear it".
+function redactProfile(profile) {
+  if (!profile) return profile;
+  const { arr_api_key: key, arrApiKey: _camelKey, ...rest } = profile;
+  return { ...rest, arr_api_key_set: Boolean(key) };
+}
+
 function profileResponse(profile, input) {
   const warnings = input.browser_domain_warnings;
-  return warnings?.length ? { ...profile, browser_domain_warnings: warnings } : profile;
+  const redacted = redactProfile(profile);
+  return warnings?.length ? { ...redacted, browser_domain_warnings: warnings } : redacted;
 }
 
 function normalizeProfileInput(input, { partial = false } = {}) {
@@ -1781,6 +1833,11 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   const clientUseSsl = input.client_use_ssl ?? input.clientUseSsl;
   const browserDomains = input.browser_domains ?? input.browserDomains;
   const browserCatchAll = input.browser_catch_all ?? input.browserCatchAll;
+  const arrBaseUrl = input.arr_base_url ?? input.arrBaseUrl;
+  const arrApiKey = input.arr_api_key ?? input.arrApiKey;
+  const rejectUnimportable = input.reject_unimportable ?? input.rejectUnimportable;
+  const rejectMinSize = input.reject_min_size ?? input.rejectMinSize;
+  const rejectRetention = input.reject_log_retention_days ?? input.rejectLogRetentionDays;
   const takeOverCatchAll = input.take_over_catch_all ?? input.takeOverCatchAll;
   const takeOverCatchAllFrom = input.take_over_catch_all_from ?? input.takeOverCatchAllFrom;
 
@@ -1816,6 +1873,41 @@ function normalizeProfileInput(input, { partial = false } = {}) {
   // never come through here have to be checked too.
   if (browserCatchAll !== undefined) {
     output.browser_catch_all = normalizeBooleanInput(browserCatchAll);
+  }
+  // Issue #111. Refused rather than silently dropped: a base URL putiorr cannot
+  // build a request from would leave the profile looking configured to reject
+  // releases while every call throws at download time, which is the one moment
+  // nobody is watching.
+  if (arrBaseUrl !== undefined) {
+    const value = String(arrBaseUrl ?? '').trim();
+    if (value && !/^https?:\/\/.+/i.test(value)) {
+      throw new Error(`"${value}" is not a usable *arr URL; it must start with http:// or https://`);
+    }
+    output.arr_base_url = value;
+  }
+  // Blank means "keep what is stored", because the wizard cannot render the key
+  // back into the field to resubmit it. Turning the feature off is the
+  // reject_unimportable toggle, not clearing this.
+  if (arrApiKey !== undefined) {
+    const value = String(arrApiKey ?? '').trim();
+    if (value) output.arr_api_key = value;
+  }
+  if (rejectUnimportable !== undefined) {
+    output.reject_unimportable = normalizeBooleanInput(rejectUnimportable);
+  }
+  if (rejectMinSize !== undefined) {
+    const size = Number(rejectMinSize);
+    if (rejectMinSize !== '' && rejectMinSize != null && (!Number.isFinite(size) || size < 0)) {
+      throw new Error(`"${rejectMinSize}" is not a usable minimum release size; use a whole number of bytes, or 0 for no minimum`);
+    }
+    output.reject_min_size = Number.isFinite(size) && size > 0 ? Math.floor(size) : 0;
+  }
+  if (rejectRetention !== undefined) {
+    const days = Number(rejectRetention);
+    if (rejectRetention !== '' && rejectRetention != null && (!Number.isFinite(days) || days < 0)) {
+      throw new Error(`"${rejectRetention}" is not a usable retention; use a whole number of days, or 0 to keep the log forever`);
+    }
+    output.reject_log_retention_days = Number.isFinite(days) && days > 0 ? Math.floor(days) : 0;
   }
   // Not a column, and the store is where it is answered — same reason the flag
   // itself is: only that layer sees the other rows, and the clear and the

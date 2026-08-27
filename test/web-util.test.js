@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  arrBaseUrlPlaceholder,
   profileDeletionSummary,
   profileDeletionOutcome,
   profileDeletionRequest,
@@ -873,5 +874,21 @@ test('the download folder refusal offers to put the folder back, and still reads
     assert.deepEqual(clickedWith, lock);
   } finally {
     globalThis.document = previousDocument;
+  }
+});
+
+// The App URL hint is a real URL someone will copy into a config, so naming the
+// wrong app is a wrong setting rather than untidy copy.
+test('the App URL hint names the app the preset picked', () => {
+  assert.equal(arrBaseUrlPlaceholder('sonarr'), 'http://sonarr:8989');
+  assert.equal(arrBaseUrlPlaceholder('radarr'), 'http://radarr:7878');
+  assert.equal(arrBaseUrlPlaceholder('RADARR'), 'http://radarr:7878');
+});
+
+// The step is hidden for these, so an empty hint is right — and a stale one
+// from whichever preset was shown last would be worse than none.
+test('presets with no App URL field get no hint', () => {
+  for (const preset of ['lidarr', 'readarr', 'prowlarr', 'custom', 'grab', '', undefined]) {
+    assert.equal(arrBaseUrlPlaceholder(preset), '', `${preset} should have no hint`);
   }
 });

@@ -39,6 +39,9 @@ putiorr favours reliability over feature breadth. What it does today:
 - safe handling of `delete-local-data`
 - a Chrome extension that sends magnet links and `.torrent` clicks on any site
   to put.io, routed to a profile by the site they came from
+- optional rejection of unimportable releases on Sonarr and Radarr profiles:
+  putiorr inspects what put.io produced before downloading it, and has the app
+  blocklist and search again instead of importing junk (off by default)
 - automatic cleanup of completed transfers for profiles nothing imports from —
   the `prowlarr` and **Putiorr Grab** presets get it by default (removed from
   the list and put.io, downloaded files kept on disk)

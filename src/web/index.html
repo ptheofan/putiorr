@@ -60,6 +60,12 @@
               <span class="nav-full">Download profiles</span>
               <span class="nav-short">Profiles</span>
             </a>
+            <a class="nav-item" href="#/rejected" data-route="rejected">
+              <wa-icon name="ban"></wa-icon>
+              <span class="nav-full">Rejected releases</span>
+              <span class="nav-short">Rejected</span>
+              <span id="rejectedNavBadge" class="nav-badge" data-testid="rejected-nav-badge" hidden></span>
+            </a>
           </div>
 
           <div class="nav-group">
@@ -172,6 +178,40 @@
               </p>
             </div>
             <div id="orphanedDownloadsList" class="downloads-list"></div>
+          </div>
+        </section>
+
+        <section id="rejected" class="panel" data-route-view="rejected" hidden>
+          <div class="section-head">
+            <div class="section-title-row">
+              <h2>Rejected releases</h2>
+              <div class="button-row section-actions">
+                <wa-button id="rejectedReadAllButton" variant="neutral" appearance="outlined" data-testid="rejected-read-all">
+                  <wa-icon slot="start" name="check-double"></wa-icon>
+                  Read all
+                </wa-button>
+              </div>
+            </div>
+            <p id="rejectedReleasesSummary" data-testid="rejected-releases-summary"></p>
+          </div>
+
+          <div class="rejected-filters">
+            <wa-input id="rejectedSearch" type="search" placeholder="Search release, profile or reason" autocomplete="off" data-testid="rejected-search"></wa-input>
+            <wa-select id="rejectedOutcome" value="" data-testid="rejected-outcome">
+              <wa-option value="">Every outcome</wa-option>
+              <wa-option value="blocklisted">Blocklisted</wa-option>
+              <wa-option value="downloaded">Downloaded anyway</wa-option>
+            </wa-select>
+          </div>
+
+          <div id="rejectedReleasesList" class="downloads-list"></div>
+
+          <div id="rejectedEmpty" class="rejected-empty" data-testid="rejected-empty" hidden></div>
+
+          <div id="rejectedPager" class="rejected-pager" data-testid="rejected-pager" hidden>
+            <wa-button id="rejectedPrev" appearance="outlined" data-testid="rejected-prev">Previous</wa-button>
+            <span id="rejectedPageLabel" data-testid="rejected-page-label"></span>
+            <wa-button id="rejectedNext" appearance="outlined" data-testid="rejected-next">Next</wa-button>
           </div>
         </section>
 
@@ -463,8 +503,20 @@
               </div>
             </section>
 
+            <section class="wizard-step" id="wizardRejectStep" hidden>
+              <div class="step-label" data-step-title="Reject bad releases">4. Reject bad releases</div>
+              <div class="check-grid">
+                <wa-checkbox id="wizardRejectUnimportable" data-testid="profile-reject-unimportable">Reject releases put.io delivers with nothing importable, and have this app blocklist and search again</wa-checkbox>
+              </div>
+              <wa-input id="wizardArrBaseUrl" label="App URL" type="text" autocomplete="off" placeholder="" data-testid="profile-arr-base-url"></wa-input>
+              <wa-input id="wizardArrApiKey" label="App API key" type="password" autocomplete="off" placeholder="leave blank to keep the stored key" data-testid="profile-arr-api-key"></wa-input>
+              <wa-input id="wizardRejectMinSize" label="Minimum release size (MB)" type="number" min="0" step="1" autocomplete="off" placeholder="0 for no minimum" data-testid="profile-reject-min-size"></wa-input>
+              <wa-input id="wizardRejectRetention" label="Keep the rejection log for (days)" type="number" min="0" step="1" autocomplete="off" placeholder="0 to keep forever" data-testid="profile-reject-retention"></wa-input>
+              <p class="field-help">Only Sonarr and Radarr expose the blocklist API this uses. Neither can extract archives from a torrent, so a release that arrives packed as .rar is rejected too — <strong>leave this off if you run Unpackerr or another extractor</strong>, which makes those releases importable after all. A minimum size is off by default on purpose: half-hour SD episodes and 720p anime sit well under any figure that is safe for movies, and a blocklist cannot be undone from putiorr.</p>
+            </section>
+
             <section class="wizard-step" id="wizardOptionsStep">
-              <div class="step-label" data-step-title="Options">4. Options</div>
+              <div class="step-label" data-step-title="Options">5. Options</div>
               <div class="check-grid">
                 <wa-checkbox id="wizardEnabled">Enable this profile</wa-checkbox>
                 <wa-checkbox id="wizardAutoRemoveCompleted" data-testid="profile-auto-remove-completed">App will not signal import completion; remove from putiorr once files download locally</wa-checkbox>

@@ -1,7 +1,7 @@
 import { setHidden } from './util.js';
 
 // --- Sidebar routing (hash-based, no server rewrites needed) ---
-export const ROUTES = ['topology', 'downloads', 'download-profiles', 'profiles', 'help'];
+export const ROUTES = ['topology', 'downloads', 'download-profiles', 'profiles', 'rejected', 'help'];
 
 export function currentRoute() {
   const hash = window.location.hash.replace(/^#\/?/, '');

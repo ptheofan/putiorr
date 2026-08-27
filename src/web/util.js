@@ -1,4 +1,4 @@
-import { BYTE_UNITS, TIME_UNITS, DEFAULT_PROFILE_TYPE } from './constants.js';
+import { BYTE_UNITS, TIME_UNITS, DEFAULT_PROFILE_TYPE, PROFILE_TYPES } from './constants.js';
 
 // Web Awesome inputs (wa-input/wa-select) return `null` for an empty value
 // rather than ''. Normalize to a string so the many `.value.trim()` reads below
@@ -245,6 +245,74 @@ export function browserDomainsPayload(hidden, value) {
 // did it could be refused over a second catch-all the user never asked for.
 export function browserCatchAllPayload(hidden, checked) {
   return hidden ? {} : { browserCatchAll: Boolean(checked) };
+}
+
+// Issue #111. The App URL hint has to name the app the preset picked. A Radarr
+// profile showing http://sonarr:8989 reads as a value to copy, and someone will
+// copy it — the field takes a real URL, so a wrong hint is a wrong config, not
+// just untidy copy. Host comes from the label and port from the preset, so
+// there is no third list of app names to drift.
+export function arrBaseUrlPlaceholder(type) {
+  const preset = PROFILE_TYPES[String(type ?? '').trim().toLowerCase()];
+  if (!preset?.defaultPort) return '';
+  return `http://${preset.label.toLowerCase()}:${preset.defaultPort}`;
+}
+
+// Issue #111. Only a visible step sends its fields — a hidden control must
+// never write a setting nobody saw, which is the same rule the browser fields
+// follow. Which presets show the step lives in constants.js, shared with the
+// downloader that has to act on it.
+// The field is MB because nobody reasons about a release in bytes; the column
+// is bytes because every size putiorr compares it against is. Anything
+// unreadable becomes 0, which is "no minimum" — the harmless direction, where
+// a NaN floor would reject every release.
+export function minSizeMbToBytes(value) {
+  const mb = Number(String(value ?? '').trim());
+  return Number.isFinite(mb) && mb > 0 ? Math.floor(mb * 1024 * 1024) : 0;
+}
+
+export function minSizeBytesToMb(bytes) {
+  const size = Number(bytes ?? 0);
+  return Number.isFinite(size) && size > 0 ? String(Math.round(size / (1024 * 1024))) : '';
+}
+
+export function rejectionPayload(hidden, { enabled, baseUrl, apiKey, minSizeMb, retentionDays }) {
+  if (hidden) return {};
+  const days = Number(String(retentionDays ?? '').trim());
+  return {
+    reject_unimportable: Boolean(enabled),
+    arr_base_url: String(baseUrl ?? '').trim(),
+    // Blank is "keep the stored key" all the way down: the wizard never reads
+    // one back, so it cannot resubmit what it was not given.
+    arr_api_key: String(apiKey ?? '').trim(),
+    reject_min_size: minSizeMbToBytes(minSizeMb),
+    // A cleared field is "keep the log forever", not "delete it all".
+    reject_log_retention_days: Number.isFinite(days) && days > 0 ? Math.floor(days) : 0,
+  };
+}
+
+// Stored as ISO so the row is portable; shown in the reader's own locale and
+// zone, because "was that before or after I noticed the gap?" is the question
+// being asked of it. An unparseable value is shown as stored rather than as
+// "Invalid Date".
+export function formatDateTime(value) {
+  const parsed = new Date(String(value ?? ''));
+  return Number.isNaN(parsed.getTime()) ? String(value ?? '') : parsed.toLocaleString();
+}
+
+// Issue #111. The count is the headline, but a rejection putiorr could not
+// deliver to the *arr is the one worth reading — that release was downloaded
+// and the queue item is still stuck — so it is never folded into the total.
+export function rejectedReleasesSummary({ total = 0, blocklisted = 0, downloaded = 0 } = {}) {
+  if (!total) return '';
+  const releases = `${total} release${total === 1 ? '' : 's'}`;
+  if (!downloaded) {
+    return `${releases} rejected and sent back for a new search.`;
+  }
+  if (!blocklisted) {
+    return `${releases} judged unimportable, but the app was never told — ${downloaded === 1 ? 'it was' : 'they were'} downloaded as usual and may still be stuck in its queue.`;
+  }
+  return `${releases} judged unimportable: ${blocklisted} blocklisted and searched again, ${downloaded} downloaded anyway because the app could not be told.`;
 }
 
 // What the takeover offer says, and what it costs. The consequence is stated

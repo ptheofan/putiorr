@@ -9,6 +9,67 @@ This file starts at 3.0.0. Releases before it shipped without a changelog, and
 their notes — GitHub's generated list of merged pull requests — remain on the
 [releases page](https://github.com/ptheofan/putiorr/releases).
 
+## [Unreleased]
+
+### Added
+
+- **Sonarr and Radarr profiles can reject a release put.io delivered as junk,
+  before downloading it.** ([#111](https://github.com/ptheofan/putiorr/issues/111))
+  When put.io finishes a transfer, putiorr already knows every filename and size
+  in it — and until now it downloaded a passworded archive, a folder of `.exe`
+  and `.txt`, or a release that arrived a fraction of its announced size just
+  like any other. The import then failed and the queue item sat in Activity
+  blocking that episode or movie until someone clicked blocklist by hand.
+
+  Put an app URL and API key on a Sonarr or Radarr profile, tick **Reject
+  releases put.io delivers with nothing importable**, and putiorr calls the
+  app's queue API to blocklist the release and search again, then drops it from
+  put.io. Nothing is ever staged or downloaded.
+
+  This cannot be done over Transmission. putiorr already sets the torrent's
+  `errorString`, and Sonarr maps that to a *warning*, never a failure — so
+  Failed Download Handling never fires and the item stays in the queue. The
+  blocklist only exists in the REST API, which is why it needs a key.
+
+  **Off by default, and it stays off after upgrading.** Three things count as
+  junk: nothing importable in the release at all, put.io delivering less than
+  half the announced size, and an optional per-profile minimum size. The
+  minimum is off by default on purpose — a half-hour SD episode is 150–250 MB
+  and 720p anime runs 200–350 MB, so any figure safe for movies would silently
+  blocklist a whole anime library.
+
+  What counts as importable is decided by the preset, not by one list shared
+  across all of them. On a Sonarr or Radarr profile that means a release of
+  nothing but `.flac`, or a lone `.pdf` — importable to *some* app, and to these
+  two exactly as useless as a folder of `.exe` — and it also means **a release
+  that arrives packed as `.rar`**: neither app extracts archives from a torrent
+  download, which is why a packed release imports as "no files found are
+  eligible for import" today. `VIDEO_TS`/`BDMV` disc rips and `.iso` still pass.
+
+  **Leave this off if you run Unpackerr** or another extractor, which makes
+  packed releases importable after all and would turn every one of them into a
+  wrongly blocklisted release. A wrong blocklist is invisible and permanent; a
+  missed bad release costs the one manual click that happens today.
+
+  **Every rejection is recorded**, on its own **Rejected releases** screen in
+  the sidebar: what was thrown away, why, on which profile and when, paged and
+  searchable by release, profile or reason, and filterable by outcome. Unread
+  rejections raise a badge on the sidebar link until **Read all** clears them,
+  because the whole point of the log is that someone looks. Rows are kept for
+  90 days by default, per profile and configurable on the same wizard step; set
+  it to 0 to keep them forever.
+
+  A blocklist cannot be undone from putiorr and leaves no trace in the download
+  list, so this is the only place a wrong rejection can be noticed after the
+  fact. Releases putiorr judged unimportable but could not report to the app — it was unreachable, or its queue had no matching item — are
+  recorded too and called out separately: those were downloaded as usual and
+  their queue item may still be stuck, which a single total would have hidden.
+
+  Only Sonarr and Radarr — Lidarr and Readarr serve a different API version
+  putiorr does not speak, so the step is not offered there. The API key is
+  write-only over HTTP: `GET /api/profiles` reports only whether one is stored,
+  never its value.
+
 ## [3.0.6] — 2026-07-27
 
 ### Changed

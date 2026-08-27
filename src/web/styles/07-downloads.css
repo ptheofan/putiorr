@@ -719,3 +719,103 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Issue #111. Deliberately quieter than a quarantined download: a rejection is
+   a thing that happened correctly, not a thing awaiting a decision. */
+.rejected-release {
+  display: grid;
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+/* Except this one. putiorr judged the release junk and could not tell the app,
+   so it was downloaded and that queue item may still be stuck — the only row
+   here that asks anything of the reader. */
+.rejected-release.rejected-release-undelivered {
+  border-left-color: var(--danger);
+}
+
+.rejected-release .download-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.rejected-release .download-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rejected-release .download-status {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.rejected-release.rejected-release-undelivered .download-status {
+  color: var(--danger);
+}
+
+.rejected-release .download-facts {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}
+
+/* Issue #111. The rejection log's own screen. */
+.rejected-filters {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.rejected-filters wa-input { flex: 1 1 260px; }
+.rejected-filters wa-select { flex: 0 1 200px; }
+
+.rejected-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 18px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.rejected-empty {
+  padding: 28px 18px;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+}
+
+/* Unread rows are the ones nobody has looked at yet, which is the entire point
+   of keeping the log: a wrong blocklist is invisible until someone reads it. */
+.rejected-release.rejected-release-unread {
+  border-left-width: 5px;
+}
+
+.nav-badge {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.nav-badge[hidden] { display: none; }

@@ -28,6 +28,7 @@ import {
   setDisabled,
 } from './util.js';
 import { renderTopology } from './topology.js';
+import { renderRejectedBadge } from './rejected.js';
 
 export async function refreshDownloads() {
   applyDownloadsPayload(await api('/api/downloads'));
@@ -41,6 +42,13 @@ export async function refreshDownloads() {
 export function applyDownloadsPayload(payload) {
   if (Array.isArray(payload?.downloads)) state.downloads = payload.downloads;
   if (Array.isArray(payload?.orphaned)) state.orphanedDownloads = payload.orphaned;
+  // Only the counts ride along here; the log's own page fetches its rows. This
+  // is what keeps the sidebar badge live without the downloads payload carrying
+  // a list nothing on this screen renders.
+  if (payload?.rejected) {
+    state.rejectedReleases = payload.rejected;
+    renderRejectedBadge();
+  }
 }
 
 export function applyDownloadsUpdate(message) {

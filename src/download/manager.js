@@ -4,6 +4,9 @@ import { once } from 'node:events';
 import path from 'node:path';
 import { logger } from '../logger.js';
 import { downloadPolicyForContext, isSlowSpeedResetEnabled } from './policy.js';
+import { rejectRelease } from '../arr/client.js';
+import { supportsArrRejection } from '../web/constants.js';
+import { inspectRelease } from './release-check.js';
 import {
   downloadLocalRoot,
   fileExistsWithSize,
@@ -16,6 +19,11 @@ const SLOW_RESET_PAUSE_MS = 500;
 // How many times a file is fetched before it is left alone. It bounds both
 // ends of the retry: what counts as spent, and what the queue stops offering.
 const MAX_FILE_ATTEMPTS = 3;
+// Issue #111. How many polls a rejection waits for the *arr to notice the
+// download before giving up and fetching it. The *arr rebuilds its queue from
+// putiorr on its own schedule, so the first look after put.io finishes often
+// finds nothing. At the default 30s poll this is about two and a half minutes.
+const REJECTION_ATTEMPTS = 5;
 
 class SlowSpeedResetError extends Error {
   constructor(message) {
@@ -68,6 +76,10 @@ export class DownloadManager {
     this.workers = [];
     this.activeFileIds = new Set();
     this.activeFileRates = new Map();
+    // Issue #111. How many polls a rejection has waited for the *arr to catch
+    // up, keyed by download id. In memory on purpose: a restart just starts the
+    // wait again, which is harmless, and this is not worth a column.
+    this.rejectionAttempts = new Map();
   }
 
   async start() {
@@ -108,6 +120,12 @@ export class DownloadManager {
       logger.info('purged tombstoned files under processed transfers', { count: purgedFiles });
     }
     await this.removeProcessedAutoRemoveTransfers();
+    // Issue #111. The rejection log is append-only and nothing else trims it, so
+    // it is pruned on the poll rather than growing without bound.
+    const prunedRejections = this.store.pruneRejectedReleases();
+    if (prunedRejections > 0) {
+      logger.info('pruned rejected releases past their retention', { count: prunedRejections });
+    }
     if (!this.service.getPutioToken()) return;
     const rows = await this.service.refreshRemoteTransfers();
     for (const row of rows) {
@@ -218,6 +236,12 @@ export class DownloadManager {
       throw new Error('ready transfer has no downloadable files on put.io');
     }
 
+    // Issue #111. The last moment this is free: put.io has listed the files, and
+    // nothing has been staged or fetched yet. A release that cannot be imported
+    // is rejected here rather than downloaded, imported-and-failed, and left
+    // blocking the *arr queue.
+    if (await this.rejectUnimportableTransfer(transfer, profile, remoteFiles)) return;
+
     // Claimed before the row is moved on, because claiming is the step that can
     // refuse — a staging collision, or a put.io name too long to be a folder.
     // Flipping lifecycle first left a refused download sitting at 'downloading'
@@ -265,6 +289,152 @@ export class DownloadManager {
 
     this.store.updateDownload(updated.id, { total_size: totalSize });
     await this.finalizeTransferIfComplete(updated.id);
+  }
+
+  // Issue #111. Returns true when the release was rejected and prepareTransfer
+  // must stop. Every failure path returns false: a profile with no *arr
+  // configured, an *arr that cannot be reached, or a queue it does not hold
+  // this hash in all mean putiorr downloads the release as it always did.
+  // Rejecting is the exceptional branch, and it never runs on a guess.
+  async rejectUnimportableTransfer(transfer, profile, remoteFiles) {
+    // Decided once, before the first byte. pollOnce re-runs prepareTransfer for
+    // everything that is not yet 'processed', so a release that already started
+    // downloading would otherwise be re-judged every poll: the attempt counter
+    // restarts, it concedes again five polls later, and the log fills with rows
+    // for one release — each claiming a download that a later attempt may have
+    // deleted out from under it. Once it is downloading, the decision is made.
+    if (transfer.lifecycle !== 'remote') return false;
+    if (!profile?.reject_unimportable) return false;
+    if (!supportsArrRejection(profile.type)) return false;
+    if (!profile.arr_base_url || !profile.arr_api_key) return false;
+
+    const verdict = inspectRelease({
+      files: remoteFiles,
+      announcedSize: Number(transfer.total_size ?? 0),
+      minSize: Number(profile.reject_min_size ?? 0),
+      // What the owning app can import is what makes a release valid, so the
+      // preset decides the rule rather than only deciding whether it runs.
+      preset: profile.type,
+    });
+    if (!verdict.reject) {
+      this.rejectionAttempts.delete(transfer.id);
+      return false;
+    }
+
+    const record = (outcome) => {
+      try {
+        this.store.recordRejectedRelease({
+          profileName: profile.name,
+          name: transfer.name,
+          reason: verdict.reason,
+          outcome,
+        });
+      } catch (error) {
+        // Bookkeeping must never be the reason a rejection fails to happen.
+        logger.warn('failed to record a rejected release', {
+          transferId: transfer.id,
+          error: error.message,
+        });
+      }
+    };
+
+    // Conceding means downloading the release and writing a row that says the
+    // rejection did not happen. Both are worth delaying: the *arr often has not
+    // refreshed its queue from putiorr yet, and one more poll is enough. Give
+    // up only once waiting has stopped being plausible.
+    const concede = (message, meta) => {
+      const attempts = (this.rejectionAttempts.get(transfer.id) ?? 0) + 1;
+      if (attempts < REJECTION_ATTEMPTS) {
+        this.rejectionAttempts.set(transfer.id, attempts);
+        logger.info(`${message}; waiting for the next poll`, { ...meta, attempt: attempts });
+        // Nothing is staged and nothing is recorded: this transfer is simply
+        // left ready, and the next poll asks again.
+        return true;
+      }
+      this.rejectionAttempts.delete(transfer.id);
+      logger.warn(`${message}; downloading it anyway`, { ...meta, attempts });
+      record('downloaded');
+      return false;
+    };
+
+    const meta = {
+      transferId: transfer.id,
+      name: transfer.name,
+      profile: profile.name,
+      reason: verdict.reason,
+    };
+
+    const hash = transfer.hash;
+    if (!hash) {
+      // No identity means no queue item can ever be matched, so waiting cannot
+      // help and this is not deferred.
+      logger.warn('cannot reject unimportable release without a torrent hash', meta);
+      this.rejectionAttempts.delete(transfer.id);
+      record('downloaded');
+      return false;
+    }
+
+    let result;
+    try {
+      result = await rejectRelease({
+        baseUrl: profile.arr_base_url,
+        apiKey: profile.arr_api_key,
+        hash,
+        preset: profile.type,
+        fetchImpl: this.fetch,
+      });
+    } catch (error) {
+      // Downloading a bad release is recoverable by hand; silently dropping one
+      // the *arr still has queued is not, because nothing would ever search
+      // again for it.
+      return concede('failed to tell the *arr to blocklist an unimportable release', {
+        ...meta, error: error.message,
+      });
+    }
+
+    if (!result.queued) {
+      // queueSize is the diagnostic that separates "the *arr has not seen this
+      // download yet" from "the hash putiorr reports is not the one the *arr
+      // recorded": an empty queue is the first, a full one holding other items
+      // is the second.
+      return concede('the *arr has no queue item for this release', {
+        ...meta, hash, arrQueueSize: result.queueSize,
+      });
+    }
+
+    this.rejectionAttempts.delete(transfer.id);
+    record('blocklisted');
+    logger.info('rejected unimportable release; told the *arr to blocklist and search again', {
+      ...meta,
+      hash,
+      searched: result.searched,
+      searchCommand: result.searchCommand,
+      searchIds: result.searchIds,
+      matchedQueueIds: result.matchedQueueIds,
+      arrQueueSize: result.queueSize,
+    });
+    if (!result.searched) {
+      // The queue item carried no episode or movie id, so there is nothing to
+      // name in a search command. Blocklisted, but nothing will replace it.
+      logger.warn('blocklisted the release but could not ask the *arr to search again', meta);
+    }
+
+    // Nothing has been staged yet, so there is nothing local to delete. The
+    // remote copy goes because keeping junk on put.io is the whole cost this
+    // avoids.
+    try {
+      await this.service.deleteDownloadBucket(transfer.id, {
+        deleteRemote: Boolean(this.service.getPutioToken()),
+        deleteLocal: false,
+      });
+    } catch (error) {
+      logger.warn('failed to remove a rejected release from putiorr', {
+        transferId: transfer.id,
+        name: transfer.name,
+        error: error.message,
+      });
+    }
+    return true;
   }
 
   async pruneProcessedTransfersMissingLocalData() {
