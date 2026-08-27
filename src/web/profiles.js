@@ -27,6 +27,7 @@ import {
   browserDomainsPayload,
   browserCatchAllPayload,
   rejectionPayload,
+  arrBaseUrlPlaceholder,
   minSizeBytesToMb,
   grabProfileSummary,
   presetDisplayName,
@@ -627,6 +628,9 @@ export function applyProfileTypeLayout(type = fieldValue(el.wizardProfileType)) 
   // the step for Lidarr, Readarr or a custom profile would offer a setting that
   // silently never fires.
   setHidden(el.wizardRejectStep, !supportsArrRejection(type));
+  // The hint is a real URL someone will copy, so it has to follow the preset
+  // rather than sit in the markup naming whichever app was written there first.
+  el.wizardArrBaseUrl.setAttribute('placeholder', arrBaseUrlPlaceholder(type));
   setHidden(el.copyClientSettingsButton, isGrab);
   setText(el.profileWizardIntro, isGrab ? GRAB_WIZARD_INTRO : ARR_WIZARD_INTRO);
   setText(el.wizardAppStepHelp, isGrab ? GRAB_APP_STEP_HELP : ARR_APP_STEP_HELP);

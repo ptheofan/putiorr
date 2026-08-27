@@ -1,4 +1,4 @@
-import { BYTE_UNITS, TIME_UNITS, DEFAULT_PROFILE_TYPE } from './constants.js';
+import { BYTE_UNITS, TIME_UNITS, DEFAULT_PROFILE_TYPE, PROFILE_TYPES } from './constants.js';
 
 // Web Awesome inputs (wa-input/wa-select) return `null` for an empty value
 // rather than ''. Normalize to a string so the many `.value.trim()` reads below
@@ -245,6 +245,17 @@ export function browserDomainsPayload(hidden, value) {
 // did it could be refused over a second catch-all the user never asked for.
 export function browserCatchAllPayload(hidden, checked) {
   return hidden ? {} : { browserCatchAll: Boolean(checked) };
+}
+
+// Issue #111. The App URL hint has to name the app the preset picked. A Radarr
+// profile showing http://sonarr:8989 reads as a value to copy, and someone will
+// copy it — the field takes a real URL, so a wrong hint is a wrong config, not
+// just untidy copy. Host comes from the label and port from the preset, so
+// there is no third list of app names to drift.
+export function arrBaseUrlPlaceholder(type) {
+  const preset = PROFILE_TYPES[String(type ?? '').trim().toLowerCase()];
+  if (!preset?.defaultPort) return '';
+  return `http://${preset.label.toLowerCase()}:${preset.defaultPort}`;
 }
 
 // Issue #111. Only a visible step sends its fields — a hidden control must

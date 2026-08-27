@@ -7,11 +7,16 @@ export const PROFILE_TYPES = {
   sonarr: {
     label: 'Sonarr',
     root: '/series',
+    // Issue #111. The app's own default web port, used to build the App URL
+    // hint on the rejection step. Only the presets that show that step have
+    // one; anywhere else it would be data nothing reads.
+    defaultPort: 8989,
     note: 'In Sonarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.',
   },
   radarr: {
     label: 'Radarr',
     root: '/movies',
+    defaultPort: 7878,
     note: 'In Radarr, add a Transmission download client and paste these values. Leave username and password blank unless putiorr has RPC auth configured.',
   },
   lidarr: {
