@@ -719,3 +719,54 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Issue #111. Deliberately quieter than a quarantined download: a rejection is
+   a thing that happened correctly, not a thing awaiting a decision. */
+.rejected-release {
+  display: grid;
+  gap: 8px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+/* Except this one. putiorr judged the release junk and could not tell the app,
+   so it was downloaded and that queue item may still be stuck — the only row
+   here that asks anything of the reader. */
+.rejected-release.rejected-release-undelivered {
+  border-left-color: var(--danger);
+}
+
+.rejected-release .download-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.rejected-release .download-name {
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.rejected-release .download-status {
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.rejected-release.rejected-release-undelivered .download-status {
+  color: var(--danger);
+}
+
+.rejected-release .download-facts {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+}

@@ -1290,6 +1290,14 @@ export class TransmissionRpcServer {
     return {
       downloads: this.service.listDownloads(),
       orphaned: this.service.listOrphanedDownloads(),
+      // Issue #111. Rides along on the payload the dashboard already fetches
+      // and the WebSocket already broadcasts, so a rejection appears without a
+      // second request or a reload. Only a head of the history: the count is
+      // the whole of it, the list is what makes the count checkable.
+      rejected: {
+        ...this.service.store.countRejectedReleases(),
+        recent: this.service.store.listRejectedReleases(20),
+      },
     };
   }
 

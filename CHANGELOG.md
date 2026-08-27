@@ -51,6 +51,15 @@ their notes — GitHub's generated list of merged pull requests — remain on th
   wrongly blocklisted release. A wrong blocklist is invisible and permanent; a
   missed bad release costs the one manual click that happens today.
 
+  **Every rejection is recorded**, and the dashboard grows a **Rejected
+  releases** section listing what was thrown away, why, on which profile and
+  when. A blocklist cannot be undone from putiorr and leaves no trace in the
+  download list, so this is the only place a wrong rejection can be noticed
+  after the fact. Releases putiorr judged unimportable but could not report to
+  the app — it was unreachable, or its queue had no matching item — are
+  recorded too and called out separately: those were downloaded as usual and
+  their queue item may still be stuck, which a single total would have hidden.
+
   Only Sonarr and Radarr — Lidarr and Readarr serve a different API version
   putiorr does not speak, so the step is not offered there. The API key is
   write-only over HTTP: `GET /api/profiles` reports only whether one is stored,

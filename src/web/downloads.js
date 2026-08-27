@@ -26,6 +26,8 @@ import {
   setCheckboxChecked,
   isCheckboxChecked,
   setDisabled,
+  rejectedReleasesSummary,
+  formatDateTime,
 } from './util.js';
 import { renderTopology } from './topology.js';
 
@@ -41,6 +43,7 @@ export async function refreshDownloads() {
 export function applyDownloadsPayload(payload) {
   if (Array.isArray(payload?.downloads)) state.downloads = payload.downloads;
   if (Array.isArray(payload?.orphaned)) state.orphanedDownloads = payload.orphaned;
+  if (payload?.rejected) state.rejectedReleases = payload.rejected;
 }
 
 export function applyDownloadsUpdate(message) {
@@ -151,6 +154,48 @@ export function renderOrphanedDownloads() {
   }
 }
 
+// Issue #111. A blocklist cannot be undone from putiorr and leaves no trace in
+// the download list, so this is the only place a wrong rejection can be seen
+// after the fact. It is read-only on purpose: there is nothing to undo here,
+// only something to notice.
+export function renderRejectedReleases() {
+  const rejected = state.rejectedReleases ?? {};
+  const recent = Array.isArray(rejected.recent) ? rejected.recent : [];
+  setHidden(el.rejectedReleases, !rejected.total);
+  setText(el.rejectedReleasesSummary, rejectedReleasesSummary(rejected));
+  el.rejectedReleasesList.replaceChildren();
+  if (!rejected.total) return;
+
+  for (const row of recent) {
+    const undelivered = row.outcome !== 'blocklisted';
+    const card = document.createElement('article');
+    card.className = `download-card rejected-release${undelivered ? ' rejected-release-undelivered' : ''}`;
+    card.setAttribute('data-testid', 'rejected-release');
+    card.dataset.outcome = row.outcome || '';
+    card.innerHTML = `
+      <div class="download-head">
+        <span class="download-name" data-role="name"></span>
+        <span class="download-status" data-role="outcome"></span>
+      </div>
+      <div class="download-facts">
+        <span data-role="reason"></span>
+        <span data-role="origin"></span>
+      </div>
+    `;
+    setText(card.querySelector('[data-role="name"]'), row.name || '(unnamed)');
+    setText(
+      card.querySelector('[data-role="outcome"]'),
+      undelivered ? 'Downloaded anyway' : 'Blocklisted',
+    );
+    setText(card.querySelector('[data-role="reason"]'), row.reason || 'No reason recorded');
+    setText(
+      card.querySelector('[data-role="origin"]'),
+      `${row.profile_name || 'Unknown profile'} · ${formatDateTime(row.rejected_at)}`,
+    );
+    el.rejectedReleasesList.appendChild(card);
+  }
+}
+
 // The refusals here are the whole point of the section — "put.io transfer N
 // already belongs to RR profile X" is the answer the user needs — so a failure
 // is written onto the card rather than swallowed.
@@ -185,6 +230,7 @@ export function renderDownloads() {
   renderSchemaMigrations();
   renderStagingCollisions();
   renderOrphanedDownloads();
+  renderRejectedReleases();
   const viewportScroll = captureViewportScroll();
   rememberFileListScrollTops();
   pruneDownloadUiState();

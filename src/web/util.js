@@ -282,6 +282,30 @@ export function rejectionPayload(hidden, { enabled, baseUrl, apiKey, minSizeMb }
   };
 }
 
+// Stored as ISO so the row is portable; shown in the reader's own locale and
+// zone, because "was that before or after I noticed the gap?" is the question
+// being asked of it. An unparseable value is shown as stored rather than as
+// "Invalid Date".
+export function formatDateTime(value) {
+  const parsed = new Date(String(value ?? ''));
+  return Number.isNaN(parsed.getTime()) ? String(value ?? '') : parsed.toLocaleString();
+}
+
+// Issue #111. The count is the headline, but a rejection putiorr could not
+// deliver to the *arr is the one worth reading — that release was downloaded
+// and the queue item is still stuck — so it is never folded into the total.
+export function rejectedReleasesSummary({ total = 0, blocklisted = 0, downloaded = 0 } = {}) {
+  if (!total) return '';
+  const releases = `${total} release${total === 1 ? '' : 's'}`;
+  if (!downloaded) {
+    return `${releases} rejected and sent back for a new search.`;
+  }
+  if (!blocklisted) {
+    return `${releases} judged unimportable, but the app was never told — ${downloaded === 1 ? 'it was' : 'they were'} downloaded as usual and may still be stuck in its queue.`;
+  }
+  return `${releases} judged unimportable: ${blocklisted} blocklisted and searched again, ${downloaded} downloaded anyway because the app could not be told.`;
+}
+
 // What the takeover offer says, and what it costs. The consequence is stated
 // next to the action rather than behind it: the profile it clears may not even
 // be on screen, and "it worked" is no answer to "what did it do?".

@@ -787,8 +787,14 @@ test('dashboard can delete multiple selected buckets through mocked put.io', asy
   const downloadsResponse = await fetch(harness.url.replace('/transmission/rpc', '/api/downloads'));
   assert.equal(downloadsResponse.status, 200);
   // The quarantine is its own array so the dashboard can render it as a
-  // separate needs-attention section rather than interleaving it.
-  assert.deepEqual(await downloadsResponse.json(), { downloads: [], orphaned: [] });
+  // separate needs-attention section rather than interleaving it. The rejection
+  // log rides along for the same reason and reports zero rather than being
+  // absent, so the dashboard never has to distinguish "none" from "unsupported".
+  assert.deepEqual(await downloadsResponse.json(), {
+    downloads: [],
+    orphaned: [],
+    rejected: { total: 0, blocklisted: 0, downloaded: 0, recent: [] },
+  });
 });
 
 test('dashboard file delete keeps local files when deleteLocal is omitted', async (t) => {

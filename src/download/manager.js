@@ -299,6 +299,29 @@ export class DownloadManager {
     });
     if (!verdict.reject) return false;
 
+    // Every outcome from here on is recorded, including the ones where the
+    // release is downloaded anyway. A rejection that did not happen is exactly
+    // what someone is looking for when the queue is still stuck.
+    const record = (outcome) => {
+      try {
+        this.store.recordRejectedRelease({
+          profileName: profile.name,
+          profileType: profile.type,
+          name: transfer.name,
+          hash: transfer.hash ?? '',
+          reason: verdict.reason,
+          totalSize: Number(transfer.total_size ?? 0),
+          outcome,
+        });
+      } catch (error) {
+        // Bookkeeping must never be the reason a rejection fails to happen.
+        logger.warn('failed to record a rejected release', {
+          transferId: transfer.id,
+          error: error.message,
+        });
+      }
+    };
+
     const hash = transfer.hash;
     if (!hash) {
       logger.warn('cannot reject unimportable release without a torrent hash', {
@@ -306,6 +329,7 @@ export class DownloadManager {
         name: transfer.name,
         reason: verdict.reason,
       });
+      record('downloaded');
       return false;
     }
 
@@ -328,6 +352,7 @@ export class DownloadManager {
         reason: verdict.reason,
         error: error.message,
       });
+      record('downloaded');
       return false;
     }
 
@@ -339,9 +364,11 @@ export class DownloadManager {
         hash,
         reason: verdict.reason,
       });
+      record('downloaded');
       return false;
     }
 
+    record('blocklisted');
     logger.info('rejected unimportable release; told the *arr to blocklist and search again', {
       transferId: transfer.id,
       name: transfer.name,
