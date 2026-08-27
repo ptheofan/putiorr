@@ -179,7 +179,14 @@ const REJECTED_RELEASES_DDL = `
 
   CREATE INDEX IF NOT EXISTS idx_rejected_releases_rejected_at
     ON rejected_releases(rejected_at DESC);
+`;
 
+// Indexed on a column added by ensureColumn, so it can only be built once that
+// has run. Creating it alongside the table killed every upgrade from a build
+// that shipped rejected_releases without read_at: CREATE INDEX resolves its
+// column immediately, so migrate() threw before it reached the ALTER that would
+// have added it, and the process crash-looped on boot.
+const REJECTED_RELEASES_READ_AT_INDEX_DDL = `
   CREATE INDEX IF NOT EXISTS idx_rejected_releases_read_at
     ON rejected_releases(read_at);
 `;
@@ -667,6 +674,7 @@ export class StateStore {
     // still be able to look back at without the table growing without bound.
     this.ensureColumn('profiles', 'reject_log_retention_days', 'INTEGER NOT NULL DEFAULT 90');
     this.ensureColumn('rejected_releases', 'read_at', 'TEXT');
+    this.db.exec(REJECTED_RELEASES_READ_AT_INDEX_DDL);
     // Everything below only exists on a database written by an older putiorr.
     // A fresh database never creates these tables, and PRAGMA table_info on a
     // table that is not there answers with an empty list rather than an error —
