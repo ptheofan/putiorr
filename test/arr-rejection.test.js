@@ -255,6 +255,33 @@ test('a hash the *arr has no queue item for is downloaded rather than dropped', 
   }
 });
 
+// An audio-only release is importable to *something*, which is exactly why a
+// single union list let it through to Sonarr, downloaded it, and left the queue
+// item stuck on a failed import.
+test('an audio-only release is rejected on a sonarr profile', async () => {
+  const files = [{ relativePath: 'Album/01 - Track.flac', size: 60 * MB, id: 4, name: 'a' }];
+  const harness = await createHarness(new FakePutio(files));
+  const arr = createFakeArr();
+  try {
+    const profile = createSonarrProfile(harness);
+    const transfer = seedReadyTransfer(harness, profile, { total_size: 60 * MB });
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: arr.fetchImpl,
+    });
+    await manager.prepareTransfer(harness.store.findDownloadById(transfer.id));
+
+    assert.equal(arr.calls[1].method, 'DELETE');
+    assert.equal(arr.calls[1].query.blocklist, 'true');
+    assert.equal(harness.store.findDownloadById(transfer.id), undefined);
+  } finally {
+    harness.store.close();
+  }
+});
+
 test('a lidarr profile never rejects, because putiorr does not speak its API', async () => {
   const harness = await createHarness(new FakePutio(JUNK_FILES));
   const arr = createFakeArr();

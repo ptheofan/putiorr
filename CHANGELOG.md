@@ -38,10 +38,13 @@ their notes — GitHub's generated list of merged pull requests — remain on th
   and 720p anime runs 200–350 MB, so any figure safe for movies would silently
   blocklist a whole anime library.
 
-  The rule for "nothing importable" is deliberately conservative: rar'd scene
-  releases, `VIDEO_TS`/`BDMV` disc rips, and multipart archives all pass. A
-  wrongly blocklisted release is invisible and permanent; a missed bad one
-  costs the one manual click that happens today.
+  What counts as importable is decided by the preset, not by one list shared
+  across all of them: on a Sonarr or Radarr profile a release of nothing but
+  `.flac`, or a lone `.pdf`, is rejected too — importable to *some* app, and to
+  these two exactly as useless as a folder of `.exe`. Within that, the rule is
+  deliberately conservative: rar'd scene releases, `VIDEO_TS`/`BDMV` disc rips,
+  and multipart archives all pass. A wrongly blocklisted release is invisible
+  and permanent; a missed bad one costs the one manual click that happens today.
 
   Only Sonarr and Radarr — Lidarr and Readarr serve a different API version
   putiorr does not speak, so the step is not offered there. The API key is

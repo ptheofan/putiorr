@@ -293,6 +293,9 @@ export class DownloadManager {
       files: remoteFiles,
       announcedSize: Number(transfer.total_size ?? 0),
       minSize: Number(profile.reject_min_size ?? 0),
+      // What the owning app can import is what makes a release valid, so the
+      // preset decides the rule rather than only deciding whether it runs.
+      preset: profile.type,
     });
     if (!verdict.reject) return false;
 

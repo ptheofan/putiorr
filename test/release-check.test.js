@@ -33,9 +33,47 @@ test('accepts releases with no video extension that an *arr can still import', (
 test('rejects a release with nothing importable in it', () => {
   const verdict = inspectRelease({
     files: [file('Download me.txt', 2048), file('setup.exe', 4 * MB), file('release.nfo', 900)],
+    preset: 'sonarr',
   });
   assert.equal(verdict.reject, true);
-  assert.match(verdict.reason, /no importable file/);
+  assert.match(verdict.reason, /nothing Sonarr can import/);
+});
+
+// The gap a single union list left open: these are importable to *some* app,
+// and to Sonarr or Radarr they are exactly as useless as a folder of .exe.
+test('rejects an audio-only or book-only release on a video preset', () => {
+  for (const preset of ['sonarr', 'radarr']) {
+    const audio = inspectRelease({ files: [file('01 - Track.flac')], preset });
+    assert.equal(audio.reject, true, `${preset} must reject an audio-only release`);
+    assert.match(audio.reason, /can import/);
+
+    const book = inspectRelease({ files: [file('Author - Title.pdf')], preset });
+    assert.equal(book.reject, true, `${preset} must reject a book-only release`);
+  }
+});
+
+test('a video preset still accepts archives and disc structures', () => {
+  for (const preset of ['sonarr', 'radarr']) {
+    const cases = [
+      [file('release.rar'), file('release.r00')],
+      [file('release.001'), file('release.002')],
+      [file('Movie/VIDEO_TS/VTS_01_1.VOB')],
+      [file('Movie/BDMV/STREAM/00000.m2ts')],
+      [file('Show.S01E01.mkv')],
+    ];
+    for (const files of cases) {
+      assert.equal(inspectRelease({ files, preset }).reject, false, `${preset}: ${files[0].relativePath}`);
+    }
+  }
+});
+
+// Nothing else reaches this today, but the fallback has to be the permissive
+// one: a preset with no rule must not start rejecting everything.
+test('an unknown preset is checked against everything', () => {
+  for (const files of [[file('01 - Track.flac')], [file('Author - Title.epub')], [file('Show.mkv')]]) {
+    assert.equal(inspectRelease({ files, preset: 'lidarr' }).reject, false);
+    assert.equal(inspectRelease({ files }).reject, false);
+  }
 });
 
 test('rejects a transfer put.io finished with no files', () => {

@@ -9,24 +9,45 @@
 // a wrongly blocklisted release is invisible and permanent, while a missed bad
 // one costs the one manual click that already happens today.
 
-// Anything an *arr can import, directly or after its own unpack step. Kept
-// broad on purpose: a extension missing from this list is a false rejection.
-const IMPORTABLE = [
-  // video
-  /\.(mkv|mp4|avi|m4v|ts|m2ts|mov|wmv|mpg|mpeg|webm|vob|iso|img|flv|ogm|divx|rmvb)$/i,
-  // archives, including every multipart naming scheme in the wild
+const VIDEO = /\.(mkv|mp4|avi|m4v|ts|m2ts|mov|wmv|mpg|mpeg|webm|vob|iso|img|flv|ogm|divx|rmvb)$/i;
+const AUDIO = /\.(flac|mp3|m4a|m4b|ogg|opus|wav|aac|ape|wma|alac|dsf|dff|mka)$/i;
+const BOOK = /\.(epub|mobi|azw|azw3|pdf|cbz|cbr|djvu|fb2)$/i;
+// Every multipart naming scheme in the wild. Archives belong to every preset:
+// an *arr unpacks before it imports, so a rar'd release is valid whatever it is.
+const ARCHIVE = [
   /\.(rar|zip|7z|tar|gz|bz2|xz|tgz)$/i,
   /\.r\d{2}$/i,
   /\.\d{3}$/,
-  // audio (lidarr)
-  /\.(flac|mp3|m4a|m4b|ogg|opus|wav|aac|ape|wma|alac|dsf|dff|mka)$/i,
-  // books (readarr)
-  /\.(epub|mobi|azw|azw3|pdf|cbz|cbr|djvu|fb2)$/i,
 ];
+
+// What each preset can actually import. A union list would let a release of
+// nothing but .flac — or a lone .pdf — through on a Sonarr profile, get it
+// downloaded, and fail the import anyway: the stuck queue item this exists to
+// prevent. Only the presets whose blocklist API putiorr speaks are listed; a
+// preset with no entry is checked against everything, which is the permissive
+// direction and so the safe one.
+const IMPORTABLE_BY_PRESET = {
+  sonarr: [VIDEO, ...ARCHIVE],
+  radarr: [VIDEO, ...ARCHIVE],
+};
+
+const IMPORTABLE_ANY = [VIDEO, ...ARCHIVE, AUDIO, BOOK];
 
 // A disc rip's payload is inside these directories, and the files themselves
 // (.BUP, .IFO, .CLPI) would not otherwise read as importable.
 const DISC_STRUCTURE = /(^|\/)(VIDEO_TS|BDMV|AUDIO_TS)(\/|$)/i;
+
+function importablePatterns(preset) {
+  return IMPORTABLE_BY_PRESET[String(preset ?? '').trim().toLowerCase()] ?? IMPORTABLE_ANY;
+}
+
+// The blocklist reason is read by a human in the *arr, so it names the app that
+// could not import the release rather than saying "importable" and leaving them
+// to work out for what.
+function presetLabel(preset) {
+  const value = String(preset ?? '').trim().toLowerCase();
+  return value ? value.charAt(0).toUpperCase() + value.slice(1) : 'this app';
+}
 
 // ponytail: put.io's `size` on a transfer it only partially satisfied is not
 // verified to be the full announced torrent size — if it turns out to report
@@ -35,9 +56,9 @@ const DISC_STRUCTURE = /(^|\/)(VIDEO_TS|BDMV|AUDIO_TS)(\/|$)/i;
 // legitimate shortfall, so it only fires on unambiguous junk.
 export const SHORT_DELIVERY_RATIO = 0.5;
 
-function isImportable(relativePath) {
+function isImportable(relativePath, patterns) {
   if (DISC_STRUCTURE.test(relativePath)) return true;
-  return IMPORTABLE.some((pattern) => pattern.test(relativePath));
+  return patterns.some((pattern) => pattern.test(relativePath));
 }
 
 function formatBytes(bytes) {
@@ -58,10 +79,14 @@ function formatBytes(bytes) {
  * @param {number} [input.announcedSize] The torrent's own size, as put.io reported
  *   it on the transfer. 0 or missing skips the short-delivery check.
  * @param {number} [input.minSize] Per-profile floor in bytes. 0 disables it.
+ * @param {string} [input.preset] The owning profile's app preset, which decides
+ *   what counts as importable. An unknown preset is checked against everything.
  * @returns {{reject: boolean, reason: string}} reason is empty when reject is false.
  *   It is written to be read by a human in the *arr's blocklist and in the log.
  */
-export function inspectRelease({ files = [], announcedSize = 0, minSize = 0 } = {}) {
+export function inspectRelease({
+  files = [], announcedSize = 0, minSize = 0, preset = '',
+} = {}) {
   const paths = files.map((file) => String(file?.relativePath ?? file?.name ?? ''));
   const deliveredSize = files.reduce((total, file) => total + Number(file?.size ?? 0), 0);
 
@@ -85,10 +110,11 @@ export function inspectRelease({ files = [], announcedSize = 0, minSize = 0 } = 
     };
   }
 
-  if (!paths.some(isImportable)) {
+  const patterns = importablePatterns(preset);
+  if (!paths.some((relativePath) => isImportable(relativePath, patterns))) {
     return {
       reject: true,
-      reason: `no importable file in ${paths.length} file(s): ${paths.slice(0, 3).join(', ')}`,
+      reason: `nothing ${presetLabel(preset)} can import in ${paths.length} file(s): ${paths.slice(0, 3).join(', ')}`,
     };
   }
 
