@@ -297,6 +297,13 @@ export class DownloadManager {
   // this hash in all mean putiorr downloads the release as it always did.
   // Rejecting is the exceptional branch, and it never runs on a guess.
   async rejectUnimportableTransfer(transfer, profile, remoteFiles) {
+    // Decided once, before the first byte. pollOnce re-runs prepareTransfer for
+    // everything that is not yet 'processed', so a release that already started
+    // downloading would otherwise be re-judged every poll: the attempt counter
+    // restarts, it concedes again five polls later, and the log fills with rows
+    // for one release — each claiming a download that a later attempt may have
+    // deleted out from under it. Once it is downloading, the decision is made.
+    if (transfer.lifecycle !== 'remote') return false;
     if (!profile?.reject_unimportable) return false;
     if (!supportsArrRejection(profile.type)) return false;
     if (!profile.arr_base_url || !profile.arr_api_key) return false;

@@ -376,3 +376,39 @@ test('a lidarr profile never rejects, because putiorr does not speak its API', a
     harness.store.close();
   }
 });
+
+// The rejection is decided once, before the download starts. pollOnce re-runs
+// prepareTransfer for every transfer that is not yet 'processed', so without a
+// gate a conceded release is re-judged on every poll: the attempt counter starts
+// over, and five polls later it concedes again, writing another row for a
+// release it already decided about. The log then shows one release many times,
+// and each row claims a download that the next attempt may have deleted.
+test('a conceded release is decided once and never re-judged', async () => {
+  const harness = await createHarness(new FakePutio(JUNK_FILES));
+  const arr = createFakeArr({ queueRecords: [] });
+  try {
+    const profile = createSonarrProfile(harness);
+    const transfer = seedReadyTransfer(harness, profile);
+
+    const manager = new DownloadManager({
+      config: harness.config,
+      store: harness.store,
+      service: harness.service,
+      fetchImpl: arr.fetchImpl,
+    });
+
+    // Five polls: four deferrals, then it concedes and starts downloading.
+    await pollTimes(manager, harness, transfer.id, 5);
+    assert.equal(harness.store.findDownloadById(transfer.id).lifecycle, 'downloading');
+    assert.equal(harness.store.countRejectedReleases().total, 1);
+    const callsAfterConceding = arr.calls.length;
+
+    // Twenty more polls while it downloads must add nothing: not another row,
+    // and not another question to the *arr.
+    await pollTimes(manager, harness, transfer.id, 20);
+    assert.equal(harness.store.countRejectedReleases().total, 1, 'one release, one row');
+    assert.equal(arr.calls.length, callsAfterConceding, 'the *arr is not asked again');
+  } finally {
+    harness.store.close();
+  }
+});
