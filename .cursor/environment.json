@@ -1,0 +1,21 @@
+{
+  "name": "putiorr",
+  "user": "node",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "install": "pnpm install --frozen-lockfile",
+  "terminals": [
+    {
+      "name": "putiorr dev server",
+      "command": "pnpm run dev",
+      "description": "Runs the putiorr bridge with file watching. Serves the web UI and Transmission RPC endpoint on http://0.0.0.0:9091."
+    }
+  ],
+  "ports": [
+    {
+      "name": "putiorr web UI + Transmission RPC",
+      "port": 9091
+    }
+  ]
+}
