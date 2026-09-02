@@ -30,6 +30,20 @@ test('sleep resolves early when the signal aborts, and cleans up', async () => {
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
 });
 
+test('sleep on an already-aborted signal resolves at once without listening', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  const started = Date.now();
+
+  // 'abort' has already fired and will not fire again, so a listener added now
+  // would never be called and the sleep would run its full duration. That is
+  // what stop() would wait on.
+  await sleep(10_000, controller.signal);
+
+  assert.ok(Date.now() - started < 1_000, 'an aborted signal should not be waited on');
+  assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
+});
+
 test('sleep without a signal still resolves', async () => {
   await sleep(0);
 });
