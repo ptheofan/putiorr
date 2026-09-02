@@ -34,13 +34,23 @@ class SlowSpeedResetError extends Error {
   }
 }
 
-function sleep(ms, signal) {
+export function sleep(ms, signal) {
   return new Promise((resolve) => {
-    const timeout = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
+    // The listener must be removed on the timeout path too. { once: true } only
+    // self-removes when the event fires, and the signal passed here is the
+    // long-lived controller signal, which does not abort during normal
+    // operation -- so without this the idle workerLoop leaks one listener per
+    // tick, per worker, and addEventListener's list walk makes the loop
+    // quadratic in uptime.
+    const onAbort = () => {
       clearTimeout(timeout);
       resolve();
-    }, { once: true });
+    };
+    const timeout = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
