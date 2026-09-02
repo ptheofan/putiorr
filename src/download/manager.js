@@ -36,6 +36,12 @@ class SlowSpeedResetError extends Error {
 
 export function sleep(ms, signal) {
   return new Promise((resolve) => {
+    // An 'abort' event fires once, and it already has. Waiting on it would
+    // hold stop() for the full duration instead of returning at once.
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
     // The listener must be removed on the timeout path too. { once: true } only
     // self-removes when the event fires, and the signal passed here is the
     // long-lived controller signal, which does not abort during normal
