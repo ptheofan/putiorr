@@ -177,8 +177,23 @@ function putioTransferToStoreInput(transfer, fallback = {}) {
     eta: useLocalMetrics
       ? fallback.eta ?? -1
       : transfer.estimatedTime,
-    error: transfer.errorMessage ? TRANSMISSION_ERROR.localError : TRANSMISSION_ERROR.ok,
-    error_string: transfer.errorMessage ?? '',
+    // Issue #120. Once putiorr is staging the files itself the error is
+    // putiorr's own, the rule speed and eta already follow above. put.io keeps
+    // `error_message` on a transfer that later succeeded, so a transient "you
+    // need 7.5 G free space to start this transfer" was re-stamped onto the row
+    // by every poll — long after prepareTransfer had cleared it, and long after
+    // the release was downloaded, staged and seeding. Sonarr reads a non-empty
+    // errorString before it reads completion, so the finished download sat in
+    // its queue as a Warning and was never imported.
+    //
+    // It cuts the other way too: put.io reporting no error used to wipe a local
+    // failure the download manager had just recorded on the row.
+    error: useLocalMetrics
+      ? fallback.error ?? TRANSMISSION_ERROR.ok
+      : transfer.errorMessage ? TRANSMISSION_ERROR.localError : TRANSMISSION_ERROR.ok,
+    error_string: useLocalMetrics
+      ? fallback.error_string ?? ''
+      : transfer.errorMessage ?? '',
     reactivate: fallback.reactivate,
   };
 }
@@ -758,6 +773,8 @@ export class TransferService {
         lifecycle: existing.lifecycle,
         download_speed: existing.download_speed,
         eta: existing.eta,
+        error: existing.error,
+        error_string: existing.error_string,
         source: existing.source ?? remote.magnetUri ?? '',
         source_type: existing.source_type ?? 'remote',
         reactivate: !existing.removed_at,
