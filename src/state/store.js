@@ -706,6 +706,7 @@ export class StateStore {
     if (this.hasTable('downloads')) {
       this.ensureColumn('downloads', 'staging_folder', "TEXT NOT NULL DEFAULT ''");
       this.freezeStagedDownloadFolders();
+      this.clearProcessedDownloadErrors();
     }
     this.migrateProfilesSchema();
     this.absolutizeProfileDownloadFolders();
@@ -759,6 +760,33 @@ export class StateStore {
     this.setSetting('downloads_staging_folder_backfill', '1');
     if (result.changes > 0) {
       logger.info('froze the staging folder of downloads staged before the upgrade', {
+        downloads: Number(result.changes),
+      });
+    }
+  }
+
+  // Issue #120. A download that reached 'processed' has every one of its files
+  // complete — finalizeTransferIfComplete flips the lifecycle on nothing less —
+  // so a transfer-level error sitting on such a row is put.io's history, not a
+  // state. Until the poll stopped re-stamping put.io's `error_message` onto
+  // rows putiorr already owns, a transient free-space refusal from before the
+  // download ever started stayed on the completed row for good, and the *arr
+  // read that errorString instead of the completion next to it and never
+  // imported the release.
+  //
+  // One-way, and guarded like the staging backfill: this clears what an older
+  // build wrote, and nothing in this version writes an error onto a processed
+  // row for it to clear again.
+  clearProcessedDownloadErrors() {
+    if (this.getSetting('downloads_processed_error_backfill') === '1') return;
+    const result = this.db.prepare(`
+      UPDATE downloads
+      SET error = 0, error_string = ''
+      WHERE lifecycle = 'processed' AND (error <> 0 OR error_string <> '')
+    `).run();
+    this.setSetting('downloads_processed_error_backfill', '1');
+    if (result.changes > 0) {
+      logger.info('cleared stale put.io errors from downloads that had already completed', {
         downloads: Number(result.changes),
       });
     }

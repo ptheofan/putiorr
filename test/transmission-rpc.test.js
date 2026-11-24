@@ -341,6 +341,101 @@ test('torrent-get reports a local error as the integer 3 (TR_STAT_LOCAL_ERROR)',
   assert.equal(getBody.arguments.torrents[0].errorString, 'put.io 500: temporary failure');
 });
 
+test('issue #120: a put.io error from before the transfer completed is not re-stamped onto the finished download', async (t) => {
+  const harness = await createHarness();
+  t.after(async () => {
+    await harness.rpcServer.stop();
+    harness.store.close();
+  });
+
+  const first = await fetch(harness.url, { method: 'POST' });
+  const sessionId = first.headers.get('x-transmission-session-id');
+
+  await fetch(harness.url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Transmission-Session-Id': sessionId,
+    },
+    body: JSON.stringify({
+      method: 'torrent-add',
+      arguments: { filename: 'magnet:?xt=urn:btih:feedface&dn=Example.Release' },
+    }),
+  });
+
+  // The release was downloaded, staged and processed locally.
+  harness.store.updateDownload(1, { lifecycle: 'processed', percent_done: 100 });
+  harness.store.upsertDownloadFile({
+    download_id: 1,
+    putio_file_id: 88,
+    relative_path: 'Example.Release.mkv',
+    size: 1000,
+    downloaded_bytes: 1000,
+    status: 'complete',
+  });
+
+  // put.io keeps the transient free-space refusal on the transfer it later
+  // completed, so every poll sees an error_message on a finished transfer.
+  const remote = {
+    id: 77,
+    fileId: 88,
+    saveParentId: 42,
+    hash: 'feedface',
+    name: 'Example.Release',
+    status: 'SEEDING',
+    percentDone: 100,
+    completionPercent: 100,
+    size: 1000,
+    downloaded: 1000,
+    uploaded: 500,
+    downloadSpeed: 0,
+    uploadSpeed: 1000,
+    estimatedTime: -1,
+    errorMessage: 'You need 7.5 G free space to start this transfer.',
+  };
+  harness.putio.transfers = [remote];
+  await harness.service.refreshRemoteTransfers();
+
+  const getTorrent = async () => {
+    const response = await fetch(harness.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Transmission-Session-Id': sessionId,
+      },
+      body: JSON.stringify({
+        method: 'torrent-get',
+        arguments: { fields: ['id', 'error', 'errorString', 'percentDone', 'leftUntilDone'] },
+      }),
+    });
+    const body = await response.json();
+    assert.equal(body.result, 'success');
+    return body.arguments.torrents[0];
+  };
+
+  // What Sonarr reads: a completed download with no error on it. It checks
+  // errorString before completion, so anything here keeps the release in its
+  // queue as a Warning and it is never imported.
+  const torrent = await getTorrent();
+  assert.equal(torrent.errorString, '');
+  assert.equal(torrent.error, TRANSMISSION_ERROR.ok);
+  assert.equal(torrent.percentDone, 1);
+  assert.equal(torrent.leftUntilDone, 0);
+
+  // The same rule in reverse: put.io reporting no error must not wipe a local
+  // failure the download manager recorded on the row.
+  harness.store.updateDownload(1, {
+    error: TRANSMISSION_ERROR.localError,
+    error_string: 'staging folder is not writable',
+  });
+  harness.putio.transfers = [{ ...remote, errorMessage: '' }];
+  await harness.service.refreshRemoteTransfers();
+
+  const afterLocalFailure = await getTorrent();
+  assert.equal(afterLocalFailure.errorString, 'staging folder is not writable');
+  assert.equal(afterLocalFailure.error, TRANSMISSION_ERROR.localError);
+});
+
 test('failed RPC surfaces the real error in the Transmission result field', async (t) => {
   const harness = await createHarness();
   t.after(async () => {

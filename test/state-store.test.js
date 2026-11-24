@@ -129,6 +129,49 @@ test('an upgrade freezes the staging folder of every download already staged', a
   }
 });
 
+test('an upgrade clears the stale put.io error an older build left on completed downloads', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'putiorr-processed-error-backfill-'));
+  const dbPath = path.join(dir, 'state.sqlite');
+  const first = new StateStore(dbPath);
+  const ids = {};
+  try {
+    const profile = seedProfile(first);
+    for (const [lifecycle, putioTransferId] of [['processed', 120], ['downloading', 121]]) {
+      ids[lifecycle] = first.upsertDownload({
+        profile_id: profile.id,
+        putio_transfer_id: putioTransferId,
+        hash: `${lifecycle}errorhash`,
+        name: `${lifecycle}.Release`,
+        lifecycle,
+        error: 3,
+        error_string: 'You need 7.5 G free space to start this transfer.',
+      }).id;
+    }
+    // The shape an upgrading install has: rows an older build wrote, and no
+    // record of the backfill, because the build that wrote them had none.
+    first.db.exec("DELETE FROM settings WHERE key = 'downloads_processed_error_backfill'");
+  } finally {
+    first.close();
+  }
+
+  const reopened = new StateStore(dbPath);
+  try {
+    // Issue #120. Every file of a processed download is complete, so a
+    // transfer-level error on it is put.io's history. The *arr reads that
+    // errorString instead of the completion beside it and never imports.
+    const processed = reopened.findDownloadById(ids.processed);
+    assert.equal(processed.error, 0);
+    assert.equal(processed.error_string, '');
+    // A download still being fetched may genuinely be in error, so it is left
+    // exactly as it is.
+    const downloading = reopened.findDownloadById(ids.downloading);
+    assert.equal(downloading.error, 3);
+    assert.equal(downloading.error_string, 'You need 7.5 G free space to start this transfer.');
+  } finally {
+    reopened.close();
+  }
+});
+
 // The put.io adoption notice is gone: a transfer the poll cannot attribute to
 // one RR profile is skipped, and nothing is reported about it. Every install
 // that ran a version which did report it has the row still sitting in
